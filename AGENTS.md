@@ -923,20 +923,11 @@ aproximadamente 22px.
 
 IMPORTANTE:
 
-O item atualmente selecionado deve SEMPRE ir para o centro do footer.
+Atualização solicitada pelo usuário: os itens permanecem sempre em posições fixas,
+na ordem Início, Explorar, Fórum, Biblioteca e Perfil.
 
-Exemplo:
-
-Início selecionado:
-Início fica no centro.
-
-Biblioteca selecionada:
-Biblioteca fica no centro.
-
-Perfil selecionado:
-Perfil fica no centro.
-
-Os outros itens se reorganizam ao redor dele.
+A seleção NÃO reorganiza o rodapé. Manter a animação de seleção e o destaque roxo
+do item ativo.
 
 Todos continuam mostrando ícone + label.
 
