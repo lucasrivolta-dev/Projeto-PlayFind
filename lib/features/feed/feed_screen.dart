@@ -23,13 +23,19 @@ class FeedScreen extends StatelessWidget {
 
   void _comments(BuildContext context, FeedItem item) {
     final input = TextEditingController();
+    final likedCommentKeys = <String>{};
     showAppSheet<void>(context, StatefulBuilder(builder: (context, setState) {
       final comments = controller.commentsFor(item);
       void send(String value) {
-        controller.addComment(item.game.id, value);
+        final text = value.trim();
+        if (text.isEmpty) return;
+        controller.addComment(item.game.id, text);
         input.clear();
         setState(() {});
       }
+
+      Future<void> requireAccount(VoidCallback action) =>
+          _protected(context, action);
 
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Center(
@@ -95,16 +101,40 @@ class FeedScreen extends StatelessWidget {
                                     .copyWith(color: AppColors.text)),
                             const SizedBox(height: AppSpacing.xs),
                             Row(children: [
-                              Icon(Icons.favorite_border,
-                                  size: 16, color: AppColors.muted),
+                              InkWell(
+                                  borderRadius: BorderRadius.circular(999),
+                                  onTap: () => requireAccount(() {
+                                        final key =
+                                            '${comment.user}:${comment.time}:${comment.text}';
+                                        if (!likedCommentKeys.add(key)) {
+                                          likedCommentKeys.remove(key);
+                                        }
+                                        setState(() {});
+                                      }),
+                                  child: Icon(
+                                      likedCommentKeys.contains(
+                                              '${comment.user}:${comment.time}:${comment.text}')
+                                          ? Icons.favorite
+                                          : Icons.favorite_border,
+                                      size: 16,
+                                      color: likedCommentKeys.contains(
+                                              '${comment.user}:${comment.time}:${comment.text}')
+                                          ? AppColors.primary
+                                          : AppColors.muted)),
                               const SizedBox(width: 4),
                               Text('${comment.likes}',
                                   style: AppTypography.label(10)
                                       .copyWith(color: AppColors.secondary)),
                               const SizedBox(width: AppSpacing.md),
-                              Text('Responder',
-                                  style: AppTypography.label(10)
-                                      .copyWith(color: AppColors.primary))
+                              InkWell(
+                                  onTap: () => requireAccount(() {
+                                        input.text = '@${comment.user} ';
+                                        input.selection = TextSelection.collapsed(
+                                            offset: input.text.length);
+                                      }),
+                                  child: Text('Responder',
+                                      style: AppTypography.label(10)
+                                          .copyWith(color: AppColors.primary)))
                             ])
                           ]))
                     ])))),
@@ -123,14 +153,15 @@ class FeedScreen extends StatelessWidget {
                   child: TextField(
                       controller: input,
                       textInputAction: TextInputAction.send,
-                      onSubmitted: send,
+                      onSubmitted: (value) =>
+                          requireAccount(() => send(value)),
                       decoration: const InputDecoration(
                           hintText: 'Adicione um comentário…',
                           prefixIcon: Icon(Icons.alternate_email, size: 18)))),
               const SizedBox(width: AppSpacing.xs),
               IconButton.filled(
                   tooltip: 'Enviar comentário',
-                  onPressed: () => send(input.text),
+                  onPressed: () => requireAccount(() => send(input.text)),
                   icon: const Icon(Icons.send_rounded))
             ]))
       ]);
@@ -348,7 +379,7 @@ class _Actions extends StatelessWidget {
             () => onProtected(() => controller.markPlayed(item.game.id)),
             active: controller.played.contains(item.game.id)),
         action(context, Icons.chat_bubble_outline, 'Comentar',
-            () => onProtected(onComments)),
+            onComments),
         action(
             context,
             Icons.share_outlined,
