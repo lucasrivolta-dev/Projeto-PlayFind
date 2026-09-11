@@ -7,7 +7,7 @@
 > Antes de implementar, consulte este documento e as screenshots fornecidas para a tarefa. Não invente referências visuais ausentes. Se uma decisão entrar em conflito com as screenshots ou com o Style Guide, avise o usuário antes de alterar o design. A arquitetura Flutter detalhada ainda precisa ser definida antes da implementação.
 Antes de começarmos a programar, quero que você entenda completamente o projeto, sua arquitetura e seu Design System.
 
-NÃO implemente nenhuma tela ainda.
+No estado inicial deste documento, não implemente telas sem uma solicitação específica. As telas descritas na seção 32 foram solicitadas e já estão implementadas; novas telas continuam dependendo de solicitação do usuário.
 
 Neste momento, apenas considere estas informações como a especificação base do projeto. Nas próximas mensagens vou pedir as telas e funcionalidades individualmente.
 
@@ -1067,7 +1067,7 @@ A identidade deve vir do token Firebase validado no backend.
 
 # 31. OBJETIVO ATUAL
 
-Por enquanto NÃO crie telas e NÃO implemente funcionalidades.
+Não crie novas telas ou funcionalidades sem solicitação específica. As implementações já autorizadas e documentadas na seção 32 fazem parte do estado atual do projeto.
 
 Use estas informações apenas como contexto permanente para nossa conversa.
 
@@ -1082,4 +1082,205 @@ Quero que toda implementação futura respeite:
 5. consistência entre todas as telas.
 
 Caso uma decisão futura contradiga as screenshots ou o Style Guide, me avise antes de alterar o design por conta própria.
+
+---
+
+# 32. IMPLEMENTAÇÃO ATUAL DO PROTÓTIPO
+
+As telas abaixo já foram implementadas em Flutter e representam a base visual e funcional que o backend deverá suportar:
+
+* `lib/main.dart` — inicialização do app, `MaterialApp`, shell e navegação principal.
+* `lib/design_system/theme.dart` — tokens de cores, espaçamento, raios, tipografia e tema Obsidian Kinetic.
+* `lib/design_system/components.dart` — cards de superfície, chips, artwork, cabeçalhos, bottom navigation e bottom sheets.
+* `lib/features/feed/feed_screen.dart` — For You/feed vertical, ações laterais, comentários e abertura de detalhes.
+* `lib/features/feed/feed_controller.dart` — itens do feed, curtidas, salvos, jogados e comentários da sessão.
+* `lib/features/explore/explore_screen.dart` — Explorar, busca, filtros, categorias e descoberta por escolhas.
+* `lib/features/explore/explore_controller.dart` — estado de busca, categoria, plataforma, escolhas e salvos.
+* `lib/features/explore/explore_data.dart` — modelo `DiscoveryGame`, catálogo demonstrativo e dados editoriais.
+* `lib/features/explore/explore_widgets.dart` — cards e widgets específicos de Explorar.
+* `lib/features/game_detail/game_detail_screen.dart` — tela completa de detalhes, ações, informações, gameplay, lojas, jogos parecidos e comunidade.
+* `lib/features/library/library_screen.dart` — Minha Biblioteca, filtros Quero jogar/Já joguei/Favoritos/Avaliações, busca, grade/lista e avaliação.
+* `lib/features/library/library_store.dart` — estado compartilhado de salvos, jogados, favoritos e notas.
+* `lib/features/forum/forum_screen.dart` — Fórum, busca, categorias, tópicos em alta/recentes e criação de tópico.
+* `lib/features/forum/forum_topic_screen.dart` — discussão completa, curtidas, seguir, respostas e respostas aninhadas.
+* `lib/features/forum/forum_controller.dart` — tópicos, respostas, curtidas, seguimento e validação de publicação.
+* `lib/features/profile/profile_screen.dart` — Perfil, estatísticas, favoritos, gosto, atividade, avaliações e tópicos.
+* `lib/features/profile/profile_widgets.dart` — componentes visuais do Perfil.
+* `lib/features/profile/profile_controller.dart` — carregamento, estados, edição e curtidas de avaliações.
+* `lib/features/profile/profile_models.dart` — modelos demonstrativos de usuário, atividade, avaliação e tópico.
+* `lib/features/profile/profile_repository.dart` — repositório mock que será substituído pela API.
+* `lib/features/auth/auth_controller.dart` — estado visitante/autenticado e adaptador temporário dos provedores.
+* `lib/features/auth/auth_screen.dart` — login/criação de conta com e-mail, Google, Apple, visitante e animação da marca.
+
+As telas de comentários do For You são um Bottom Sheet sobre o feed. A tela de detalhes é compartilhada por Feed, Explorar e Biblioteca. O estado atual é em memória e será substituído por repositórios ligados à API.
+
+---
+
+# 33. NAVEGAÇÃO E RODAPÉ
+
+As cinco posições do rodapé são fixas e permanecem nesta ordem:
+
+Início | Explorar | Fórum | Biblioteca | Perfil
+
+O item selecionado recebe animação, fundo e texto Electric Violet. A ordem nunca deve ser reorganizada para centralizar o item ativo. Fórum e Biblioteca são áreas reais do app e devem permanecer acessíveis pelo shell principal.
+
+---
+
+# 34. MODO VISITANTE E AUTENTICAÇÃO
+
+O primeiro acesso não exige cadastro. Um visitante pode navegar no For You, Explorar, busca, detalhes e conteúdo público do Fórum.
+
+Uma ação que cria ou altera dados exige autenticação. Isso inclui:
+
+* curtir jogo, comentário, tópico ou resposta;
+* Quero jogar, Já joguei, Favoritar e Avaliar;
+* comentar no For You;
+* criar tópico, responder ou seguir uma discussão;
+* editar Perfil e seguir outro usuário.
+
+Ao bloquear uma ação, abrir a tela ou modal de autenticação preservando a intenção original. Depois de concluir o login, executar a ação pendente automaticamente. O usuário pode fechar e continuar como visitante.
+
+O fluxo visual de autenticação terá logo NextPlay com uma animação curta e discreta, campos de e-mail/senha, criar conta, entrar, continuar com Google e continuar com Apple. A animação deve reforçar a marca sem atrasar o acesso ao Feed.
+
+Autenticação:
+
+Flutter usa Firebase Authentication para e-mail/senha, Google e Apple. O cliente envia `Authorization: Bearer <firebaseIdToken>` para a API. O backend usa Firebase Admin SDK exclusivamente para validar o token e obter o `firebaseUid`. Nunca aceitar um UID enviado livremente pelo cliente.
+
+Para preservar a intenção do visitante, é permitido usar uma sessão anônima ou um `guestSessionId` local. Quando ele cria ou vincula uma conta, ações compatíveis podem ser transferidas para o usuário autenticado. A API deve aplicar uma política explícita de migração e evitar duplicatas.
+
+---
+
+# 35. CONTRATO DE DADOS PARA O BACKEND
+
+O PostgreSQL é a fonte dos dados do produto. Firebase guarda a identidade; não armazenar senhas no PostgreSQL.
+
+## Entidades principais
+
+### `users`
+
+`id` UUID primary key, `firebaseUid` unique not null, `email` nullable/unique, `name`, `username` unique, `avatarUrl`, `bio`, `createdAt`, `updatedAt`, `deletedAt` nullable.
+
+Um usuário pode ter várias identidades Firebase apenas se a política de vinculação permitir. E-mail, username e firebaseUid devem possuir índices únicos apropriados.
+
+### `guest_sessions`
+
+`id` UUID primary key, `userId` nullable foreign key, `deviceIdHash` nullable, `createdAt`, `lastSeenAt`, `convertedAt` nullable, `expiresAt` nullable.
+
+Serve para leituras e eventos antes do login. Não armazenar dados pessoais desnecessários. Quando uma sessão vira conta, associar os registros migráveis ao `userId` e marcar `convertedAt`.
+
+### `games`
+
+`id` UUID primary key, `source` (ex.: STEAM), `sourceId` unique, `title`, `slug` unique, `description`, `studio`, `publisher`, `coverUrl`, `heroUrl`, `rating`, `releaseDate` nullable, `mode` nullable, `playerCountMin` nullable, `playerCountMax` nullable, `isFree`, `createdAt`, `updatedAt`.
+
+### `genres`, `gameGenres`, `platforms`, `gamePlatforms`
+
+Catálogos normalizados para filtros e recomendações. `genres(id, name, slug)`, `platforms(id, name, slug)`, tabelas de relação com chave composta (`gameId`, `genreId`) e (`gameId`, `platformId`).
+
+### `gameMedia`
+
+`id`, `gameId`, `type` (TRAILER, GAMEPLAY, SCREENSHOT), `url`, `thumbnailUrl`, `durationSeconds`, `sortOrder`, `createdAt`.
+
+### `userGameLibrary`
+
+Uma linha por usuário e jogo: `userId`, `gameId`, `status` (WANT_TO_PLAY ou PLAYED), `isFavorite`, `rating` de 1 a 5 nullable, `reviewText` nullable, `reviewUpdatedAt`, `createdAt`, `updatedAt`. Chave única (`userId`, `gameId`). Avaliar deve registrar o jogo como PLAYED conforme a regra atual do protótipo.
+
+### `gameLikes`
+
+`userId`, `gameId`, `createdAt`, chave única (`userId`, `gameId`). Se no futuro curtidas de visitante forem permitidas, usar `guestSessionId` em uma tabela separada ou uma coluna mutuamente exclusiva, nunca uma identidade inventada.
+
+### `comments`
+
+`id`, `userId`, `gameId`, `parentId` nullable para respostas, `body`, `createdAt`, `updatedAt`, `deletedAt` nullable. Índices por (`gameId`, `createdAt`) e `parentId`. Comentários são carregados no Bottom Sheet e não criam uma tela independente.
+
+### `commentLikes`
+
+`userId`, `commentId`, `createdAt`, chave única (`userId`, `commentId`).
+
+### `forumCategories`
+
+`id`, `name`, `slug`, `sortOrder`, `isActive`. Categorias iniciais: Geral, Recomendações, Perguntas e Análises.
+
+### `forumTopics`
+
+`id`, `userId`, `categoryId`, `gameId` nullable, `title`, `body`, `createdAt`, `updatedAt`, `lastActivityAt`, `isPinned`, `deletedAt` nullable. Índices por `categoryId`, `lastActivityAt` e `createdAt`.
+
+### `forumTopicTags`, `forumTags`
+
+Tags normalizadas para tópicos. Chaves únicas por slug e por (`topicId`, `tagId`).
+
+### `forumReplies`
+
+`id`, `topicId`, `userId`, `parentId` nullable, `body`, `createdAt`, `updatedAt`, `deletedAt` nullable. `parentId` permite respostas aninhadas com profundidade limitada pela aplicação.
+
+### `forumTopicLikes`, `forumReplyLikes`, `forumTopicFollows`
+
+Tabelas de relação com chaves únicas por usuário e alvo. Seguir uma discussão deve alimentar notificações futuramente, sem misturar isso com curtidas.
+
+### `userFollows`
+
+`followerId`, `followingId`, `createdAt`, chave única composta e restrição para impedir seguir a si próprio.
+
+### `recommendationEvents`
+
+`id`, `userId` nullable, `guestSessionId` nullable, `gameId` nullable, `eventType`, `position` nullable, `watchDurationMs` nullable, `metadata` JSONB nullable, `createdAt`. Eventos: IMPRESSION, VIEW, LIKE, SAVE, PLAYED, DISLIKE, SEARCH, SWIPE_YES, SWIPE_NO, DETAIL_OPEN, COMMENT.
+
+### `searchQueries`
+
+`id`, `userId` nullable, `guestSessionId` nullable, `query`, `parsedFilters` JSONB nullable, `resultCount`, `createdAt`. Não armazenar texto sensível sem necessidade; aplicar retenção e anonimização.
+
+### `notifications` (fase posterior)
+
+`id`, `userId`, `type`, `actorUserId` nullable, `topicId` nullable, `commentId` nullable, `readAt` nullable, `createdAt`. Necessária quando seguir discussões, respostas e interações forem persistentes.
+
+---
+
+# 36. REGRAS DE DOMÍNIO
+
+* Salvar no Feed ou Explorar cria/atualiza `userGameLibrary` com status WANT_TO_PLAY.
+* Já joguei atualiza o mesmo registro para PLAYED.
+* Favorito e avaliação são propriedades do registro do usuário com o jogo.
+* Remover uma ação não deve apagar o jogo do catálogo.
+* Curtidas são relações idempotentes: repetir a mesma ação não cria duplicata.
+* Comentários do For You pertencem ao jogo, não ao tópico do Fórum.
+* Tópicos do Fórum são persistentes e podem ter jogo relacionado, tags e respostas.
+* O catálogo é público; mutações exigem usuário autenticado. No protótipo, o `AuthController` simula a conclusão dos provedores; a integração real deve substituir esse adaptador por Firebase Authentication sem mudar o fluxo de UX.
+* Todas as rotas protegidas devem derivar o usuário do Firebase ID Token validado no backend.
+* Listagens devem ter paginação, ordenação determinística e estados loading, empty e error.
+* Exclusão de conteúdo deve preferir soft delete e preservar auditoria básica.
+
+---
+
+# 37. CAMADAS RECOMENDADAS
+
+Flutter: tela/widget → controller ou state layer → repository → API client.
+
+Backend: route/controller → autenticação Firebase Admin → service/application → repository Prisma → PostgreSQL.
+
+Widgets não conhecem Prisma, PostgreSQL, Firebase Admin ou regras de consulta. O cliente Firebase conhece apenas autenticação. O backend concentra autorização, validação, normalização e regras de domínio.
+
+---
+
+# 38. VALIDAÇÃO ATUAL
+
+Os testes em `test/` cobrem Feed, comentários e ações, Explorar e descoberta, Perfil, Biblioteca, Fórum, discussões, detalhes do jogo, estado compartilhado e responsividade em larguras pequenas com escala de texto ampliada. Antes de alterar telas, executar `flutter analyze` e `flutter test` usando o Flutter local do projeto por meio de `flutter.ps1`.
+
+---
+
+# 39. CATÁLOGO IGDB + STEAM
+
+O diretório `backend/` contém a base da integração automática de catálogo. IGDB é a fonte principal de metadados; Steam complementa disponibilidade, loja e preço para PC. As duas APIs são acessadas somente pelo backend. O Flutter consome a API do NextPlay e nunca recebe credenciais externas.
+
+Os clientes, tipos e mappers ficam separados em `backend/src/modules/integrations/`. As respostas externas são transformadas em `NormalizedGame` antes de chegar ao domínio. `backend/src/modules/sync/game-matcher.service.ts` associa fontes apenas quando nome normalizado, lançamento, desenvolvedora, publisher e plataformas atingem um limite conservador; IDs externos diferentes não justificam duplicar um `Game` nem unir remakes ou edições sem confiança.
+
+`backend/src/modules/sync/game-sync.service.ts` coordena importação, atualização, enriquecimento Steam, matching e registro de sincronização por meio de um repositório. O script `backend/src/scripts/sync-games.ts` é somente uma entrada de desenvolvimento e exige variáveis de ambiente. A persistência projetada está em `backend/prisma/schema.prisma`; antes da primeira migration, revisar o schema e conectar um `GameRepository` Prisma.
+
+Credenciais devem existir apenas em `.env` local, com nomes documentados em `backend/.env.example`. Não versionar tokens, não chamar IGDB/Steam a partir do Flutter e não expor publicamente um endpoint de sincronização sem autenticação administrativa, limite e logs seguros.
+
+---
+
+# 40. SEPARAÇÃO FRONTEND/BACKEND
+
+O frontend Flutter fica nas pastas `lib/`, `android/`, `web/`, `assets/` e `test/`; sua documentação de organização está em `frontend/README.md`. O Flutter permanece com `pubspec.yaml` na raiz para não quebrar o fluxo de desenvolvimento e o wrapper `flutter.ps1`.
+
+O backend fica exclusivamente em `backend/`, com código TypeScript em `backend/src/`, schema e migrations em `backend/prisma/`, dependências em `backend/package.json` e configuração segura em `backend/.env.example`. Não misturar imports, credenciais, regras ou dependências entre as duas áreas.
 

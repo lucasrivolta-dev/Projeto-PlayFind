@@ -77,47 +77,68 @@ class _ForumTopicScreenState extends State<ForumTopicScreen> {
                   child: ListView(
                       padding: const EdgeInsets.all(AppSpacing.margin),
                       children: [
-                    ForumAuthor(author: topic.author, time: topic.time),
-                    const SizedBox(height: AppSpacing.lg),
-                    Text(topic.title, style: AppTypography.title(26)),
-                    const SizedBox(height: AppSpacing.md),
-                    Text(topic.body,
-                        style: AppTypography.body(15)
-                            .copyWith(color: AppColors.text)),
-                    const SizedBox(height: AppSpacing.md),
-                    Wrap(
-                        spacing: AppSpacing.xs,
-                        runSpacing: AppSpacing.xs,
-                        children: [
-                          GenreChip(topic.category),
-                          if (topic.game != null) GenreChip(topic.game!),
-                          ...topic.tags.map(GenreChip.new)
-                        ]),
-                    const SizedBox(height: AppSpacing.md),
-                    Wrap(children: [
-                      TextButton.icon(
-                          onPressed: () => widget.controller.like(topic),
-                          icon: Icon(topic.liked
-                              ? Icons.favorite
-                              : Icons.favorite_border),
-                          label: Text('${topic.likeCount} curtidas')),
-                      TextButton.icon(
-                          onPressed: () async {
-                            await Clipboard.setData(ClipboardData(
-                                text: '${topic.title}\n\n${topic.body}'));
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                      content:
-                                          Text('Texto da discussão copiado.')));
-                            }
-                          },
-                          icon: const Icon(Icons.copy_outlined),
-                          label: const Text('Copiar discussão'))
-                    ]),
+                    SurfaceCard(
+                        color: AppColors.surface,
+                        padding: const EdgeInsets.all(AppSpacing.md),
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              ForumAuthor(
+                                  author: topic.author, time: topic.time),
+                              const SizedBox(height: AppSpacing.lg),
+                              Text(topic.title, style: AppTypography.title(26)),
+                              const SizedBox(height: AppSpacing.md),
+                              Text(topic.body,
+                                  style: AppTypography.body(15)
+                                      .copyWith(color: AppColors.text)),
+                              const SizedBox(height: AppSpacing.md),
+                              Wrap(
+                                  spacing: AppSpacing.xs,
+                                  runSpacing: AppSpacing.xs,
+                                  children: [
+                                    GenreChip(topic.category),
+                                    if (topic.game != null)
+                                      GenreChip(topic.game!),
+                                    ...topic.tags.map(GenreChip.new)
+                                  ]),
+                              const SizedBox(height: AppSpacing.md),
+                              Wrap(children: [
+                                TextButton.icon(
+                                    onPressed: () =>
+                                        widget.controller.like(topic),
+                                    icon: Icon(topic.liked
+                                        ? Icons.favorite
+                                        : Icons.favorite_border),
+                                    label: Text('${topic.likeCount} curtidas')),
+                                TextButton.icon(
+                                    onPressed: () async {
+                                      await Clipboard.setData(ClipboardData(
+                                          text:
+                                              '${topic.title}\n\n${topic.body}'));
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(const SnackBar(
+                                                content: Text(
+                                                    'Texto da discussão copiado.')));
+                                      }
+                                    },
+                                    icon: const Icon(Icons.copy_outlined),
+                                    label: const Text('Copiar discussão'))
+                              ]),
+                            ])),
                     SectionHeading(
                         title: '${topic.replies.length} respostas',
                         icon: Icons.chat_bubble_outline),
+                    Align(
+                        alignment: Alignment.centerRight,
+                        child: SegmentedButton<String>(segments: const [
+                          ButtonSegment(
+                              value: 'relevantes', label: Text('Relevantes')),
+                          ButtonSegment(
+                              value: 'recentes', label: Text('Recentes')),
+                        ], selected: const {
+                          'relevantes'
+                        }, onSelectionChanged: (_) {})),
                     if (replies.isEmpty)
                       Text(
                           'Seja a primeira pessoa a participar dessa conversa.',

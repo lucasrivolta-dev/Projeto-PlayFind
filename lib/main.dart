@@ -9,6 +9,7 @@ import 'features/feed/feed_controller.dart';
 import 'features/feed/feed_screen.dart';
 import 'features/forum/forum_controller.dart';
 import 'features/forum/forum_screen.dart';
+import 'features/auth/auth_controller.dart';
 import 'features/library/library_store.dart';
 import 'features/library/library_screen.dart';
 import 'features/profile/profile_controller.dart';
@@ -26,6 +27,7 @@ class NextPlayApp extends StatefulWidget {
 
 class _NextPlayAppState extends State<NextPlayApp> {
   final library = LibraryStore();
+  final auth = AuthController();
   late final ProfileController controller =
       ProfileController(DemoProfileRepository())..load();
   late final ExploreController explore =
@@ -39,6 +41,7 @@ class _NextPlayAppState extends State<NextPlayApp> {
     explore.dispose();
     feed.dispose();
     library.dispose();
+    auth.dispose();
     super.dispose();
   }
 
@@ -47,16 +50,21 @@ class _NextPlayAppState extends State<NextPlayApp> {
         title: 'NextPlay',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.dark,
-        home: _AppShell(profile: controller, explore: explore, feed: feed),
+        home: _AppShell(
+            profile: controller, explore: explore, feed: feed, auth: auth),
       );
 }
 
 class _AppShell extends StatefulWidget {
   const _AppShell(
-      {required this.profile, required this.explore, required this.feed});
+      {required this.profile,
+      required this.explore,
+      required this.feed,
+      required this.auth});
   final ProfileController profile;
   final ExploreController explore;
   final FeedController feed;
+  final AuthController auth;
   @override
   State<_AppShell> createState() => _AppShellState();
 }
@@ -86,7 +94,7 @@ class _AppShellState extends State<_AppShell> {
             builder: (context, _) => IndexedStack(
                   index: pageIndex,
                   children: [
-                    FeedScreen(controller: widget.feed),
+                    FeedScreen(controller: widget.feed, auth: widget.auth),
                     ExploreScreen(controller: widget.explore),
                     ProfileScreen(
                         controller: widget.profile,
