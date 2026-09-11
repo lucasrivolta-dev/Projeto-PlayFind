@@ -7,4 +7,6 @@ coverage/
 *.iml
 .idea/
 .tools/
+.env
+backend/.env
 flutter_*.log

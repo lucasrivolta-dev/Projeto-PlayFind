@@ -92,3 +92,12 @@ Fórum com busca por texto/jogo, categorias, tópicos em alta e recentes. A cria
 ## Detalhes do jogo
 
 Tela completa baseada em `Detalhes do Jogo.png` do ZIP fornecido. Feed, Explorar e Biblioteca abrem a mesma rota, com voltar, capa/hero, dados do catálogo, ações compartilhadas, avaliação, jogos semelhantes e discussões vinculadas. A criação de discussão já seleciona o jogo de origem. Pacific Drive foi incluído com informações presentes na referência. Os campos ausentes são indicados; vídeos e preços ao vivo ainda não estão integrados, e os botões de loja copiam o link oficial da Steam. Os dados continuam limitados à sessão.
+
+## Separação do projeto
+
+O repositório possui duas áreas independentes:
+
+* **Frontend Flutter:** `lib/`, `android/`, `web/`, `assets/` e `test/`. O arquivo `pubspec.yaml` permanece na raiz porque essa é a estrutura exigida pelo Flutter e preserva os comandos atuais.
+* **Backend Node/TypeScript:** `backend/src/`, `backend/prisma/`, `backend/package.json` e `backend/.env.example`. O backend concentra API, autenticação validada, integrações IGDB/Steam, Prisma e PostgreSQL.
+
+Cada lado possui seu próprio README. O frontend não contém credenciais ou chamadas das APIs externas; o backend não deve importar widgets Flutter.

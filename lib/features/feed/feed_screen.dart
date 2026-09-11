@@ -3,69 +3,136 @@ import 'package:flutter/material.dart';
 import '../../design_system/components.dart';
 import '../../design_system/theme.dart';
 import 'feed_controller.dart';
+import '../auth/auth_controller.dart';
+import '../auth/auth_screen.dart';
 
 class FeedScreen extends StatelessWidget {
-  const FeedScreen({super.key, required this.controller});
+  const FeedScreen({super.key, required this.controller, this.auth});
   final FeedController controller;
+  final AuthController? auth;
+
+  Future<void> _protected(BuildContext context, VoidCallback action) async {
+    if (auth == null || auth!.isAuthenticated) {
+      action();
+      return;
+    }
+    final loggedIn = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => AuthScreen(controller: auth!)));
+    if (loggedIn == true) action();
+  }
 
   void _comments(BuildContext context, FeedItem item) {
     final input = TextEditingController();
     showAppSheet<void>(context, StatefulBuilder(builder: (context, setState) {
       final comments = controller.commentsFor(item);
+      void send(String value) {
+        controller.addComment(item.game.id, value);
+        input.clear();
+        setState(() {});
+      }
+
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Center(
+            child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: AppColors.muted,
+                    borderRadius: BorderRadius.circular(4)))),
+        const SizedBox(height: AppSpacing.md),
         Row(children: [
           Expanded(child: Text('Comentários', style: AppTypography.title(20))),
-          Text('${comments.length}',
-              style:
-                  AppTypography.label(12).copyWith(color: AppColors.secondary))
+          Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                  color: AppColors.high,
+                  borderRadius: BorderRadius.circular(999)),
+              child: Text('${comments.length} comentários',
+                  style: AppTypography.label(10)
+                      .copyWith(color: AppColors.secondary))),
+          IconButton(
+              tooltip: 'Fechar comentários',
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.close))
+        ]),
+        const SizedBox(height: AppSpacing.sm),
+        Row(children: [
+          Text('Mais relevantes', style: AppTypography.label(11)),
+          const Icon(Icons.keyboard_arrow_down,
+              size: 18, color: AppColors.secondary)
         ]),
         const SizedBox(height: AppSpacing.md),
         ...comments.map((comment) => Padding(
             padding: EdgeInsets.only(
-                left: comment.reply ? AppSpacing.lg : 0, bottom: AppSpacing.md),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              CircleAvatar(
+                left: comment.reply ? AppSpacing.lg : 0, bottom: AppSpacing.sm),
+            child: SurfaceCard(
+                color: comment.reply ? AppColors.low : AppColors.surface,
+                padding: const EdgeInsets.all(AppSpacing.sm),
+                child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CircleAvatar(
+                          radius: 17,
+                          backgroundColor: AppColors.high,
+                          child: Text(
+                              comment.user.characters.first.toUpperCase(),
+                              style: AppTypography.label(12)
+                                  .copyWith(color: AppColors.primary))),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            Row(children: [
+                              Expanded(
+                                  child: Text('@${comment.user}',
+                                      style: AppTypography.label(11))),
+                              Text(comment.time, style: AppTypography.body(10))
+                            ]),
+                            const SizedBox(height: AppSpacing.xs),
+                            Text(comment.text,
+                                style: AppTypography.body(13)
+                                    .copyWith(color: AppColors.text)),
+                            const SizedBox(height: AppSpacing.xs),
+                            Row(children: [
+                              Icon(Icons.favorite_border,
+                                  size: 16, color: AppColors.muted),
+                              const SizedBox(width: 4),
+                              Text('${comment.likes}',
+                                  style: AppTypography.label(10)
+                                      .copyWith(color: AppColors.secondary)),
+                              const SizedBox(width: AppSpacing.md),
+                              Text('Responder',
+                                  style: AppTypography.label(10)
+                                      .copyWith(color: AppColors.primary))
+                            ])
+                          ]))
+                    ])))),
+        Container(
+            padding: const EdgeInsets.only(top: AppSpacing.sm),
+            decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: AppColors.border))),
+            child: Row(children: [
+              const CircleAvatar(
                   radius: 16,
                   backgroundColor: AppColors.high,
-                  child: Text(comment.user.characters.first.toUpperCase(),
-                      style: AppTypography.label(12))),
+                  child: Icon(Icons.person_outline,
+                      size: 18, color: AppColors.secondary)),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                    Row(children: [
-                      Text(comment.user, style: AppTypography.label(12)),
-                      const SizedBox(width: AppSpacing.xs),
-                      Text(comment.time, style: AppTypography.body(10))
-                    ]),
-                    const SizedBox(height: AppSpacing.xxs),
-                    Text(comment.text, style: AppTypography.body(12)),
-                    const SizedBox(height: AppSpacing.xxs),
-                    Text('♡  ${comment.likes}    Responder',
-                        style: AppTypography.label(10)
-                            .copyWith(color: AppColors.muted)),
-                  ])),
-            ]))),
-        const SizedBox(height: AppSpacing.xs),
-        TextField(
-            controller: input,
-            textInputAction: TextInputAction.send,
-            onSubmitted: (value) {
-              controller.addComment(item.game.id, value);
-              input.clear();
-              setState(() {});
-            },
-            decoration: InputDecoration(
-                hintText: 'Escreva um comentário…',
-                suffixIcon: IconButton(
-                    tooltip: 'Enviar comentário',
-                    onPressed: () {
-                      controller.addComment(item.game.id, input.text);
-                      input.clear();
-                      setState(() {});
-                    },
-                    icon: const Icon(Icons.send, color: AppColors.primary)))),
+                  child: TextField(
+                      controller: input,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: send,
+                      decoration: const InputDecoration(
+                          hintText: 'Adicione um comentário…',
+                          prefixIcon: Icon(Icons.alternate_email, size: 18)))),
+              const SizedBox(width: AppSpacing.xs),
+              IconButton.filled(
+                  tooltip: 'Enviar comentário',
+                  onPressed: () => send(input.text),
+                  icon: const Icon(Icons.send_rounded))
+            ]))
       ]);
     }));
   }
@@ -97,17 +164,27 @@ class FeedScreen extends StatelessWidget {
                     child: const Text('Tentar novamente'))
               ]));
             }
-            return PageView.builder(
-                scrollDirection: Axis.vertical,
-                itemCount: controller.items.length,
-                onPageChanged: controller.setCurrent,
-                itemBuilder: (context, index) => _FeedPage(
-                    item: controller.items[index],
-                    controller: controller,
-                    onComments: () =>
-                        _comments(context, controller.items[index]),
-                    onDetails: () =>
-                        _details(context, controller.items[index])));
+            return LayoutBuilder(builder: (context, constraints) {
+              // Keep the editorial feed in a phone-sized column on wide browser screens.
+              final width =
+                  constraints.maxWidth > 600 ? 430.0 : constraints.maxWidth;
+              return Center(
+                  child: SizedBox(
+                      width: width,
+                      child: PageView.builder(
+                          scrollDirection: Axis.vertical,
+                          itemCount: controller.items.length,
+                          onPageChanged: controller.setCurrent,
+                          itemBuilder: (context, index) => _FeedPage(
+                              item: controller.items[index],
+                              controller: controller,
+                              onProtected: (action) =>
+                                  _protected(context, action),
+                              onComments: () =>
+                                  _comments(context, controller.items[index]),
+                              onDetails: () => _details(
+                                  context, controller.items[index])))));
+            });
           }));
 }
 
@@ -116,10 +193,12 @@ class _FeedPage extends StatelessWidget {
       {required this.item,
       required this.controller,
       required this.onComments,
-      required this.onDetails});
+      required this.onDetails,
+      required this.onProtected});
   final FeedItem item;
   final FeedController controller;
   final VoidCallback onComments, onDetails;
+  final Future<void> Function(VoidCallback action) onProtected;
   @override
   Widget build(BuildContext context) => Stack(fit: StackFit.expand, children: [
         GameArtwork(appId: item.game.id, title: item.game.title, cover: true),
@@ -184,7 +263,10 @@ class _FeedPage extends StatelessWidget {
                     ])),
                 const SizedBox(width: 12),
                 _Actions(
-                    item: item, controller: controller, onComments: onComments)
+                    item: item,
+                    controller: controller,
+                    onComments: onComments,
+                    onProtected: onProtected)
               ]),
               const SizedBox(height: 14),
               InkWell(
@@ -202,10 +284,14 @@ class _FeedPage extends StatelessWidget {
 
 class _Actions extends StatelessWidget {
   const _Actions(
-      {required this.item, required this.controller, required this.onComments});
+      {required this.item,
+      required this.controller,
+      required this.onComments,
+      required this.onProtected});
   final FeedItem item;
   final FeedController controller;
   final VoidCallback onComments;
+  final Future<void> Function(VoidCallback action) onProtected;
   Widget action(
           BuildContext context, IconData icon, String label, VoidCallback onTap,
           {bool active = false}) =>
@@ -243,7 +329,7 @@ class _Actions extends StatelessWidget {
                 ? Icons.favorite
                 : Icons.favorite_border,
             'Curtir',
-            () => controller.toggleLike(item.game.id),
+            () => onProtected(() => controller.toggleLike(item.game.id)),
             active: controller.liked.contains(item.game.id)),
         action(
             context,
@@ -251,7 +337,7 @@ class _Actions extends StatelessWidget {
                 ? Icons.bookmark
                 : Icons.bookmark_border,
             'Quero jogar',
-            () => controller.toggleSave(item.game.id),
+            () => onProtected(() => controller.toggleSave(item.game.id)),
             active: controller.saved.contains(item.game.id)),
         action(
             context,
@@ -259,9 +345,10 @@ class _Actions extends StatelessWidget {
                 ? Icons.check_circle
                 : Icons.check_circle_outline,
             'Já joguei',
-            () => controller.markPlayed(item.game.id),
+            () => onProtected(() => controller.markPlayed(item.game.id)),
             active: controller.played.contains(item.game.id)),
-        action(context, Icons.chat_bubble_outline, 'Comentar', onComments),
+        action(context, Icons.chat_bubble_outline, 'Comentar',
+            () => onProtected(onComments)),
         action(
             context,
             Icons.share_outlined,
