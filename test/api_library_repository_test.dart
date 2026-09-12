@@ -8,6 +8,23 @@ import 'package:nextplay/features/library/library_repository.dart';
 
 void main() {
   group('ApiLibraryRepository', () {
+    test('loadInto: usa dev-user e mantém biblioteca vazia', () async {
+      String? capturedPath;
+      final mockClient = MockClient((request) async {
+        capturedPath = request.url.path;
+        expect(request.headers['x-user-id'], 'dev-user');
+        return http.Response(jsonEncode({'data': [], 'total': 0}), 200);
+      });
+
+      final repo = ApiLibraryRepository(client: mockClient);
+      final store = LibraryStore();
+      await repo.loadInto(store);
+
+      expect(capturedPath, '/api/v1/library');
+      expect(store.saved, isEmpty);
+      expect(store.played, isEmpty);
+    });
+
     test('loadInto: popula store com dados da API', () async {
       final mockClient = MockClient((request) async {
         expect(request.headers['x-user-id'], 'test-user');
@@ -42,6 +59,39 @@ void main() {
       expect(store.played, contains(123));
       expect(store.favorites, contains(123));
       expect(store.ratings[123], equals(5));
+    });
+
+    test('loadInto: não duplica jogos repetidos na mesma categoria', () async {
+      final mockClient = MockClient((_) async {
+        return http.Response(jsonEncode({
+          'data': [
+            {
+              'status': 'WANT_TO_PLAY',
+              'game': {'steamAppId': 1145360},
+            },
+            {
+              'status': 'WANT_TO_PLAY',
+              'game': {'steamAppId': 1145360},
+            },
+            {
+              'status': 'PLAYED',
+              'game': {'igdbId': 123},
+            },
+            {
+              'status': 'PLAYED',
+              'game': {'igdbId': 123},
+            },
+          ],
+          'total': 4,
+        }), 200);
+      });
+
+      final repo = ApiLibraryRepository(client: mockClient);
+      final store = LibraryStore();
+      await repo.loadInto(store);
+
+      expect(store.saved, {1145360});
+      expect(store.played, {123});
     });
 
     test('loadInto: fallback gracioso em erro HTTP', () async {
