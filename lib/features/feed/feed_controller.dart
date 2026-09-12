@@ -69,7 +69,8 @@ class FeedController extends ChangeNotifier {
     _emit();
     try {
       final games = await repository();
-      items = games.take(6).toList().asMap().entries.map((entry) {
+      items = games.asMap().entries.map((entry) {
+        final index = entry.key;
         final game = entry.value;
         final comments = [
           FeedComment(
@@ -84,17 +85,27 @@ class FeedController extends ChangeNotifier {
               likes: 7,
               reply: true),
         ];
+        // Captions editoriais rotativos — funcionam para qualquer N de jogos.
+        const captions = [
+          'Uma aventura que recompensa cada minuto de exploração.',
+          'Quando você quer uma história para esquecer do mundo por algumas horas.',
+          'Encontre seu esquadrão. A próxima missão começa agora.',
+          'Pequeno no tamanho. Gigante nos segredos.',
+          'Uma mão nunca é igual à outra.',
+          'O mundo está esperando por você.',
+          'Horas se passam sem você perceber.',
+          'Difícil de largár depois do primeiro nível.',
+          'Uma experiência que fica na memória.',
+          'Descubra o que está além do horizonte.',
+        ];
+        // matchScore vem da API quando disponível; caso contrário usa valor editorial rotativo.
+        const fallbackMatches = [94, 87, 91, 82, 89, 78, 85, 92, 88, 80];
+        final match =
+            game.matchScore ?? fallbackMatches[index % fallbackMatches.length];
         return FeedItem(
             game: game,
-            match: [94, 87, 91, 82, 89, 78][entry.key],
-            caption: [
-              'Uma aventura que recompensa cada minuto de exploração.',
-              'Quando você quer uma história para esquecer do mundo por algumas horas.',
-              'Encontre seu esquadrão. A próxima missão começa agora.',
-              'Pequeno no tamanho. Gigante nos segredos.',
-              'Uma mão nunca é igual à outra.',
-              'O mundo está esperando por você.',
-            ][entry.key],
+            match: match,
+            caption: captions[index % captions.length],
             comments: comments);
       }).toList();
     } catch (_) {

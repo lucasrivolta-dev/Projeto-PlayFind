@@ -57,4 +57,61 @@ void main() {
     controller.setCurrent(999);
     expect(controller.current, controller.items.length - 1);
   });
+
+  test('Feed exibe todos os jogos retornados pela API sem limitar a 6', () async {
+    // Simula repositório com 10 jogos — reproduz o que a API real retorna.
+    Future<List<DiscoveryGame>> repoWith10() async => List.generate(
+          10,
+          (i) => DiscoveryGame(
+            id: 1000 + i,
+            title: 'Game ${i + 1}',
+            studio: 'Studio',
+            genre: 'Ação',
+            description: 'Desc',
+            rating: '9.0',
+            matchScore: 95,
+          ),
+        );
+
+    final controller = FeedController(repoWith10);
+    addTearDown(controller.dispose);
+    await controller.load();
+
+    expect(controller.items.length, 10);
+    expect(controller.loading, isFalse);
+    expect(controller.error, isFalse);
+  });
+
+  test('matchScore da API é usado como match no FeedItem', () async {
+    Future<List<DiscoveryGame>> repoWithMatch() async => [
+          const DiscoveryGame(
+            id: 42,
+            title: 'Jogo com Match',
+            studio: 'Studio',
+            genre: 'RPG',
+            description: 'Desc',
+            rating: '9.5',
+            matchScore: 88,
+          ),
+        ];
+
+    final controller = FeedController(repoWithMatch);
+    addTearDown(controller.dispose);
+    await controller.load();
+
+    expect(controller.items.first.match, 88);
+  });
+
+  test('FeedController sinaliza error quando repositório lança exceção', () async {
+    Future<List<DiscoveryGame>> failingRepo() async =>
+        throw Exception('Conexão recusada');
+
+    final controller = FeedController(failingRepo);
+    addTearDown(controller.dispose);
+    await controller.load();
+
+    expect(controller.error, isTrue);
+    expect(controller.loading, isFalse);
+    expect(controller.items, isEmpty);
+  });
 }

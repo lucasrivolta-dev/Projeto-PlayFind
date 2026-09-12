@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../../config/api_config.dart';
 
 class DiscoveryGame {
   const DiscoveryGame(
@@ -16,12 +17,19 @@ class DiscoveryGame {
       this.free = false,
       this.releaseDate,
       this.mode,
-      this.publisher});
-  final String? releaseDate, mode, publisher;
+      this.publisher,
+      this.matchScore,
+      this.slug,
+      this.coverUrl,
+      this.heroUrl});
+  final String? releaseDate, mode, publisher, slug, coverUrl, heroUrl;
   final int id;
   final String title, studio, genre, description, rating, collection;
   final List<String> tags, platforms;
   final bool offer, free;
+  /// Percentual de compatibilidade retornado pela API (0–100).
+  /// Null quando o dado vem de fontes locais/mock.
+  final int? matchScore;
 
   factory DiscoveryGame.fromJson(Map<String, dynamic> json) {
     final steamAppId = json['steamAppId'] as int?;
@@ -70,6 +78,10 @@ class DiscoveryGame {
       releaseDate: json['releaseDate']?.toString(),
       mode: json['mode'] as String?,
       publisher: json['publisher'] as String?,
+      matchScore: json['matchScore'] as int?,
+      slug: json['slug'] as String?,
+      coverUrl: json['coverUrl'] as String?,
+      heroUrl: json['heroUrl'] as String?,
     );
   }
 }
@@ -219,11 +231,12 @@ class DemoExploreRepository implements ExploreRepository {
 
 class ApiExploreRepository implements ExploreRepository {
   ApiExploreRepository({
-    this.baseUrl = 'http://127.0.0.1:3333/api/v1',
+    String? baseUrl,
     http.Client? client,
     this.fallback = const DemoExploreRepository(),
     this.timeout = const Duration(seconds: 2),
-  })  : _client = client ?? http.Client(),
+  })  : baseUrl = baseUrl ?? ApiConfig.baseUrl,
+        _client = client ?? http.Client(),
         _ownsClient = client == null;
 
   final String baseUrl;

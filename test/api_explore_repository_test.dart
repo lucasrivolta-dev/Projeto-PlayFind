@@ -79,6 +79,10 @@ void main() {
                 'genres': ['RPG'],
                 'platforms': ['PC'],
                 'rating': 9.0,
+                'slug': 'api-game-test',
+                'coverUrl': 'https://example.com/cover.jpg',
+                'heroUrl': 'https://example.com/hero.jpg',
+                'matchScore': 95,
               }
             ],
             'total': 1,
@@ -94,6 +98,11 @@ void main() {
       expect(games.length, 1);
       expect(games.first.title, 'API Game Test');
       expect(games.first.id, 123456);
+      // Campos adicionados na integração com a API real.
+      expect(games.first.slug, 'api-game-test');
+      expect(games.first.coverUrl, 'https://example.com/cover.jpg');
+      expect(games.first.heroUrl, 'https://example.com/hero.jpg');
+      expect(games.first.matchScore, 95);
       repo.dispose();
     });
 

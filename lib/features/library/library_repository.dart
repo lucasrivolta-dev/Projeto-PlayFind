@@ -1,5 +1,6 @@
 ﻿import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../../config/api_config.dart';
 import 'library_store.dart';
 
 /// Contrato para persistência da biblioteca do usuário.
@@ -57,11 +58,12 @@ class NoopLibraryRepository implements LibraryRepository {
 /// o que permite trocar o usuario autenticado sem recriar o repositorio.
 class ApiLibraryRepository implements LibraryRepository {
   ApiLibraryRepository({
-    this.baseUrl = 'http://127.0.0.1:3333/api/v1',
+    String? baseUrl,
     String userId = 'dev-user',
     http.Client? client,
     this.timeout = const Duration(seconds: 4),
-  })  : _userId = userId,
+  })  : baseUrl = baseUrl ?? ApiConfig.baseUrl,
+        _userId = userId,
         _client = client ?? http.Client(),
         _ownsClient = client == null;
 
