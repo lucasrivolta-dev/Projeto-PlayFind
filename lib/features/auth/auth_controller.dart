@@ -8,14 +8,6 @@ class AuthController extends ChangeNotifier {
 
   bool get isAuthenticated => status == AuthStatus.authenticated;
 
-  /// Identificador único do usuário para uso na API.
-  /// Usa o email normalizado quando autenticado, ou 'dev-user' como fallback.
-  String get userId {
-    if (!isAuthenticated || email == null) return 'dev-user';
-    // Remove caracteres inválidos para header HTTP e normaliza.
-    return email!.trim().toLowerCase().replaceAll(RegExp(r'[^\w@.\-]'), '_');
-  }
-
   Future<bool> signIn({String? email, String? password}) async {
     if (email == null ||
         email.trim().isEmpty ||

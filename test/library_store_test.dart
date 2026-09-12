@@ -10,6 +10,9 @@ class _FakeLibraryRepository implements LibraryRepository {
   final Object? error;
   final List<String> statuses = [];
   final List<int> ids = [];
+  final List<int> likedIds = [];
+  final List<int> favoriteIds = [];
+  final List<int> ratedIds = [];
   final Completer<void> request = Completer<void>();
 
   @override
@@ -24,13 +27,28 @@ class _FakeLibraryRepository implements LibraryRepository {
   }
 
   @override
-  Future<void> remove(int gameId) async {}
+  Future<void> remove(int gameId) async {
+    if (error != null) throw error!;
+  }
 
   @override
-  Future<void> toggleFavorite(int gameId) async {}
+  Future<void> toggleFavorite(int gameId, {bool? isFavorite}) async {
+    favoriteIds.add(gameId);
+    if (error != null) throw error!;
+  }
 
   @override
-  Future<void> rate(int gameId, int rating) async {}
+  Future<bool?> toggleLike(int gameId) async {
+    likedIds.add(gameId);
+    if (error != null) throw error!;
+    return null;
+  }
+
+  @override
+  Future<void> rate(int gameId, int rating) async {
+    ratedIds.add(gameId);
+    if (error != null) throw error!;
+  }
 
   @override
   Future<void> removeRating(int gameId) async {}
@@ -91,5 +109,58 @@ void main() {
     expect(() => store.markPlayed(7), returnsNormally);
     await Future<void>.delayed(Duration.zero);
     expect(store.played, isEmpty);
+  });
+
+  test('favorite and rating preserve the current library collections',
+      () async {
+    final repository = _FakeLibraryRepository();
+    final store = LibraryStore(repo: repository);
+    addTearDown(store.dispose);
+    store.saved.add(42);
+
+    store.toggleFavorite(42);
+    store.rate(42, 4);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(repository.favoriteIds, [42]);
+    expect(repository.ratedIds, [42]);
+    expect(store.favorites, {42});
+    expect(store.ratings[42], 4);
+    expect(store.played, {42});
+    expect(store.saved, isEmpty);
+  });
+
+  test('favorite and rating rollback on repository failure', () async {
+    final repository = _FakeLibraryRepository(error: StateError('server'));
+    final store = LibraryStore(repo: repository);
+    addTearDown(store.dispose);
+    store.saved.add(42);
+    final errors = <String>[];
+    final subscription = store.errors.listen(errors.add);
+    addTearDown(subscription.cancel);
+
+    store.toggleFavorite(42);
+    store.rate(42, 4);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(store.favorites, isEmpty);
+    expect(store.ratings, isEmpty);
+    expect(store.played, isEmpty);
+    expect(store.saved, {42});
+    expect(errors, hasLength(2));
+  });
+
+  test('remover jogo jogado restaura nota se a API falhar', () async {
+    final repository = _FakeLibraryRepository(error: StateError('server'));
+    final store = LibraryStore(repo: repository);
+    addTearDown(store.dispose);
+    store.played.add(42);
+    store.ratings[42] = 5;
+
+    store.togglePlayed(42);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(store.played, {42});
+    expect(store.ratings[42], 5);
   });
 }

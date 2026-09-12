@@ -19,7 +19,6 @@ void main() {
   testWidgets('Auth screen offers guest, email, Google and Apple paths',
       (tester) async {
     final auth = AuthController();
-    addTearDown(auth.dispose);
     await tester.pumpWidget(
         MaterialApp(theme: AppTheme.dark, home: AuthScreen(controller: auth)));
     await tester.pump(const Duration(milliseconds: 100));

@@ -15,7 +15,10 @@ abstract interface class LibraryRepository {
   Future<void> remove(int gameId);
 
   /// Alterna favorito do jogo.
-  Future<void> toggleFavorite(int gameId);
+  Future<void> toggleFavorite(int gameId, {bool? isFavorite});
+
+  /// Alterna a curtida do jogo.
+  Future<bool?> toggleLike(int gameId);
 
   /// Atribui uma nota (1-5) ao jogo (implica PLAYED).
   Future<void> rate(int gameId, int rating);
@@ -24,8 +27,7 @@ abstract interface class LibraryRepository {
   Future<void> removeRating(int gameId);
 }
 
-/// Implementacao sem operacoes reais - estado fica apenas em memoria.
-/// Usado como fallback quando a API esta indisponivel.
+/// Implementacao sem persistencia, usada apenas em testes e prototipos isolados.
 class NoopLibraryRepository implements LibraryRepository {
   const NoopLibraryRepository();
 
@@ -39,7 +41,10 @@ class NoopLibraryRepository implements LibraryRepository {
   Future<void> remove(int gameId) async {}
 
   @override
-  Future<void> toggleFavorite(int gameId) async {}
+  Future<void> toggleFavorite(int gameId, {bool? isFavorite}) async {}
+
+  @override
+  Future<bool?> toggleLike(int gameId) async => null;
 
   @override
   Future<void> rate(int gameId, int rating) async {}
@@ -50,12 +55,10 @@ class NoopLibraryRepository implements LibraryRepository {
 
 /// Repositorio HTTP que persiste a biblioteca no backend REST.
 ///
-/// Todas as operacoes sao fire-and-forget com fallback gracioso:
-/// se a API estiver offline, o estado em memoria do [LibraryStore]
-/// ja foi atualizado localmente (o caller faz isso antes de chamar o repo).
+/// As mutações lançam erro em falhas HTTP para permitir rollback no store.
 ///
-/// O [userId] pode ser atualizado em tempo de execucao via [setUserId],
-/// o que permite trocar o usuario autenticado sem recriar o repositorio.
+/// Em producao, o identificador temporario e sempre `dev-user` ate a
+/// autenticacao real substituir este contrato.
 class ApiLibraryRepository implements LibraryRepository {
   ApiLibraryRepository({
     String? baseUrl,
@@ -68,7 +71,7 @@ class ApiLibraryRepository implements LibraryRepository {
         _ownsClient = client == null;
 
   final String baseUrl;
-  String _userId;
+  final String _userId;
 
   /// Identificador do usuario enviado no header x-user-id.
   String get userId => _userId;
@@ -76,11 +79,6 @@ class ApiLibraryRepository implements LibraryRepository {
   final http.Client _client;
   final bool _ownsClient;
   final Duration timeout;
-
-  /// Troca o usuario ativo. A proxima chamada a [loadInto] usara o novo ID.
-  void setUserId(String newUserId) {
-    _userId = newUserId;
-  }
 
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
@@ -92,6 +90,7 @@ class ApiLibraryRepository implements LibraryRepository {
   // READ
   @override
   Future<void> loadInto(LibraryStore store) async {
+    final revision = store.revision;
     try {
       final uri = Uri.parse('$baseUrl/library');
       final response =
@@ -100,10 +99,17 @@ class ApiLibraryRepository implements LibraryRepository {
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body) as Map<String, dynamic>;
         final items = (decoded['data'] as List<dynamic>?) ?? [];
-        store.loadFromApi(items.whereType<Map<String, dynamic>>().toList());
+        final likes = (decoded['likes'] as List<dynamic>?) ?? [];
+        store.loadFromApi(items.whereType<Map<String, dynamic>>().toList(),
+            likedGames: likes.whereType<Map<String, dynamic>>().toList(),
+            preserveIds: store.idsChangedSince(revision),
+            preserveLikedIds: store.likedIdsChangedSince(revision));
+      } else {
+        throw StateError('Library load failed: ${response.statusCode}');
       }
     } catch (_) {
-      // Fallback gracioso: mantém estado em memoria intacto.
+      store.reportLoadFailure();
+      rethrow;
     }
   }
 
@@ -121,36 +127,59 @@ class ApiLibraryRepository implements LibraryRepository {
 
   @override
   Future<void> remove(int gameId) async {
-    try {
-      final uri = Uri.parse('$baseUrl/library/${_id(gameId)}');
-      await _client.delete(uri, headers: _headers).timeout(timeout);
-    } catch (_) {}
+    final uri = Uri.parse('$baseUrl/library/${_id(gameId)}');
+    final response = await _client.delete(uri, headers: _headers).timeout(timeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Library removal failed: ${response.statusCode}');
+    }
   }
 
   @override
-  Future<void> toggleFavorite(int gameId) async {
-    try {
-      final uri = Uri.parse('$baseUrl/library/${_id(gameId)}/favorite');
-      await _client.post(uri, headers: _headers).timeout(timeout);
-    } catch (_) {}
+  Future<void> toggleFavorite(int gameId, {bool? isFavorite}) async {
+    final uri = Uri.parse('$baseUrl/library/${_id(gameId)}/favorite');
+    final response = await _client
+        .post(uri,
+            headers: _headers,
+            body: jsonEncode({'isFavorite': isFavorite ?? true}))
+        .timeout(timeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Library favorite update failed: ${response.statusCode}');
+    }
+  }
+
+  @override
+  Future<bool?> toggleLike(int gameId) async {
+    final uri = Uri.parse('$baseUrl/library/${_id(gameId)}/like');
+    final response = await _client.post(uri, headers: _headers).timeout(timeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Game like update failed: ${response.statusCode}');
+    }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    if (body['liked'] is! bool) {
+      throw StateError('Game like response missing liked state');
+    }
+    return body['liked'] as bool;
   }
 
   @override
   Future<void> rate(int gameId, int rating) async {
-    try {
-      final uri = Uri.parse('$baseUrl/library/${_id(gameId)}/rate');
-      await _client
-          .post(uri, headers: _headers, body: jsonEncode({'rating': rating}))
-          .timeout(timeout);
-    } catch (_) {}
+    final uri = Uri.parse('$baseUrl/library/${_id(gameId)}/rate');
+    final response = await _client
+        .post(uri, headers: _headers, body: jsonEncode({'rating': rating}))
+        .timeout(timeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Library rating update failed: ${response.statusCode}');
+    }
   }
 
   @override
   Future<void> removeRating(int gameId) async {
-    try {
-      final uri = Uri.parse('$baseUrl/library/${_id(gameId)}/rate');
-      await _client.delete(uri, headers: _headers).timeout(timeout);
-    } catch (_) {}
+    final uri = Uri.parse('$baseUrl/library/${_id(gameId)}/rate');
+    final response =
+        await _client.delete(uri, headers: _headers).timeout(timeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Library rating removal failed: ${response.statusCode}');
+    }
   }
 
   void dispose() {

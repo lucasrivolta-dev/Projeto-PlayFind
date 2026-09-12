@@ -1,4 +1,6 @@
-﻿import 'features/game_detail/game_detail_screen.dart';
+import 'dart:async';
+
+import 'features/game_detail/game_detail_screen.dart';
 import 'package:flutter/material.dart';
 import 'design_system/theme.dart';
 import 'design_system/components.dart';
@@ -16,13 +18,14 @@ import 'features/library/library_screen.dart';
 import 'features/profile/profile_controller.dart';
 import 'features/profile/profile_repository.dart';
 import 'features/profile/profile_screen.dart';
-import 'config/api_config.dart';
 
 void main() => runApp(const NextPlayApp());
 
 class NextPlayApp extends StatefulWidget {
-  const NextPlayApp({super.key, this.exploreRepository});
+  const NextPlayApp({super.key, this.exploreRepository, this.libraryRepository, this.authController});
   final ExploreRepository? exploreRepository;
+  final LibraryRepository? libraryRepository;
+  final AuthController? authController;
 
   @override
   State<NextPlayApp> createState() => _NextPlayAppState();
@@ -41,34 +44,20 @@ class _NextPlayAppState extends State<NextPlayApp> {
   void initState() {
     super.initState();
     _libraryRepo = ApiLibraryRepository();
-    library = LibraryStore(repo: _libraryRepo);
-    auth = AuthController();
+    library = LibraryStore(repo: widget.libraryRepository ?? _libraryRepo);
+    auth = widget.authController ?? AuthController();
     _repo = widget.exploreRepository ?? ApiExploreRepository();
     controller = ProfileController(DemoProfileRepository())..load();
     explore = ExploreController(_repo, library: library)..load();
     feed = FeedController(_repo.load, library: library)..load();
     // Carrega estado da biblioteca para o usuario inicial (dev-user).
-    _libraryRepo.loadInto(library);
-    // Recarrega biblioteca sempre que o estado de autenticacao mudar.
-    auth.addListener(_onAuthChanged);
-  }
-
-  /// Chamado quando o usuario faz login ou logout.
-  /// Recarrega a biblioteca do usuario temporario de desenvolvimento.
-  void _onAuthChanged() {
-    _libraryRepo.setUserId(ApiConfig.devUserId);
-    if (auth.isAuthenticated) {
-      // Login: carrega biblioteca do novo usuario (substitui estado anterior).
-      _libraryRepo.loadInto(library);
-    } else {
-      // Logout: limpa estado em memoria.
-      library.loadFromApi([]);
-    }
+    unawaited((widget.libraryRepository ?? _libraryRepo)
+        .loadInto(library)
+        .catchError((Object _) {}));
   }
 
   @override
   void dispose() {
-    auth.removeListener(_onAuthChanged);
     _libraryRepo.dispose();
     if (_repo is ApiExploreRepository) {
       _repo.dispose();
@@ -124,6 +113,7 @@ class _AppShellState extends State<_AppShell> {
   @override
   Widget build(BuildContext context) => GameDetailScope(
       forum: forum,
+      auth: widget.auth,
       child: Scaffold(
         body: ListenableBuilder(
             listenable: widget.explore,
@@ -131,7 +121,7 @@ class _AppShellState extends State<_AppShell> {
                   index: pageIndex,
                   children: [
                     FeedScreen(controller: widget.feed, auth: widget.auth),
-                    ExploreScreen(controller: widget.explore),
+                    ExploreScreen(controller: widget.explore, auth: widget.auth),
                     ProfileScreen(
                         controller: widget.profile,
                         embedded: true,
@@ -140,7 +130,7 @@ class _AppShellState extends State<_AppShell> {
                         controller: widget.explore,
                         onExplore: () =>
                             setState(() => selected = AppDestination.explore)),
-                    ForumScreen(controller: forum, games: widget.explore.games),
+                    ForumScreen(controller: forum, games: widget.explore.games, auth: widget.auth),
                   ],
                 )),
         bottomNavigationBar: AppBottomNavigation(

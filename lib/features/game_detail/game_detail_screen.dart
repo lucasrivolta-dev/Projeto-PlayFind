@@ -7,10 +7,13 @@ import '../library/library_store.dart';
 import '../forum/forum_controller.dart';
 import '../forum/forum_screen.dart';
 import '../forum/forum_topic_screen.dart';
+import '../auth/auth_controller.dart';
+import '../auth/auth_guard.dart';
 
 class GameDetailScope extends InheritedWidget {
-  const GameDetailScope({super.key, required this.forum, required super.child});
+  const GameDetailScope({super.key, required this.forum, this.auth, required super.child});
   final ForumController forum;
+  final AuthController? auth;
   @override
   bool updateShouldNotify(GameDetailScope oldWidget) =>
       forum != oldWidget.forum;
@@ -19,9 +22,10 @@ class GameDetailScope extends InheritedWidget {
 Future<void> openGameDetails(BuildContext context, DiscoveryGame game,
     LibraryStore library, List<DiscoveryGame> catalog) {
   final forum = context.getInheritedWidgetOfExactType<GameDetailScope>()?.forum;
+  final auth = context.getInheritedWidgetOfExactType<GameDetailScope>()?.auth;
   return Navigator.of(context).push<void>(MaterialPageRoute(
       builder: (_) => GameDetailScreen(
-          game: game, library: library, catalog: catalog, forum: forum)));
+          game: game, library: library, catalog: catalog, forum: forum, auth: auth)));
 }
 
 class GameDetailScreen extends StatelessWidget {
@@ -30,7 +34,9 @@ class GameDetailScreen extends StatelessWidget {
       required this.game,
       required this.library,
       required this.catalog,
-      this.forum});
+      this.forum,
+      this.auth});
+  final AuthController? auth;
   final DiscoveryGame game;
   final LibraryStore library;
   final List<DiscoveryGame> catalog;
@@ -61,8 +67,8 @@ class GameDetailScreen extends StatelessWidget {
                             (index) => IconButton(
                                 tooltip:
                                     '${index + 1} estrela${index == 0 ? '' : 's'}',
-                                onPressed: () =>
-                                    library.rate(game.id, index + 1),
+                                onPressed: () => requireAuthentication(context, auth,
+                                    () => library.rate(game.id, index + 1)),
                                 icon: Icon(
                                     index < (library.ratings[game.id] ?? 0)
                                         ? Icons.star_rounded
@@ -70,7 +76,8 @@ class GameDetailScreen extends StatelessWidget {
                                     color: AppColors.primary)))),
                     if (library.ratings.containsKey(game.id))
                       TextButton(
-                          onPressed: () => library.removeRating(game.id),
+                          onPressed: () => requireAuthentication(context, auth,
+                              () => library.removeRating(game.id)),
                           child: const Text('Remover avaliação')),
                   ])));
   @override
@@ -100,8 +107,8 @@ class GameDetailScreen extends StatelessWidget {
                                   runSpacing: AppSpacing.xs,
                                   children: [
                                     FilledButton.icon(
-                                        onPressed: () =>
-                                            library.toggleSaved(game.id),
+                                        onPressed: () => requireAuthentication(context, auth,
+                                            () => library.toggleSaved(game.id)),
                                         icon: Icon(
                                             library.saved.contains(game.id)
                                                 ? Icons.bookmark_added
@@ -111,8 +118,8 @@ class GameDetailScreen extends StatelessWidget {
                                                 ? 'Salvo em Quero jogar'
                                                 : 'Quero jogar')),
                                     OutlinedButton.icon(
-                                        onPressed: () =>
-                                            library.togglePlayed(game.id),
+                                        onPressed: () => requireAuthentication(context, auth,
+                                            () => library.togglePlayed(game.id)),
                                         icon: Icon(
                                             library.played.contains(game.id)
                                                 ? Icons.check_circle
@@ -127,14 +134,15 @@ class GameDetailScreen extends StatelessWidget {
                                             library.favorites.contains(game.id)
                                                 ? 'Remover dos favoritos'
                                                 : 'Favoritar',
-                                        onPressed: () =>
-                                            library.toggleFavorite(game.id),
+                                        onPressed: () => requireAuthentication(context, auth,
+                                            () => library.toggleFavorite(game.id)),
                                         icon: Icon(
                                             library.favorites.contains(game.id)
                                                 ? Icons.star
                                                 : Icons.star_border)),
                                     OutlinedButton.icon(
-                                        onPressed: () => evaluate(context),
+                                        onPressed: () => requireAuthentication(context, auth,
+                                            () => evaluate(context)),
                                         icon: const Icon(Icons.edit_outlined),
                                         label: Text(library.ratings
                                                 .containsKey(game.id)

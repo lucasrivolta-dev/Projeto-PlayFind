@@ -124,6 +124,7 @@ class _AuthScreenState extends State<AuthScreen>
                         ]),
                         const SizedBox(height: AppSpacing.lg),
                         OutlinedButton.icon(
+                            key: const ValueKey('auth-google'),
                             onPressed: busy ? null : () => provider('Google'),
                             icon: const Icon(Icons.g_mobiledata, size: 28),
                             label: const Text('Continuar com Google')),

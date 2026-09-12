@@ -1,10 +1,12 @@
-﻿import 'dart:convert';
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:nextplay/features/library/library_store.dart';
 import 'package:nextplay/features/library/library_repository.dart';
+import 'package:nextplay/features/feed/feed_controller.dart';
 
 void main() {
   group('ApiLibraryRepository', () {
@@ -61,6 +63,83 @@ void main() {
       expect(store.ratings[123], equals(5));
     });
 
+    test('like salvo reidrata e os dois primeiros toques seguem o banco', () async {
+      var persistedLike = true;
+      final requests = <http.Request>[];
+      final client = MockClient((request) async {
+        requests.add(request);
+        expect(request.headers['x-user-id'], 'dev-user');
+        if (request.method == 'GET') {
+          return http.Response(jsonEncode({
+            'data': [],
+            'likes': persistedLike ? [{'steamAppId': 1145360, 'igdbId': null}] : [],
+            'total': 0,
+          }), 200);
+        }
+        persistedLike = !persistedLike;
+        return http.Response(jsonEncode({'liked': persistedLike}), 200);
+      });
+      final repo = ApiLibraryRepository(client: client);
+      final store = LibraryStore(repo: repo);
+      final feed = FeedController(() async => [], library: store);
+      addTearDown(feed.dispose);
+      addTearDown(store.dispose);
+
+      await repo.loadInto(store); // Mesmo estado de uma nova sessão após F5.
+      expect(feed.liked, contains(1145360));
+
+      feed.toggleLike(1145360);
+      expect(feed.liked, isNot(contains(1145360))); // Otimista.
+      await Future<void>.delayed(Duration.zero);
+      expect(persistedLike, isFalse);
+      expect(feed.liked, isNot(contains(1145360)));
+
+      feed.toggleLike(1145360);
+      await Future<void>.delayed(Duration.zero);
+      expect(persistedLike, isTrue);
+      expect(feed.liked, contains(1145360));
+      expect(requests.map((request) => request.method), ['GET', 'POST', 'POST']);
+    });
+
+    test('falha HTTP ao descurtir restaura a curtida reidratada', () async {
+      final client = MockClient((request) async {
+        if (request.method == 'GET') {
+          return http.Response(jsonEncode({
+            'data': [], 'likes': [{'igdbId': 123}], 'total': 0,
+          }), 200);
+        }
+        return http.Response('{}', 500);
+      });
+      final repo = ApiLibraryRepository(client: client);
+      final store = LibraryStore(repo: repo);
+      addTearDown(store.dispose);
+      await repo.loadInto(store);
+      expect(store.liked, contains(123));
+
+      store.toggleLike(123);
+      expect(store.liked, isNot(contains(123)));
+      await Future<void>.delayed(Duration.zero);
+      expect(store.liked, contains(123));
+    });
+
+    test('GET reidrata jogo só com igdbId, favorito e rating', () async {
+      final client = MockClient((_) async => http.Response(jsonEncode({
+        'data': [{
+          'status': 'PLAYED', 'isFavorite': true, 'rating': 4,
+          'game': {'steamAppId': null, 'igdbId': 123},
+        }],
+        'likes': [{'steamAppId': null, 'igdbId': 123}],
+        'total': 1,
+      }), 200));
+      final store = LibraryStore();
+      addTearDown(store.dispose);
+      await ApiLibraryRepository(client: client).loadInto(store);
+      expect(store.played, {123});
+      expect(store.favorites, {123});
+      expect(store.ratings[123], 4);
+      expect(store.liked, {123});
+    });
+
     test('loadInto: não duplica jogos repetidos na mesma categoria', () async {
       final mockClient = MockClient((_) async {
         return http.Response(jsonEncode({
@@ -94,7 +173,47 @@ void main() {
       expect(store.played, {123});
     });
 
-    test('loadInto: fallback gracioso em erro HTTP', () async {
+    test('loadInto: resposta antiga não apaga ação feita durante o GET', () async {
+      final response = Completer<http.Response>();
+      final client = MockClient((_) => response.future);
+      final repo = ApiLibraryRepository(client: client);
+      final store = LibraryStore();
+      addTearDown(store.dispose);
+
+      final loading = repo.loadInto(store);
+      store.toggleSaved(1145360);
+      response.complete(http.Response(jsonEncode({'data': [], 'total': 0}), 200));
+      await loading;
+
+      expect(store.saved, {1145360});
+    });
+
+    test('curtir durante GET preserva curtida e carrega status do mesmo jogo', () async {
+      final response = Completer<http.Response>();
+      final client = MockClient((request) async {
+        if (request.method == 'GET') return response.future;
+        return http.Response(jsonEncode({'liked': true}), 200);
+      });
+      final repo = ApiLibraryRepository(client: client);
+      final store = LibraryStore(repo: repo);
+      addTearDown(store.dispose);
+
+      final loading = repo.loadInto(store);
+      store.toggleLike(1145360);
+      response.complete(http.Response(jsonEncode({
+        'data': [{
+          'status': 'WANT_TO_PLAY',
+          'game': {'steamAppId': 1145360, 'igdbId': null},
+        }],
+        'likes': [],
+        'total': 1,
+      }), 200));
+      await loading;
+      expect(store.saved, {1145360});
+      expect(store.liked, {1145360});
+    });
+
+    test('loadInto: preserva estado e propaga erro HTTP', () async {
       final mockClient = MockClient((_) async => http.Response('', 500));
       final repo = ApiLibraryRepository(
         userId: 'test-user',
@@ -102,21 +221,20 @@ void main() {
       );
       final store = LibraryStore();
       store.saved.add(999); // estado pre-existente
-      await repo.loadInto(store);
+      await expectLater(repo.loadInto(store), throwsStateError);
 
       // Estado deve permanecer intacto quando a API retorna erro.
       expect(store.saved, contains(999));
     });
 
-    test('loadInto: fallback gracioso em falha de rede', () async {
+    test('loadInto: propaga falha de rede', () async {
       final mockClient = MockClient((_) async => throw Exception('offline'));
       final repo = ApiLibraryRepository(
         userId: 'test-user',
         client: mockClient,
       );
       final store = LibraryStore();
-      // Não deve lançar exceção.
-      await expectLater(repo.loadInto(store), completes);
+      await expectLater(repo.loadInto(store), throwsException);
     });
 
     test('setStatus: envia PUT com status correto', () async {
@@ -136,6 +254,42 @@ void main() {
 
       expect(capturedPath, contains('1145360'));
       expect(jsonDecode(capturedBody!)['status'], equals('WANT_TO_PLAY'));
+    });
+
+    test('favorite, like e rating usam as rotas da API', () async {
+      final requests = <http.Request>[];
+      final mockClient = MockClient((request) async {
+        requests.add(request);
+        return http.Response(request.url.path.endsWith('/like')
+            ? jsonEncode({'liked': true})
+            : '{}', 200);
+      });
+      final repo = ApiLibraryRepository(client: mockClient);
+
+      await repo.toggleFavorite(1145360, isFavorite: true);
+      await repo.toggleLike(1145360);
+      await repo.rate(1145360, 4);
+      await repo.removeRating(1145360);
+
+      expect(requests[0].method, 'POST');
+      expect(requests[0].url.path, '/api/v1/library/1145360/favorite');
+      expect(jsonDecode(requests[0].body), {'isFavorite': true});
+      expect(requests[0].headers['x-user-id'], 'dev-user');
+      expect(requests[1].url.path, '/api/v1/library/1145360/like');
+      expect(requests[2].url.path, '/api/v1/library/1145360/rate');
+      expect(jsonDecode(requests[2].body), {'rating': 4});
+      expect(requests[3].method, 'DELETE');
+      expect(requests[3].url.path, '/api/v1/library/1145360/rate');
+    });
+
+    test('ações da API lançam erro em resposta HTTP', () async {
+      final mockClient = MockClient((_) async => http.Response('{}', 500));
+      final repo = ApiLibraryRepository(client: mockClient);
+
+      await expectLater(repo.toggleFavorite(1), throwsStateError);
+      await expectLater(repo.toggleLike(1), throwsStateError);
+      await expectLater(repo.rate(1, 4), throwsStateError);
+      await expectLater(repo.removeRating(1), throwsStateError);
     });
 
     test('toggleFavorite: envia POST para /favorite', () async {

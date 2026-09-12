@@ -39,8 +39,8 @@ abstract final class ApiConfig {
 
   /// Identificador temporário de desenvolvimento enviado no header `x-user-id`.
   ///
-  /// O backend aceita qualquer string como identidade enquanto o Firebase
-  /// Admin SDK ainda não está integrado. Este valor é usado somente em
+  /// O backend local aceita apenas este valor, mas o header não comprova
+  /// quem enviou a requisição. Este valor é usado somente em
   /// desenvolvimento; em produção será substituído pelo Firebase UID
   /// derivado do token validado.
   ///

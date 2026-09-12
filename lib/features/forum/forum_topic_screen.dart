@@ -4,12 +4,15 @@ import '../../design_system/components.dart';
 import '../../design_system/theme.dart';
 import 'forum_controller.dart';
 import 'forum_screen.dart';
+import '../auth/auth_controller.dart';
+import '../auth/auth_guard.dart';
 
 class ForumTopicScreen extends StatefulWidget {
   const ForumTopicScreen(
-      {super.key, required this.controller, required this.topic});
+      {super.key, required this.controller, required this.topic, this.auth});
   final ForumController controller;
   final ForumTopic topic;
+  final AuthController? auth;
   @override
   State<ForumTopicScreen> createState() => _ForumTopicScreenState();
 }
@@ -38,7 +41,8 @@ class _ForumTopicScreenState extends State<ForumTopicScreen> {
             style: AppTypography.body().copyWith(color: AppColors.text)),
         Wrap(children: [
           TextButton.icon(
-              onPressed: () => widget.controller.likeReply(reply),
+              onPressed: () => requireAuthentication(context, widget.auth,
+                  () => widget.controller.likeReply(reply)),
               icon: Icon(reply.liked ? Icons.favorite : Icons.favorite_border,
                   size: 18),
               label: Text(reply.liked ? '1' : 'Curtir')),
@@ -66,7 +70,8 @@ class _ForumTopicScreenState extends State<ForumTopicScreen> {
               IconButton(
                   tooltip:
                       topic.following ? 'Deixar de seguir' : 'Seguir discussão',
-                  onPressed: () => widget.controller.follow(topic),
+                  onPressed: () => requireAuthentication(context, widget.auth,
+                      () => widget.controller.follow(topic)),
                   icon: Icon(topic.following
                       ? Icons.notifications_active
                       : Icons.notifications_none))
@@ -104,8 +109,8 @@ class _ForumTopicScreenState extends State<ForumTopicScreen> {
                               const SizedBox(height: AppSpacing.md),
                               Wrap(children: [
                                 TextButton.icon(
-                                    onPressed: () =>
-                                        widget.controller.like(topic),
+                                    onPressed: () => requireAuthentication(context,
+                                        widget.auth, () => widget.controller.like(topic)),
                                     icon: Icon(topic.liked
                                         ? Icons.favorite
                                         : Icons.favorite_border),
@@ -172,14 +177,14 @@ class _ForumTopicScreenState extends State<ForumTopicScreen> {
                                   hintText: 'Escreva uma resposta…'))),
                       IconButton.filled(
                           tooltip: 'Enviar resposta',
-                          onPressed: () {
+                          onPressed: () => requireAuthentication(context, widget.auth, () {
                             if (widget.controller.reply(topic, text.text,
                                 parentId: replyingTo?.id)) {
                               text.clear();
                               setState(() => replyingTo = null);
                               focus.unfocus();
                             }
-                          },
+                          }),
                           icon: const Icon(Icons.send_rounded))
                     ]),
                   ])),

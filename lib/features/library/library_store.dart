@@ -15,11 +15,34 @@ class LibraryStore extends ChangeNotifier {
       : _repo = repo ?? const NoopLibraryRepository();
 
   final LibraryRepository _repo;
+  int _revision = 0;
+  final Map<int, int> _changedAt = {};
+  final Map<int, int> _likesChangedAt = {};
+
+  int get revision => _revision;
+  Set<int> idsChangedSince(int revision) => _changedAt.entries
+      .where((entry) => entry.value > revision)
+      .map((entry) => entry.key)
+      .toSet();
+  Set<int> likedIdsChangedSince(int revision) => _likesChangedAt.entries
+      .where((entry) => entry.value > revision)
+      .map((entry) => entry.key)
+      .toSet();
+
+  void _touch(int id) => _changedAt[id] = ++_revision;
+  void _touchLike(int id) => _likesChangedAt[id] = ++_revision;
+
+  void reportLoadFailure() => _emitError(
+      'Não foi possível carregar a biblioteca. Verifique a conexão.');
 
   final Set<int> saved = {};
   final Set<int> played = {};
   final Set<int> favorites = {};
+  final Set<int> liked = {};
   final Map<int, int> ratings = {};
+  final Set<int> _pendingLikes = {};
+  final Set<int> _pendingFavorites = {};
+  final Set<int> _pendingRatings = {};
   final Set<int> _pendingSaved = {};
   final Map<int, bool> _queuedSavedActions = {};
   final Set<int> _pendingPlayed = {};
@@ -33,6 +56,7 @@ class LibraryStore extends ChangeNotifier {
   }
 
   void toggleSaved(int id) {
+    _touch(id);
     final added = saved.add(id);
     if (!added) saved.remove(id);
     notifyListeners();
@@ -73,6 +97,7 @@ class LibraryStore extends ChangeNotifier {
 
   void markPlayed(int id) {
     if (played.contains(id) || !_pendingPlayed.add(id)) return;
+    _touch(id);
     final wasSaved = saved.remove(id);
     played.add(id);
     notifyListeners();
@@ -93,13 +118,15 @@ class LibraryStore extends ChangeNotifier {
   }
 
   void togglePlayed(int id) {
+    _touch(id);
     final added = played.add(id);
     if (!added) {
       played.remove(id);
-      ratings.remove(id);
+      final previousRating = ratings.remove(id);
       notifyListeners();
       _repo.remove(id).catchError((_) {
         played.add(id);
+        if (previousRating != null) ratings[id] = previousRating;
         notifyListeners();
         _emitError('Não foi possível remover o jogo. Tente novamente.');
       });
@@ -114,61 +141,143 @@ class LibraryStore extends ChangeNotifier {
   }
 
   void removeRating(int id) {
-    ratings.remove(id);
+    if (!_pendingRatings.add(id)) return;
+    _touch(id);
+    final previous = ratings.remove(id);
     notifyListeners();
-    _repo.removeRating(id).catchError((_) {
-      // Não reverte rating porque não temos o valor anterior aqui;
-      // simplesmente informa o erro.
+    unawaited(_persistRatingRemoval(id, previous));
+  }
+
+  Future<void> _persistRatingRemoval(int id, int? previous) async {
+    try {
+      await _repo.removeRating(id);
+    } catch (_) {
+      if (previous != null) ratings[id] = previous;
+      notifyListeners();
       _emitError('Não foi possível remover a avaliação. Tente novamente.');
-    });
+    } finally {
+      _pendingRatings.remove(id);
+    }
   }
 
   void toggleFavorite(int id) {
+    if (!_pendingFavorites.add(id)) return;
+    _touch(id);
     if (!favorites.add(id)) favorites.remove(id);
+    final value = favorites.contains(id);
     notifyListeners();
-    _repo.toggleFavorite(id).catchError((_) {
-      // Reverte o toggle.
-      if (!favorites.remove(id)) favorites.add(id);
+    unawaited(_persistFavorite(id, value));
+  }
+
+  Future<void> _persistFavorite(int id, bool value) async {
+    try {
+      await _repo.toggleFavorite(id, isFavorite: value);
+    } catch (_) {
+      if (value) {
+        favorites.remove(id);
+      } else {
+        favorites.add(id);
+      }
       notifyListeners();
       _emitError('Não foi possível atualizar favorito. Tente novamente.');
-    });
+    } finally {
+      _pendingFavorites.remove(id);
+    }
   }
 
   void rate(int id, int rating) {
     if (rating < 1 || rating > 5) return;
+    if (!_pendingRatings.add(id)) return;
+    _touch(id);
+    final previous = ratings[id];
+    final wasPlayed = played.contains(id);
+    final wasSaved = saved.contains(id);
     ratings[id] = rating;
     played.add(id);
+    saved.remove(id);
     notifyListeners();
-    _repo.rate(id, rating).catchError((_) {
-      ratings.remove(id);
+    unawaited(_persistRating(id, rating, previous, wasPlayed, wasSaved));
+  }
+
+  Future<void> _persistRating(int id, int rating, int? previous,
+      bool wasPlayed, bool wasSaved) async {
+    try {
+      await _repo.rate(id, rating);
+    } catch (_) {
+      if (previous == null) {
+        ratings.remove(id);
+      } else {
+        ratings[id] = previous;
+      }
+      if (!wasPlayed) played.remove(id);
+      if (wasSaved) saved.add(id);
       notifyListeners();
       _emitError('Não foi possível salvar a avaliação. Tente novamente.');
-    });
+    } finally {
+      _pendingRatings.remove(id);
+    }
+  }
+
+  void toggleLike(int id) {
+    if (!_pendingLikes.add(id)) return;
+    _touchLike(id);
+    final optimistic = liked.add(id);
+    if (!optimistic) liked.remove(id);
+    notifyListeners();
+    unawaited(_persistLike(id, optimistic));
+  }
+
+  Future<void> _persistLike(int id, bool optimistic) async {
+    try {
+      final persisted = await _repo.toggleLike(id);
+      if (persisted != null && persisted != optimistic) {
+        if (persisted) {
+          liked.add(id);
+        } else {
+          liked.remove(id);
+        }
+        notifyListeners();
+      }
+    } catch (_) {
+      if (optimistic) {
+        liked.remove(id);
+      } else {
+        liked.add(id);
+      }
+      notifyListeners();
+      _emitError('Não foi possível atualizar a curtida. Tente novamente.');
+    } finally {
+      _pendingLikes.remove(id);
+    }
   }
 
   Set<int> get all => {...saved, ...played, ...favorites, ...ratings.keys};
 
   /// Inicializa o estado a partir de uma lista de itens JSON retornada
   /// por `GET /api/v1/library`. Substitui qualquer estado anterior.
-  void loadFromApi(List<Map<String, dynamic>> items) {
+  void loadFromApi(List<Map<String, dynamic>> items,
+      {List<Map<String, dynamic>> likedGames = const [],
+      Set<int> preserveIds = const {},
+      Set<int> preserveLikedIds = const {}}) {
+    final preservedSaved = saved.intersection(preserveIds);
+    final preservedPlayed = played.intersection(preserveIds);
+    final preservedFavorites = favorites.intersection(preserveIds);
+    final preservedLiked = liked.intersection(preserveLikedIds);
+    final preservedRatings = Map<int, int>.fromEntries(
+        ratings.entries.where((entry) => preserveIds.contains(entry.key)));
     saved.clear();
     played.clear();
     favorites.clear();
+    liked.clear();
     ratings.clear();
 
     for (final item in items) {
       // Resolve o id numérico a partir de steamAppId → igdbId.
       final game = item['game'] as Map<String, dynamic>?;
-      final steamAppId = game?['steamAppId'] as int?;
-      final igdbId = game?['igdbId'] as int?;
-      final int id;
-      if (steamAppId != null && steamAppId > 0) {
-        id = steamAppId;
-      } else if (igdbId != null && igdbId > 0) {
-        id = igdbId;
-      } else {
-        continue; // Jogo sem id utilizável é ignorado.
-      }
+      final id = _externalGameId(game);
+      if (id == null) continue;
+
+      if (preserveIds.contains(id)) continue;
 
       final status = item['status'] as String?;
       if (status == 'WANT_TO_PLAY') saved.add(id);
@@ -180,7 +289,26 @@ class LibraryStore extends ChangeNotifier {
       if (rating != null) ratings[id] = rating;
     }
 
+    for (final game in likedGames) {
+      final id = _externalGameId(game);
+      if (id != null && !preserveLikedIds.contains(id)) liked.add(id);
+    }
+
+    saved.addAll(preservedSaved);
+    played.addAll(preservedPlayed);
+    favorites.addAll(preservedFavorites);
+    liked.addAll(preservedLiked);
+    ratings.addAll(preservedRatings);
+
     notifyListeners();
+  }
+
+  static int? _externalGameId(Map<String, dynamic>? game) {
+    final steamAppId = game?['steamAppId'] as int?;
+    if (steamAppId != null && steamAppId > 0) return steamAppId;
+    final igdbId = game?['igdbId'] as int?;
+    if (igdbId != null && igdbId > 0) return igdbId;
+    return null;
   }
 
   @override

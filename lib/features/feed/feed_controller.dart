@@ -39,7 +39,7 @@ class FeedController extends ChangeNotifier {
   bool error = false;
   List<FeedItem> items = [];
   int current = 0;
-  final Set<int> liked = {};
+  Set<int> get liked => library.liked;
   Set<int> get saved => library.saved;
   Set<int> get played => library.played;
   final Map<int, List<FeedComment>> addedComments = {};
@@ -121,8 +121,7 @@ class FeedController extends ChangeNotifier {
   }
 
   void toggleLike(int id) {
-    if (!liked.add(id)) liked.remove(id);
-    _emit();
+    library.toggleLike(id);
   }
 
   void toggleSave(int id) {
