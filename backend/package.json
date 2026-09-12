@@ -3,15 +3,30 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write src test *.json",
+    "format:check": "prettier --check src test *.json",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "test": "tsc && node --test test/*.test.mjs",
+    "test:db": "node test/database-smoke.mjs",
+    "prisma:validate": "prisma validate",
+    "prisma:status": "prisma migrate status",
+    "prisma:deploy": "prisma migrate deploy",
     "sync:games": "tsx src/scripts/sync-games.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },
   "dependencies": {
+    "@fastify/cors": "^11.3.0",
     "@prisma/client": "^6.16.0",
-    "dotenv": "^16.6.1"
+    "dotenv": "^16.6.1",
+    "fastify": "^5.12.4"
   },
   "devDependencies": {
+    "@types/node": "^24.13.4",
+    "prettier": "^3.9.6",
     "prisma": "^6.16.0",
     "tsx": "^4.19.0",
     "typescript": "^5.9.2"
