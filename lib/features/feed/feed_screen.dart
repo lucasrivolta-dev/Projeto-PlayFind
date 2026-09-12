@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../game_detail/game_detail_screen.dart';
 import 'package:flutter/material.dart';
 import '../../design_system/components.dart';
@@ -7,52 +9,98 @@ import 'feed_comments_sheet.dart';
 import '../auth/auth_controller.dart';
 import '../auth/auth_screen.dart';
 
-class FeedScreen extends StatelessWidget {
+class FeedScreen extends StatefulWidget {
   const FeedScreen({super.key, required this.controller, this.auth});
   final FeedController controller;
   final AuthController? auth;
 
+  @override
+  State<FeedScreen> createState() => _FeedScreenState();
+}
+
+class _FeedScreenState extends State<FeedScreen> {
+  StreamSubscription<String>? _errorSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeErrors();
+  }
+
+  @override
+  void didUpdateWidget(FeedScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller.library != widget.controller.library) {
+      _errorSub?.cancel();
+      _subscribeErrors();
+    }
+  }
+
+  void _subscribeErrors() {
+    _errorSub = widget.controller.library.errors.listen((msg) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ));
+    });
+  }
+
+  @override
+  void dispose() {
+    _errorSub?.cancel();
+    super.dispose();
+  }
+
   Future<void> _protected(BuildContext context, VoidCallback action) async {
-    if (auth == null || auth!.isAuthenticated) {
+    if (widget.auth == null || widget.auth!.isAuthenticated) {
       action();
       return;
     }
     final loggedIn = await Navigator.of(context).push<bool>(
-        MaterialPageRoute(builder: (_) => AuthScreen(controller: auth!)));
-    if (context.mounted && loggedIn == true && auth!.isAuthenticated) action();
+        MaterialPageRoute(
+            builder: (_) => AuthScreen(controller: widget.auth!)));
+    if (context.mounted &&
+        loggedIn == true &&
+        widget.auth!.isAuthenticated) {
+      action();
+    }
   }
 
   void _comments(BuildContext context, FeedItem item) {
     showAppSheet<void>(
         context,
         FeedCommentsSheet(
-            controller: controller, item: item, onProtected: _protected));
+            controller: widget.controller,
+            item: item,
+            onProtected: _protected));
   }
 
   void _details(BuildContext context, FeedItem item) => openGameDetails(
       context,
       item.game,
-      controller.library,
-      controller.items.map((item) => item.game).toList());
+      widget.controller.library,
+      widget.controller.items.map((item) => item.game).toList());
 
   @override
   Widget build(BuildContext context) => SafeArea(
       bottom: false,
       child: ListenableBuilder(
-          listenable: controller,
+          listenable: widget.controller,
           builder: (context, _) {
-            if (controller.loading) {
+            if (widget.controller.loading) {
               return const Center(
                   child: CircularProgressIndicator(
                       semanticsLabel: 'Carregando feed'));
             }
-            if (controller.error) {
+            if (widget.controller.error) {
               return Center(
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Text('Não foi possível carregar o feed.',
                     style: AppTypography.body()),
                 FilledButton(
-                    onPressed: controller.load,
+                    onPressed: widget.controller.load,
                     child: const Text('Tentar novamente'))
               ]));
             }
@@ -65,17 +113,17 @@ class FeedScreen extends StatelessWidget {
                       width: width,
                       child: PageView.builder(
                           scrollDirection: Axis.vertical,
-                          itemCount: controller.items.length,
-                          onPageChanged: controller.setCurrent,
+                          itemCount: widget.controller.items.length,
+                          onPageChanged: widget.controller.setCurrent,
                           itemBuilder: (context, index) => _FeedPage(
-                              item: controller.items[index],
-                              controller: controller,
+                              item: widget.controller.items[index],
+                              controller: widget.controller,
                               onProtected: (action) =>
                                   _protected(context, action),
-                              onComments: () =>
-                                  _comments(context, controller.items[index]),
+                              onComments: () => _comments(
+                                  context, widget.controller.items[index]),
                               onDetails: () => _details(
-                                  context, controller.items[index])))));
+                                  context, widget.controller.items[index])))));
             });
           }));
 }

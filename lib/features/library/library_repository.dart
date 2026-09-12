@@ -59,11 +59,11 @@ class NoopLibraryRepository implements LibraryRepository {
 class ApiLibraryRepository implements LibraryRepository {
   ApiLibraryRepository({
     String? baseUrl,
-    String userId = 'dev-user',
+    String? userId,
     http.Client? client,
     this.timeout = const Duration(seconds: 4),
   })  : baseUrl = baseUrl ?? ApiConfig.baseUrl,
-        _userId = userId,
+        _userId = userId ?? ApiConfig.devUserId,
         _client = client ?? http.Client(),
         _ownsClient = client == null;
 
@@ -110,12 +110,13 @@ class ApiLibraryRepository implements LibraryRepository {
   // WRITE
   @override
   Future<void> setStatus(int gameId, String status) async {
-    try {
-      final uri = Uri.parse('$baseUrl/library/${_id(gameId)}');
-      await _client
-          .put(uri, headers: _headers, body: jsonEncode({'status': status}))
-          .timeout(timeout);
-    } catch (_) {}
+    final uri = Uri.parse('$baseUrl/library/${_id(gameId)}');
+    final response = await _client
+        .put(uri, headers: _headers, body: jsonEncode({'status': status}))
+        .timeout(timeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Library status update failed: ${response.statusCode}');
+    }
   }
 
   @override

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'library_repository.dart';
 
@@ -6,6 +7,9 @@ import 'library_repository.dart';
 /// Cada mutação atualiza o estado em memória imediatamente (UI responsiva)
 /// e dispara a persistência no backend em segundo plano via [_repo].
 /// Se [repo] for omitido, usa [NoopLibraryRepository] (somente memória).
+///
+/// Erros de persistência são emitidos em [errors] como mensagens legíveis.
+/// A UI pode escutar esse stream para exibir feedback discreto (SnackBar).
 class LibraryStore extends ChangeNotifier {
   LibraryStore({LibraryRepository? repo})
       : _repo = repo ?? const NoopLibraryRepository();
@@ -16,22 +20,64 @@ class LibraryStore extends ChangeNotifier {
   final Set<int> played = {};
   final Set<int> favorites = {};
   final Map<int, int> ratings = {};
+  final Set<int> _pendingSaved = {};
+  final Map<int, bool> _queuedSavedActions = {};
+
+  // Stream de erros para feedback discreto na UI.
+  final _errorController = StreamController<String>.broadcast();
+  Stream<String> get errors => _errorController.stream;
+
+  void _emitError(String message) {
+    if (!_errorController.isClosed) _errorController.add(message);
+  }
 
   void toggleSaved(int id) {
     final added = saved.add(id);
     if (!added) saved.remove(id);
     notifyListeners();
-    if (added) {
-      _repo.setStatus(id, 'WANT_TO_PLAY');
-    } else {
-      _repo.remove(id);
+
+    if (!_pendingSaved.add(id)) {
+      _queuedSavedActions[id] = added;
+      return;
+    }
+    unawaited(_persistSaved(id, added));
+  }
+
+  Future<void> _persistSaved(int id, bool added) async {
+    try {
+      if (added) {
+        await _repo.setStatus(id, 'WANT_TO_PLAY');
+      } else {
+        await _repo.remove(id);
+      }
+    } catch (_) {
+      if (added) {
+        saved.remove(id);
+      } else {
+        saved.add(id);
+      }
+      notifyListeners();
+      _emitError(added
+          ? 'Não foi possível salvar o jogo. Tente novamente.'
+          : 'Não foi possível remover o jogo. Tente novamente.');
+    } finally {
+      _pendingSaved.remove(id);
+      final queued = _queuedSavedActions.remove(id);
+      if (queued != null) {
+        _pendingSaved.add(id);
+        unawaited(_persistSaved(id, queued));
+      }
     }
   }
 
   void markPlayed(int id) {
     played.add(id);
     notifyListeners();
-    _repo.setStatus(id, 'PLAYED');
+    _repo.setStatus(id, 'PLAYED').catchError((_) {
+      played.remove(id);
+      notifyListeners();
+      _emitError('Não foi possível marcar como jogado. Tente novamente.');
+    });
   }
 
   void togglePlayed(int id) {
@@ -40,23 +86,40 @@ class LibraryStore extends ChangeNotifier {
       played.remove(id);
       ratings.remove(id);
       notifyListeners();
-      _repo.remove(id);
+      _repo.remove(id).catchError((_) {
+        played.add(id);
+        notifyListeners();
+        _emitError('Não foi possível remover o jogo. Tente novamente.');
+      });
     } else {
       notifyListeners();
-      _repo.setStatus(id, 'PLAYED');
+      _repo.setStatus(id, 'PLAYED').catchError((_) {
+        played.remove(id);
+        notifyListeners();
+        _emitError('Não foi possível marcar como jogado. Tente novamente.');
+      });
     }
   }
 
   void removeRating(int id) {
     ratings.remove(id);
     notifyListeners();
-    _repo.removeRating(id);
+    _repo.removeRating(id).catchError((_) {
+      // Não reverte rating porque não temos o valor anterior aqui;
+      // simplesmente informa o erro.
+      _emitError('Não foi possível remover a avaliação. Tente novamente.');
+    });
   }
 
   void toggleFavorite(int id) {
     if (!favorites.add(id)) favorites.remove(id);
     notifyListeners();
-    _repo.toggleFavorite(id);
+    _repo.toggleFavorite(id).catchError((_) {
+      // Reverte o toggle.
+      if (!favorites.remove(id)) favorites.add(id);
+      notifyListeners();
+      _emitError('Não foi possível atualizar favorito. Tente novamente.');
+    });
   }
 
   void rate(int id, int rating) {
@@ -64,7 +127,11 @@ class LibraryStore extends ChangeNotifier {
     ratings[id] = rating;
     played.add(id);
     notifyListeners();
-    _repo.rate(id, rating);
+    _repo.rate(id, rating).catchError((_) {
+      ratings.remove(id);
+      notifyListeners();
+      _emitError('Não foi possível salvar a avaliação. Tente novamente.');
+    });
   }
 
   Set<int> get all => {...saved, ...played, ...favorites, ...ratings.keys};
@@ -102,5 +169,11 @@ class LibraryStore extends ChangeNotifier {
     }
 
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _errorController.close();
+    super.dispose();
   }
 }
