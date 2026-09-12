@@ -17,9 +17,22 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (fastify,
       search?: string;
     };
 
+    const page = query.page === undefined ? undefined : Number(query.page);
+    const limit = query.limit === undefined ? undefined : Number(query.limit);
+    if (
+      (page !== undefined && (!Number.isSafeInteger(page) || page < 1)) ||
+      (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1))
+    ) {
+      return reply.status(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'page e limit devem ser inteiros positivos.',
+      });
+    }
+
     const result = await service.listGames({
-      page: query.page ? Number(query.page) : undefined,
-      limit: query.limit ? Number(query.limit) : undefined,
+      page,
+      limit,
       genre: query.genre,
       platform: query.platform,
       search: query.search,
@@ -45,7 +58,14 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (fastify,
 
   fastify.get('/feed', async (request, reply) => {
     const query = request.query as { limit?: string };
-    const limit = query.limit ? Number(query.limit) : 20;
+    const limit = query.limit === undefined ? 20 : Number(query.limit);
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      return reply.status(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'limit deve ser um inteiro positivo.',
+      });
+    }
     const items = await service.getFeedGames(limit);
 
     return reply.status(200).send({

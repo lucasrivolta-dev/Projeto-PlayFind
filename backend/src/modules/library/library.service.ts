@@ -134,6 +134,7 @@ export class LibraryService {
           studio: entry.game.studio,
           rating: entry.game.rating,
           steamAppId: entry.game.steamAppId,
+          igdbId: entry.game.igdbId,
           genres: entry.game.genres.map((g) => g.genre.name),
           platforms: entry.game.platforms.map((p) => p.platform.name),
           steam: latestSteam
@@ -146,6 +147,22 @@ export class LibraryService {
         },
       };
     });
+  }
+
+  async getUserLikedGames(userId: string) {
+    const records = await this.prisma.gameLike.findMany({
+      where: { userId },
+      select: {
+        gameId: true,
+        game: { select: { steamAppId: true, igdbId: true } },
+      },
+    });
+
+    return records.map(({ gameId, game }) => ({
+      gameId,
+      steamAppId: game.steamAppId,
+      igdbId: game.igdbId,
+    }));
   }
 
   async setGameStatus(userId: string, gameIdOrSlug: string, status: LibraryStatus) {

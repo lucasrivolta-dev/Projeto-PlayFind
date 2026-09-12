@@ -74,6 +74,14 @@ try {
     assert.ok(Array.isArray(listBody.data));
     assert.ok(listBody.meta.total >= 1);
     assert.equal(listBody.meta.limit, 10);
+    for (const url of [
+      '/api/v1/games?page=abc',
+      '/api/v1/games?limit=1.5',
+      '/api/v1/feed?limit=abc',
+    ]) {
+      const invalid = await app.inject({ method: 'GET', url });
+      assert.equal(invalid.statusCode, 400);
+    }
 
     // 3. Busca por termo
     const searchRes = await app.inject({

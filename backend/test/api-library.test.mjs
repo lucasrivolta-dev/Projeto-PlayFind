@@ -35,7 +35,7 @@ try {
   }
 
   await verify('Fluxos completos de biblioteca do usuário persistem corretamente', async (tx) => {
-    const app = await buildApp({ prisma: tx });
+    const app = await buildApp({ prisma: tx, allowTestUsers: true });
     const repo = new PrismaGameRepository(tx);
     const token = randomUUID().slice(0, 8);
     const userAuthId = `test_player_${token}`;
@@ -72,6 +72,7 @@ try {
     assert.equal(emptyRes.statusCode, 200);
     const emptyBody = JSON.parse(emptyRes.payload);
     assert.equal(emptyBody.data.length, 0);
+    assert.deepEqual(emptyBody.likes, []);
 
     // 3. Adicionar "Quero jogar" (WANT_TO_PLAY) por slug
     const wantRes = await app.inject({
@@ -94,6 +95,7 @@ try {
     const listWantBody = JSON.parse(listWantRes.payload);
     assert.equal(listWantBody.data.length, 1);
     assert.equal(listWantBody.data[0].game.slug, game.slug);
+    assert.equal(listWantBody.data[0].game.steamAppId, 888123);
 
     // 5. Favoritar jogo
     const favRes = await app.inject({
@@ -126,6 +128,13 @@ try {
       payload: { rating: 7 },
     });
     assert.equal(invalidRateRes.statusCode, 400);
+    const fractionalRateRes = await app.inject({
+      method: 'POST',
+      url: `/api/v1/library/${game.slug}/rate`,
+      headers,
+      payload: { rating: 4.5 },
+    });
+    assert.equal(fractionalRateRes.statusCode, 400);
 
     // 8. Curtir e descurtir jogo (GameLike)
     const like1 = await app.inject({
@@ -135,6 +144,11 @@ try {
     });
     assert.equal(like1.statusCode, 200);
     assert.equal(JSON.parse(like1.payload).liked, true);
+    const likedLibrary = await app.inject({ method: 'GET', url: '/api/v1/library', headers });
+    assert.deepEqual(
+      JSON.parse(likedLibrary.payload).likes.map((entry) => entry.steamAppId),
+      [888123],
+    );
 
     const like2 = await app.inject({
       method: 'POST',
@@ -143,6 +157,8 @@ try {
     });
     assert.equal(like2.statusCode, 200);
     assert.equal(JSON.parse(like2.payload).liked, false);
+    const unlikedLibrary = await app.inject({ method: 'GET', url: '/api/v1/library', headers });
+    assert.deepEqual(JSON.parse(unlikedLibrary.payload).likes, []);
 
     // 9. Remover avaliação
     const delRateRes = await app.inject({
@@ -161,12 +177,38 @@ try {
     });
     assert.equal(delRes.statusCode, 200);
 
-    const finalRes = await app.inject({
-      method: 'GET',
-      url: '/api/v1/library',
+    // Curtidas independem da biblioteca: recarregar ainda deve mostrá-las.
+    const likeWithoutLibrary = await app.inject({
+      method: 'POST',
+      url: `/api/v1/library/${game.slug}/like`,
       headers,
     });
-    assert.equal(JSON.parse(finalRes.payload).data.length, 0);
+    assert.equal(JSON.parse(likeWithoutLibrary.payload).liked, true);
+    const likesOnlyRes = await app.inject({ method: 'GET', url: '/api/v1/library', headers });
+    const likesOnly = JSON.parse(likesOnlyRes.payload);
+    assert.equal(likesOnly.data.length, 0);
+    assert.deepEqual(
+      likesOnly.likes.map((entry) => entry.steamAppId),
+      [888123],
+    );
+
+    const igdbId = Number.parseInt(token.slice(0, 7), 16);
+    const igdbOnly = await tx.game.create({
+      data: { title: `IGDB Only ${token}`, slug: `igdb-only-${token}`, igdbId },
+    });
+    const igdbPut = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/library/${igdbId}`,
+      headers,
+      payload: { status: 'WANT_TO_PLAY' },
+    });
+    assert.equal(igdbPut.statusCode, 200);
+    const igdbLibrary = await app.inject({ method: 'GET', url: '/api/v1/library', headers });
+    const igdbEntry = JSON.parse(igdbLibrary.payload).data.find(
+      (entry) => entry.gameId === igdbOnly.id,
+    );
+    assert.equal(igdbEntry.game.steamAppId, null);
+    assert.equal(igdbEntry.game.igdbId, igdbId);
 
     await app.close();
   });

@@ -9,6 +9,7 @@ import type { PrismaDbClient } from './modules/games/prisma-game.repository.js';
 
 export interface BuildAppOptions {
   prisma?: PrismaDbClient;
+  allowTestUsers?: boolean;
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
@@ -17,7 +18,20 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
 
   await app.register(cors, {
-    origin: true,
+    // Permite o Flutter Web servido localmente; impede que sites externos
+    // façam requisições com x-user-id ao backend de desenvolvimento.
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      try {
+        const url = new URL(origin);
+        return callback(
+          null,
+          url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname),
+        );
+      } catch {
+        return callback(null, false);
+      }
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });
 
@@ -39,6 +53,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(libraryRoutes, {
     prefix: '/api/v1/library',
     service: libraryService,
+    allowTestUsers: options.allowTestUsers ?? false,
   });
 
   return app;

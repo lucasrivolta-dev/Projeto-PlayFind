@@ -4,6 +4,7 @@ import type { LibraryStatus } from '@prisma/client';
 
 export interface LibraryRoutesOptions {
   service: LibraryService;
+  allowTestUsers: boolean;
 }
 
 declare module 'fastify' {
@@ -13,20 +14,26 @@ declare module 'fastify' {
 }
 
 export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (fastify, opts) => {
-  const { service } = opts;
+  const { service, allowTestUsers } = opts;
 
   fastify.addHook('preHandler', async (request, reply) => {
-    const authHeader = request.headers.authorization;
-    const customUser = request.headers['x-user-id'] as string | undefined;
+    // Somente a identidade fixa de desenvolvimento é aceita. Bearer tokens
+    // ainda não são verificados e portanto não podem autenticar usuários.
+    const rawUser = request.headers['x-user-id'];
 
-    const rawUser =
-      customUser || (authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined);
-
-    if (!rawUser?.trim()) {
+    if (rawUser !== 'dev-user' && !allowTestUsers) {
       return reply.status(401).send({
         statusCode: 401,
         error: 'Unauthorized',
-        message: 'Usuário não autenticado. Forneça o cabeçalho Authorization ou x-user-id.',
+        message: 'Autenticação indisponível fora do modo local de desenvolvimento.',
+      });
+    }
+
+    if (typeof rawUser !== 'string' || !rawUser.trim()) {
+      return reply.status(401).send({
+        statusCode: 401,
+        error: 'Unauthorized',
+        message: 'Identidade de desenvolvimento ausente.',
       });
     }
 
@@ -60,9 +67,13 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (fa
       filters.rated = true;
     }
 
-    const items = await service.getUserLibrary(request.userId, filters);
+    const [items, likes] = await Promise.all([
+      service.getUserLibrary(request.userId, filters),
+      service.getUserLikedGames(request.userId),
+    ]);
     return reply.status(200).send({
       data: items,
+      likes,
       total: items.length,
     });
   });
@@ -138,7 +149,12 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (fa
     const { gameId } = request.params as { gameId: string };
     const body = request.body as { rating?: number; reviewText?: string };
 
-    if (typeof body?.rating !== 'number' || body.rating < 1 || body.rating > 5) {
+    if (
+      typeof body?.rating !== 'number' ||
+      !Number.isInteger(body.rating) ||
+      body.rating < 1 ||
+      body.rating > 5
+    ) {
       return reply.status(400).send({
         statusCode: 400,
         error: 'Bad Request',
@@ -147,12 +163,7 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (fa
     }
 
     try {
-      const result = await service.rateGame(
-        request.userId,
-        gameId,
-        Math.round(body.rating),
-        body.reviewText,
-      );
+      const result = await service.rateGame(request.userId, gameId, body.rating, body.reviewText);
       return reply.status(200).send(result);
     } catch (err: unknown) {
       if (err instanceof Error && err.message === 'GAME_NOT_FOUND') {
