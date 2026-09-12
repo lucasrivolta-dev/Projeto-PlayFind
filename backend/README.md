@@ -25,7 +25,7 @@ O servidor escuta somente `127.0.0.1:3333`. `GET /health` verifica se está ativ
 - `POST /api/v1/library/:gameId/like`: alterna curtida persistida.
 - `POST` e `DELETE /api/v1/library/:gameId/rate`: atribui ou remove nota. Atribuir nota implica `PLAYED`.
 
-As rotas da biblioteca usam temporariamente `x-user-id: dev-user`. Outros IDs e tokens Bearer sem verificação são rejeitados pelo servidor normal. Isso **não é autenticação segura**: qualquer processo local ainda pode enviar o header. Não publique a API nem use dados reais de usuários antes de integrar Firebase Admin e autorização. O Flutter reidrata status e curtidas por Steam ID ou IGDB ID; jogos sem ambos ainda não são representáveis pelo identificador numérico atual do cliente.
+Em desenvolvimento automatizado, `allowTestUsers: true` aceita explicitamente `x-user-id: dev-user`. No servidor normal, as rotas pessoais exigem `Authorization: Bearer <Firebase ID token>`; o token é validado pelo Firebase Admin e somente o `uid` verificado identifica o usuário. Configure `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL` e `FIREBASE_PRIVATE_KEY` no `.env` local. Nunca versione a chave privada nem use `x-user-id` no fluxo normal.
 
 ## Código e testes
 

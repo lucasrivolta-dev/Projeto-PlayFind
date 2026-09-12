@@ -1,10 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { LibraryService, LibraryFilters } from './library.service.js';
 import type { LibraryStatus } from '@prisma/client';
+import type { TokenVerifier } from '../../auth/firebase-auth.js';
 
 export interface LibraryRoutesOptions {
   service: LibraryService;
   allowTestUsers: boolean;
+  tokenVerifier?: TokenVerifier;
 }
 
 declare module 'fastify' {
@@ -14,31 +16,29 @@ declare module 'fastify' {
 }
 
 export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (fastify, opts) => {
-  const { service, allowTestUsers } = opts;
+  const { service, allowTestUsers, tokenVerifier } = opts;
 
   fastify.addHook('preHandler', async (request, reply) => {
-    // Somente a identidade fixa de desenvolvimento é aceita. Bearer tokens
-    // ainda não são verificados e portanto não podem autenticar usuários.
     const rawUser = request.headers['x-user-id'];
-
-    if (rawUser !== 'dev-user' && !allowTestUsers) {
-      return reply.status(401).send({
-        statusCode: 401,
-        error: 'Unauthorized',
-        message: 'Autenticação indisponível fora do modo local de desenvolvimento.',
-      });
+    const authorization = request.headers.authorization;
+    let identity: string | undefined;
+    if (authorization?.startsWith('Bearer ') && tokenVerifier) {
+      try {
+        identity = (await tokenVerifier.verify(authorization.slice(7).trim())).uid;
+      } catch {
+        return reply.status(401).send({ statusCode: 401, error: 'Unauthorized', message: 'Token inválido.' });
+      }
+    } else if (allowTestUsers && rawUser === 'dev-user') {
+      identity = 'dev-user';
+    } else {
+      return reply.status(401).send({ statusCode: 401, error: 'Unauthorized', message: 'Autenticação obrigatória.' });
     }
 
-    if (typeof rawUser !== 'string' || !rawUser.trim()) {
-      return reply.status(401).send({
-        statusCode: 401,
-        error: 'Unauthorized',
-        message: 'Identidade de desenvolvimento ausente.',
-      });
+    if (!identity) {
+      return reply.status(401).send({ statusCode: 401, error: 'Unauthorized', message: 'Identidade ausente.' });
     }
-
     try {
-      const userId = await service.ensureUser(rawUser.trim());
+      const userId = await service.ensureUser(identity);
       request.userId = userId;
     } catch {
       return reply.status(401).send({

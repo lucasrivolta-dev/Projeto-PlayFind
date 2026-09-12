@@ -35,10 +35,19 @@ try {
   }
 
   await verify('Fluxos completos de biblioteca do usuário persistem corretamente', async (tx) => {
-    const app = await buildApp({ prisma: tx, allowTestUsers: true });
-    const repo = new PrismaGameRepository(tx);
     const token = randomUUID().slice(0, 8);
-    const userAuthId = `test_player_${token}`;
+    const fakeToken = `fake-test-token-${token}`;
+    const testUid = `test_player_${token}`;
+    const app = await buildApp({
+      prisma: tx,
+      tokenVerifier: {
+        async verify(value) {
+          if (value !== fakeToken) throw new Error('INVALID_TEST_TOKEN');
+          return { uid: testUid };
+        },
+      },
+    });
+    const repo = new PrismaGameRepository(tx);
 
     const game = await repo.upsertByExternalId({
       title: `Library Game Test ${token}`,
@@ -52,9 +61,7 @@ try {
       steamAppId: 888123,
     });
 
-    const headers = {
-      'x-user-id': userAuthId,
-    };
+    const headers = { authorization: `Bearer ${fakeToken}` };
 
     // 1. Recusa sem autenticação
     const unauthRes = await app.inject({

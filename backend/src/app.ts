@@ -6,10 +6,12 @@ import { gameRoutes } from './modules/games/game.routes.js';
 import { LibraryService } from './modules/library/library.service.js';
 import { libraryRoutes } from './modules/library/library.routes.js';
 import type { PrismaDbClient } from './modules/games/prisma-game.repository.js';
+import type { TokenVerifier } from './auth/firebase-auth.js';
 
 export interface BuildAppOptions {
   prisma?: PrismaDbClient;
   allowTestUsers?: boolean;
+  tokenVerifier?: TokenVerifier;
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
@@ -54,6 +56,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     prefix: '/api/v1/library',
     service: libraryService,
     allowTestUsers: options.allowTestUsers ?? false,
+    tokenVerifier: options.tokenVerifier,
   });
 
   return app;
