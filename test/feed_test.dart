@@ -41,7 +41,7 @@ void main() {
     controller.toggleSave(id);
     controller.markPlayed(id);
     expect(controller.liked, contains(id));
-    expect(controller.saved, contains(id));
+    expect(controller.saved, isEmpty);
     expect(controller.played, contains(id));
     controller.addComment(id, 'Minha próxima descoberta.');
     expect(controller.commentsFor(controller.items.first).last.text,

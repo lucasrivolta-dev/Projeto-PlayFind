@@ -22,6 +22,7 @@ class LibraryStore extends ChangeNotifier {
   final Map<int, int> ratings = {};
   final Set<int> _pendingSaved = {};
   final Map<int, bool> _queuedSavedActions = {};
+  final Set<int> _pendingPlayed = {};
 
   // Stream de erros para feedback discreto na UI.
   final _errorController = StreamController<String>.broadcast();
@@ -71,13 +72,24 @@ class LibraryStore extends ChangeNotifier {
   }
 
   void markPlayed(int id) {
+    if (played.contains(id) || !_pendingPlayed.add(id)) return;
+    final wasSaved = saved.remove(id);
     played.add(id);
     notifyListeners();
-    _repo.setStatus(id, 'PLAYED').catchError((_) {
+    unawaited(_persistPlayed(id, wasSaved));
+  }
+
+  Future<void> _persistPlayed(int id, bool wasSaved) async {
+    try {
+      await _repo.setStatus(id, 'PLAYED');
+    } catch (_) {
       played.remove(id);
+      if (wasSaved) saved.add(id);
       notifyListeners();
       _emitError('Não foi possível marcar como jogado. Tente novamente.');
-    });
+    } finally {
+      _pendingPlayed.remove(id);
+    }
   }
 
   void togglePlayed(int id) {

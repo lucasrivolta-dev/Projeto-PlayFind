@@ -16,6 +16,7 @@ import 'features/library/library_screen.dart';
 import 'features/profile/profile_controller.dart';
 import 'features/profile/profile_repository.dart';
 import 'features/profile/profile_screen.dart';
+import 'config/api_config.dart';
 
 void main() => runApp(const NextPlayApp());
 
@@ -53,9 +54,9 @@ class _NextPlayAppState extends State<NextPlayApp> {
   }
 
   /// Chamado quando o usuario faz login ou logout.
-  /// Atualiza o userId do repositorio e recarrega a biblioteca do servidor.
+  /// Recarrega a biblioteca do usuario temporario de desenvolvimento.
   void _onAuthChanged() {
-    _libraryRepo.setUserId(auth.userId);
+    _libraryRepo.setUserId(ApiConfig.devUserId);
     if (auth.isAuthenticated) {
       // Login: carrega biblioteca do novo usuario (substitui estado anterior).
       _libraryRepo.loadInto(library);
