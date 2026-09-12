@@ -13,3 +13,4 @@ node_modules/
 .pnpm-store/
 backend/dist/
 flutter_*.log
+backend-dev.log
