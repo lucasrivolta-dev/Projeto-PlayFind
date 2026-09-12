@@ -28,7 +28,8 @@ class FeedItem {
 
 class FeedController extends ChangeNotifier {
   FeedController(this.repository, {LibraryStore? library})
-      : library = library ?? LibraryStore(), _ownsLibrary = library == null {
+      : library = library ?? LibraryStore(),
+        _ownsLibrary = library == null {
     this.library.addListener(_emit);
   }
   final LibraryStore library;
@@ -42,6 +43,20 @@ class FeedController extends ChangeNotifier {
   Set<int> get saved => library.saved;
   Set<int> get played => library.played;
   final Map<int, List<FeedComment>> addedComments = {};
+  final Map<int, Set<FeedComment>> _likedComments = {};
+
+  bool isCommentLiked(int gameId, FeedComment comment) =>
+      _likedComments[gameId]?.contains(comment) ?? false;
+
+  int commentLikeCount(int gameId, FeedComment comment) =>
+      comment.likes + (isCommentLiked(gameId, comment) ? 1 : 0);
+
+  void toggleCommentLike(int gameId, FeedComment comment) {
+    final likes = _likedComments.putIfAbsent(gameId, () => {});
+    if (!likes.add(comment)) likes.remove(comment);
+    _emit();
+  }
+
   bool _disposed = false;
 
   void _emit() {
@@ -90,7 +105,7 @@ class FeedController extends ChangeNotifier {
   }
 
   void setCurrent(int index) {
-    current = index.clamp(0, items.length - 1);
+    current = items.isEmpty ? 0 : index.clamp(0, items.length - 1);
     _emit();
   }
 

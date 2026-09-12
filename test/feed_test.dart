@@ -3,6 +3,34 @@ import 'package:nextplay/features/explore/explore_data.dart';
 import 'package:nextplay/features/feed/feed_controller.dart';
 
 void main() {
+  test('Empty feed accepts page changes', () async {
+    final controller = FeedController(() async => []);
+    addTearDown(controller.dispose);
+    await controller.load();
+    controller.setCurrent(2);
+    expect(controller.current, 0);
+  });
+
+  test('Comment likes toggle their count and remain separate per game',
+      () async {
+    final controller = FeedController(DemoExploreRepository().load);
+    addTearDown(controller.dispose);
+    await controller.load();
+    final item = controller.items.first;
+    final comment = item.comments.first;
+    controller.toggleCommentLike(item.game.id, comment);
+    expect(
+        controller.commentLikeCount(item.game.id, comment), comment.likes + 1);
+    expect(controller.isCommentLiked(controller.items.last.game.id, comment),
+        isFalse);
+    expect(
+        controller.isCommentLiked(
+            item.game.id, controller.commentsFor(item).first),
+        isTrue);
+    controller.toggleCommentLike(item.game.id, comment);
+    expect(controller.commentLikeCount(item.game.id, comment), comment.likes);
+  });
+
   test('Feed loads editorial items and tracks actions per game', () async {
     final controller = FeedController(DemoExploreRepository().load);
     addTearDown(controller.dispose);

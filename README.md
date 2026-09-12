@@ -97,7 +97,7 @@ Tela completa baseada em `Detalhes do Jogo.png` do ZIP fornecido. Feed, Explorar
 
 O repositório possui duas áreas independentes:
 
-* **Frontend Flutter:** `lib/`, `android/`, `web/`, `assets/` e `test/`. O arquivo `pubspec.yaml` permanece na raiz porque essa é a estrutura exigida pelo Flutter e preserva os comandos atuais.
+* **Frontend Flutter:** `lib/`, `android/`, `web/`, `assets/` e `test/`. O arquivo `pubspec.yaml` permanece na raiz para preservar os comandos atuais; uma migração futura para uma subpasta é possível.
 * **Backend Node/TypeScript:** `backend/src/`, `backend/prisma/`, `backend/package.json` e `backend/.env.example`. O backend concentra API, autenticação validada, integrações IGDB/Steam, Prisma e PostgreSQL.
 
 Cada lado possui seu próprio README. O frontend não contém credenciais ou chamadas das APIs externas; o backend não deve importar widgets Flutter.

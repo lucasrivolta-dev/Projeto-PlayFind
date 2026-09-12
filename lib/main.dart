@@ -1,4 +1,4 @@
-import 'features/game_detail/game_detail_screen.dart';
+﻿import 'features/game_detail/game_detail_screen.dart';
 import 'package:flutter/material.dart';
 import 'design_system/theme.dart';
 import 'design_system/components.dart';
@@ -10,6 +10,7 @@ import 'features/feed/feed_screen.dart';
 import 'features/forum/forum_controller.dart';
 import 'features/forum/forum_screen.dart';
 import 'features/auth/auth_controller.dart';
+import 'features/library/library_repository.dart';
 import 'features/library/library_store.dart';
 import 'features/library/library_screen.dart';
 import 'features/profile/profile_controller.dart';
@@ -19,24 +20,58 @@ import 'features/profile/profile_screen.dart';
 void main() => runApp(const NextPlayApp());
 
 class NextPlayApp extends StatefulWidget {
-  const NextPlayApp({super.key});
+  const NextPlayApp({super.key, this.exploreRepository});
+  final ExploreRepository? exploreRepository;
 
   @override
   State<NextPlayApp> createState() => _NextPlayAppState();
 }
 
 class _NextPlayAppState extends State<NextPlayApp> {
-  final library = LibraryStore();
-  final auth = AuthController();
-  late final ProfileController controller =
-      ProfileController(DemoProfileRepository())..load();
-  late final ExploreController explore =
-      ExploreController(DemoExploreRepository(), library: library)..load();
-  late final FeedController feed =
-      FeedController(DemoExploreRepository().load, library: library)..load();
+  late final ApiLibraryRepository _libraryRepo;
+  late final LibraryStore library;
+  late final AuthController auth;
+  late final ExploreRepository _repo;
+  late final ProfileController controller;
+  late final ExploreController explore;
+  late final FeedController feed;
+
+  @override
+  void initState() {
+    super.initState();
+    _libraryRepo = ApiLibraryRepository();
+    library = LibraryStore(repo: _libraryRepo);
+    auth = AuthController();
+    _repo = widget.exploreRepository ?? ApiExploreRepository();
+    controller = ProfileController(DemoProfileRepository())..load();
+    explore = ExploreController(_repo, library: library)..load();
+    feed = FeedController(_repo.load, library: library)..load();
+    // Carrega estado da biblioteca para o usuario inicial (dev-user).
+    _libraryRepo.loadInto(library);
+    // Recarrega biblioteca sempre que o estado de autenticacao mudar.
+    auth.addListener(_onAuthChanged);
+  }
+
+  /// Chamado quando o usuario faz login ou logout.
+  /// Atualiza o userId do repositorio e recarrega a biblioteca do servidor.
+  void _onAuthChanged() {
+    _libraryRepo.setUserId(auth.userId);
+    if (auth.isAuthenticated) {
+      // Login: carrega biblioteca do novo usuario (substitui estado anterior).
+      _libraryRepo.loadInto(library);
+    } else {
+      // Logout: limpa estado em memoria.
+      library.loadFromApi([]);
+    }
+  }
 
   @override
   void dispose() {
+    auth.removeListener(_onAuthChanged);
+    _libraryRepo.dispose();
+    if (_repo is ApiExploreRepository) {
+      _repo.dispose();
+    }
     controller.dispose();
     explore.dispose();
     feed.dispose();

@@ -117,7 +117,8 @@ void main() {
     await tester.ensureVisible(find.byType(ExploreGameCard));
     await tester.tap(find.byType(ExploreGameCard));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Quero jogar'), 250, scrollable: find.byType(Scrollable).first);
+    await tester.scrollUntilVisible(find.text('Quero jogar'), 250,
+        scrollable: find.byType(Scrollable).first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Quero jogar'));
     await tester.pumpAndSettle();
@@ -134,4 +135,3 @@ void main() {
     expect(find.text('1 jogo encontrado'), findsOneWidget);
   });
 }
-

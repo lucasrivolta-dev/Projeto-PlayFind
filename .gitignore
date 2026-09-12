@@ -9,4 +9,7 @@ coverage/
 .tools/
 .env
 backend/.env
+node_modules/
+.pnpm-store/
+backend/dist/
 flutter_*.log

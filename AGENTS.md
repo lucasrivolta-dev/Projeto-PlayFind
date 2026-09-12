@@ -1284,3 +1284,24 @@ O frontend Flutter fica nas pastas `lib/`, `android/`, `web/`, `assets/` e `test
 
 O backend fica exclusivamente em `backend/`, com código TypeScript em `backend/src/`, schema e migrations em `backend/prisma/`, dependências em `backend/package.json` e configuração segura em `backend/.env.example`. Não misturar imports, credenciais, regras ou dependências entre as duas áreas.
 
+## Manutenção do protótipo
+
+- `lib/features/feed/feed_comments_sheet.dart` concentra o painel de comentários e descarta seus recursos ao fechar. Curtidas e contagens permanecem no `FeedController` durante a sessão.
+- Abrir os comentários é público. Curtir, responder e enviar exigem autenticação; cancelar o login preserva o rascunho.
+- O contrato `backend/src/modules/games/game.repository.ts` exige o ID persistido nos candidatos; nunca usar título ou slug como ID do banco.
+- O backend possui lockfile pnpm e comandos `typecheck`, `test`, `format` e `format:check`. Dependências e arquivos de `dist/` não são versionados.
+- A integração real com Firebase, a persistência Prisma e a sincronização externa continuam pendentes. Testes locais não comprovam essas integrações.
+
+## Primeira migration aplicada
+
+`backend/prisma/migrations/20260912000100_initial_schema/migration.sql` foi
+aplicada ao PostgreSQL local nextplay. O banco contém a estrutura inicial e
+relações explícitas das curtidas, seguidores e pesquisas. IDs relacionados
+usam UUID compatível. Notas são de 1 a 5 e exigem PLAYED; seguir a si mesmo
+é proibido por CHECK, assim como valores inválidos de ofertas e jogadores.
+Esses CHECKs são mantidos no SQL. Não editar migrations já aplicadas.
+
+`pnpm.cmd run test:db`, executado em backend, testa o PostgreSQL local com
+transações revertidas. A API e o GameRepository Prisma ainda estão pendentes;
+a existência de tabelas não significa que o aplicativo já persiste seus dados.
+
