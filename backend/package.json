@@ -16,7 +16,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "sync:games": "tsx src/scripts/sync-games.ts",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
