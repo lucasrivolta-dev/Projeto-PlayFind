@@ -31,23 +31,29 @@ class _AuthScreenState extends State<AuthScreen>
     if (!form.currentState!.validate()) return;
     setState(() => busy = true);
     final ok = await widget.controller
-        .signIn(email: email.text, password: password.text);
+        .signIn(email: email.text, password: password.text, create: create);
     if (!mounted) return;
     setState(() => busy = false);
     if (ok) {
       Navigator.pop(context, true);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(widget.controller.errorMessage ??
               'Confira seu e-mail e use pelo menos 6 caracteres na senha.')));
     }
   }
 
   Future<void> provider(String value) async {
     setState(() => busy = true);
-    await widget.controller.signInWithProvider(value);
-    if (mounted) {
+    final ok = await widget.controller.signInWithProvider(value);
+    if (mounted && ok) {
       Navigator.pop(context, true);
+    } else if (mounted) {
+      setState(() => busy = false);
+      final message = widget.controller.errorMessage;
+      if (message != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      }
     }
   }
 

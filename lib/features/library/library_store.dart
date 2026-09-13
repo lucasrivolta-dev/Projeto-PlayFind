@@ -253,6 +253,23 @@ class LibraryStore extends ChangeNotifier {
 
   Set<int> get all => {...saved, ...played, ...favorites, ...ratings.keys};
 
+  /// Removes only the in-memory private state when the authenticated user changes.
+  /// Persisted data remains untouched in the backend.
+  void clearPrivateState() {
+    saved.clear();
+    played.clear();
+    favorites.clear();
+    liked.clear();
+    ratings.clear();
+    _pendingLikes.clear();
+    _pendingFavorites.clear();
+    _pendingRatings.clear();
+    _pendingSaved.clear();
+    _queuedSavedActions.clear();
+    _pendingPlayed.clear();
+    notifyListeners();
+  }
+
   /// Inicializa o estado a partir de uma lista de itens JSON retornada
   /// por `GET /api/v1/library`. Substitui qualquer estado anterior.
   void loadFromApi(List<Map<String, dynamic>> items,

@@ -163,4 +163,16 @@ void main() {
     expect(store.played, {42});
     expect(store.ratings[42], 5);
   });
+
+  test('logout limpa apenas o estado privado em memória', () {
+    final store = LibraryStore();
+    addTearDown(store.dispose);
+    store.saved.add(1);
+    store.played.add(2);
+    store.favorites.add(3);
+    store.liked.add(4);
+    store.ratings[5] = 4;
+    store.clearPrivateState();
+    expect(store.all, isEmpty);
+  });
 }

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nextplay/design_system/theme.dart';
 import 'package:nextplay/features/auth/auth_controller.dart';
 import 'package:nextplay/features/auth/auth_screen.dart';
+import 'package:nextplay/features/auth/auth_repository.dart';
 import 'package:nextplay/features/explore/explore_data.dart';
 import 'package:nextplay/features/feed/feed_controller.dart';
 import 'package:nextplay/features/feed/feed_screen.dart';
@@ -10,7 +11,7 @@ import 'package:nextplay/features/feed/feed_screen.dart';
 void main() {
   testWidgets('Guest reads comments; only interactions request authentication',
       (tester) async {
-    final auth = AuthController();
+    final auth = AuthController(repository: FakeAuthRepository());
     final feed = FeedController(DemoExploreRepository().load);
     addTearDown(auth.dispose);
     addTearDown(feed.dispose);

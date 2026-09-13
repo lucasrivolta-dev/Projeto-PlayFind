@@ -64,11 +64,13 @@ class ApiLibraryRepository implements LibraryRepository {
     String? baseUrl,
     String? userId,
     http.Client? client,
+    Future<String?> Function()? tokenProvider,
     this.timeout = const Duration(seconds: 4),
   })  : baseUrl = baseUrl ?? ApiConfig.baseUrl,
         _userId = userId ?? ApiConfig.devUserId,
         _client = client ?? http.Client(),
-        _ownsClient = client == null;
+        _ownsClient = client == null,
+        _tokenProvider = tokenProvider;
 
   final String baseUrl;
   final String _userId;
@@ -79,11 +81,16 @@ class ApiLibraryRepository implements LibraryRepository {
   final http.Client _client;
   final bool _ownsClient;
   final Duration timeout;
+  final Future<String?> Function()? _tokenProvider;
 
-  Map<String, String> get _headers => {
-        'Content-Type': 'application/json',
-        'x-user-id': _userId,
-      };
+  Future<Map<String, String>> _headers({required bool hasBody}) async {
+    final token = await _tokenProvider?.call();
+    return {
+      if (hasBody) 'Content-Type': 'application/json',
+      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token'
+      else if (_tokenProvider == null) 'x-user-id': _userId,
+    };
+  }
 
   String _id(int gameId) => gameId.toString();
 
@@ -94,7 +101,7 @@ class ApiLibraryRepository implements LibraryRepository {
     try {
       final uri = Uri.parse('$baseUrl/library');
       final response =
-          await _client.get(uri, headers: _headers).timeout(timeout);
+          await _client.get(uri, headers: await _headers(hasBody: false)).timeout(timeout);
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body) as Map<String, dynamic>;
@@ -118,7 +125,7 @@ class ApiLibraryRepository implements LibraryRepository {
   Future<void> setStatus(int gameId, String status) async {
     final uri = Uri.parse('$baseUrl/library/${_id(gameId)}');
     final response = await _client
-        .put(uri, headers: _headers, body: jsonEncode({'status': status}))
+        .put(uri, headers: await _headers(hasBody: true), body: jsonEncode({'status': status}))
         .timeout(timeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('Library status update failed: ${response.statusCode}');
@@ -128,7 +135,7 @@ class ApiLibraryRepository implements LibraryRepository {
   @override
   Future<void> remove(int gameId) async {
     final uri = Uri.parse('$baseUrl/library/${_id(gameId)}');
-    final response = await _client.delete(uri, headers: _headers).timeout(timeout);
+    final response = await _client.delete(uri, headers: await _headers(hasBody: false)).timeout(timeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('Library removal failed: ${response.statusCode}');
     }
@@ -139,7 +146,7 @@ class ApiLibraryRepository implements LibraryRepository {
     final uri = Uri.parse('$baseUrl/library/${_id(gameId)}/favorite');
     final response = await _client
         .post(uri,
-            headers: _headers,
+            headers: await _headers(hasBody: true),
             body: jsonEncode({'isFavorite': isFavorite ?? true}))
         .timeout(timeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -150,7 +157,7 @@ class ApiLibraryRepository implements LibraryRepository {
   @override
   Future<bool?> toggleLike(int gameId) async {
     final uri = Uri.parse('$baseUrl/library/${_id(gameId)}/like');
-    final response = await _client.post(uri, headers: _headers).timeout(timeout);
+    final response = await _client.post(uri, headers: await _headers(hasBody: false)).timeout(timeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('Game like update failed: ${response.statusCode}');
     }
@@ -165,7 +172,7 @@ class ApiLibraryRepository implements LibraryRepository {
   Future<void> rate(int gameId, int rating) async {
     final uri = Uri.parse('$baseUrl/library/${_id(gameId)}/rate');
     final response = await _client
-        .post(uri, headers: _headers, body: jsonEncode({'rating': rating}))
+        .post(uri, headers: await _headers(hasBody: true), body: jsonEncode({'rating': rating}))
         .timeout(timeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('Library rating update failed: ${response.statusCode}');
@@ -176,7 +183,7 @@ class ApiLibraryRepository implements LibraryRepository {
   Future<void> removeRating(int gameId) async {
     final uri = Uri.parse('$baseUrl/library/${_id(gameId)}/rate');
     final response =
-        await _client.delete(uri, headers: _headers).timeout(timeout);
+        await _client.delete(uri, headers: await _headers(hasBody: false)).timeout(timeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('Library rating removal failed: ${response.statusCode}');
     }

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 
 import 'features/game_detail/game_detail_screen.dart';
 import 'package:flutter/material.dart';
@@ -19,7 +21,11 @@ import 'features/profile/profile_controller.dart';
 import 'features/profile/profile_repository.dart';
 import 'features/profile/profile_screen.dart';
 
-void main() => runApp(const NextPlayApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  runApp(const NextPlayApp());
+}
 
 class NextPlayApp extends StatefulWidget {
   const NextPlayApp({super.key, this.exploreRepository, this.libraryRepository, this.authController});
@@ -43,17 +49,31 @@ class _NextPlayAppState extends State<NextPlayApp> {
   @override
   void initState() {
     super.initState();
-    _libraryRepo = ApiLibraryRepository();
-    library = LibraryStore(repo: widget.libraryRepository ?? _libraryRepo);
     auth = widget.authController ?? AuthController();
+    auth.addListener(_onAuthChanged);
+    _libraryRepo = ApiLibraryRepository(tokenProvider: auth.getIdToken);
+    library = LibraryStore(repo: widget.libraryRepository ?? _libraryRepo);
     _repo = widget.exploreRepository ?? ApiExploreRepository();
     controller = ProfileController(DemoProfileRepository())..load();
     explore = ExploreController(_repo, library: library)..load();
     feed = FeedController(_repo.load, library: library)..load();
-    // Carrega estado da biblioteca para o usuario inicial (dev-user).
-    unawaited((widget.libraryRepository ?? _libraryRepo)
-        .loadInto(library)
-        .catchError((Object _) {}));
+    // O primeiro carregamento acontece somente quando authStateChanges
+    // confirma uma identidade autenticada.
+    // Quando a sessão já foi restaurada antes da criação do shell, não há
+    // uma nova transição para disparar o listener; inicialize explicitamente.
+    if (auth.isAuthenticated) _onAuthChanged();
+  }
+
+  void _onAuthChanged() {
+    if (auth.isAuthenticated) {
+      unawaited((widget.libraryRepository ?? _libraryRepo)
+          .loadInto(library)
+          .catchError((Object error) {
+        debugPrint('Falha ao carregar biblioteca autenticada: $error');
+      }));
+    } else {
+      library.clearPrivateState();
+    }
   }
 
   @override
@@ -66,6 +86,7 @@ class _NextPlayAppState extends State<NextPlayApp> {
     explore.dispose();
     feed.dispose();
     library.dispose();
+    auth.removeListener(_onAuthChanged);
     auth.dispose();
     super.dispose();
   }
@@ -125,6 +146,7 @@ class _AppShellState extends State<_AppShell> {
                     ProfileScreen(
                         controller: widget.profile,
                         embedded: true,
+                        auth: widget.auth,
                         extraSaved: widget.explore.saved.length),
                     LibraryScreen(
                         controller: widget.explore,

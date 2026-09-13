@@ -5,16 +5,19 @@ import '../../design_system/theme.dart';
 import 'profile_controller.dart';
 import 'profile_models.dart';
 import 'profile_widgets.dart';
+import '../auth/auth_controller.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen(
       {super.key,
       required this.controller,
       this.embedded = false,
-      this.extraSaved = 0});
+      this.extraSaved = 0,
+      this.auth});
   final ProfileController controller;
   final bool embedded;
   final int extraSaved;
+  final AuthController? auth;
 
   void _message(BuildContext context, String text) {
     ScaffoldMessenger.of(context)
@@ -137,6 +140,18 @@ class ProfileScreen extends StatelessWidget {
                                   onPressed: () => _share(context, profile),
                                   icon: const Icon(Icons.ios_share_outlined,
                                       size: 20)),
+                              if (auth?.isAuthenticated == true)
+                                IconButton(
+                                    tooltip: 'Sair',
+                                    onPressed: () async {
+                                      final authController = auth;
+                                      if (authController == null) return;
+                                      await authController.signOut();
+                                      if (context.mounted) {
+                                        _message(context, 'Você saiu da conta.');
+                                      }
+                                    },
+                                    icon: const Icon(Icons.logout, size: 20)),
                               IconButton(
                                   tooltip: 'Sobre este perfil',
                                   onPressed: () => showAppSheet<void>(

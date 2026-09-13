@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nextplay/design_system/components.dart';
 import 'package:nextplay/design_system/theme.dart';
 import 'package:nextplay/features/auth/auth_controller.dart';
+import 'package:nextplay/features/auth/auth_repository.dart';
 import 'package:nextplay/features/explore/explore_controller.dart';
 import 'package:nextplay/features/explore/explore_data.dart';
 import 'package:nextplay/features/explore/explore_screen.dart';
@@ -190,7 +191,7 @@ void main() {
   testWidgets(
     'Explore search, saving and Profile navigation share session state',
     (tester) async {
-      final auth = AuthController();
+      final auth = AuthController(repository: FakeAuthRepository());
       await auth.signInWithProvider('Google');
       await tester.pumpWidget(
         NextPlayApp(

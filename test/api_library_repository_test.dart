@@ -338,6 +338,30 @@ void main() {
       await expectLater(repo.removeRating(1), completes);
     });
 
+    test('requisições autenticadas usam Bearer e só enviam Content-Type com body', () async {
+      final requests = <http.Request>[];
+      final repo = ApiLibraryRepository(
+        client: MockClient((request) async {
+          requests.add(request);
+          return http.Response(request.url.path.endsWith('/like') ? jsonEncode({'liked': true}) : jsonEncode({'data': [], 'likes': [], 'total': 0}), 200);
+        }),
+        tokenProvider: () async => 'fake-token',
+      );
+      await repo.loadInto(LibraryStore());
+      await repo.toggleLike(1);
+      await repo.remove(1);
+      await repo.removeRating(1);
+      await repo.setStatus(1, 'PLAYED');
+      for (final request in requests.take(4)) {
+        expect(request.headers['authorization'], 'Bearer fake-token');
+        expect(request.headers.containsKey('x-user-id'), isFalse);
+        expect(request.headers['content-type'], isNull);
+      }
+      expect(requests.last.headers['authorization'], 'Bearer fake-token');
+      expect(requests.last.headers.containsKey('x-user-id'), isFalse);
+      expect(requests.last.headers['content-type'], 'application/json');
+    });
+
     test('LibraryStore.loadFromApi: ignora jogos sem steamAppId nem igdbId', () {
       final store = LibraryStore();
       store.loadFromApi([
