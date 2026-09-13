@@ -8,6 +8,10 @@ import { enrichWithSteam } from '../modules/integrations/steam/steam.mapper.js';
 import { PrismaGameRepository } from '../modules/games/prisma-game.repository.js';
 import { GameSyncService } from '../modules/sync/game-sync.service.js';
 import type { NormalizedGame } from '../modules/games/normalized-game.js';
+import {
+  DEFAULT_IGDB_SYNC_QUERY,
+  ensureVideoField,
+} from '../modules/integrations/igdb/igdb-query.js';
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -18,9 +22,7 @@ const required = (name: string) => {
   return value;
 };
 
-const query =
-  process.env.IGDB_SYNC_QUERY ??
-  'fields name,slug,summary,cover.url,screenshots.url,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,total_rating; where version_parent = null; limit 50;';
+const query = ensureVideoField(process.env.IGDB_SYNC_QUERY ?? DEFAULT_IGDB_SYNC_QUERY);
 
 const client = new IgdbClient(required('IGDB_CLIENT_ID'), required('IGDB_CLIENT_SECRET'));
 const rawGames = (await client.search(query)) as IgdbGameDto[];
@@ -36,15 +38,22 @@ try {
   const steamKey = process.env.STEAM_API_KEY;
   let steamEnricher: ((game: NormalizedGame) => Promise<NormalizedGame | undefined>) | undefined;
 
-  if (steamKey) {
-    const steamClient = new SteamClient(steamKey);
+  // A Steam API key is only needed for the fallback app-list lookup. Known
+  // Steam IDs from IGDB can still be enriched through the public details API.
+  if (steamKey || games.some((game) => game.steamAppId !== undefined)) {
+    const steamClient = new SteamClient(steamKey ?? '');
     steamEnricher = async (game: NormalizedGame) => {
       try {
-        const appId = await steamClient.findByName(game.title);
+        const appId =
+          game.steamAppId ?? (steamKey ? await steamClient.findByName(game.title) : undefined);
         if (!appId) return game;
         const details = await steamClient.details(appId);
         return enrichWithSteam(game, appId, details);
-      } catch {
+      } catch (error) {
+        console.warn(
+          `Steam: não foi possível enriquecer "${game.title}".`,
+          error instanceof Error ? error.message : error,
+        );
         return game;
       }
     };

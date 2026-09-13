@@ -4,6 +4,8 @@ export interface IgdbGameDto {
   slug?: string;
   summary?: string;
   rating?: number;
+  total_rating?: number;
+  popularity?: number;
   first_release_date?: number;
   cover?: {
     url?: string;
@@ -19,6 +21,16 @@ export interface IgdbGameDto {
   }[];
   platforms?: {
     name: string;
+  }[];
+  videos?: {
+    video_id?: string;
+    name?: string;
+  }[];
+  external_games?: {
+    uid?: string | number;
+    external_game_source?: {
+      name?: string;
+    };
   }[];
   involved_companies?: {
     developer?: boolean;
