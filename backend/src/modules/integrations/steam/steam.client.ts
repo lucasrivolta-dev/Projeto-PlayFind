@@ -1,6 +1,42 @@
 import type { SteamAppDetailsDto } from './steam.types.js';
 export class SteamClient {
-  constructor(private readonly apiKey: string, private readonly fetcher = fetch) {}
-  async details(appId: number): Promise<SteamAppDetailsDto | undefined> { const response = await this.fetcher(`https://store.steampowered.com/api/appdetails?appids=${appId}&cc=br&l=english`); if (response.status === 404) return undefined; if (!response.ok) throw new Error(`Steam request failed (${response.status})`); const body = (await response.json()) as Record<string, SteamAppDetailsDto>; return body[String(appId)]; }
-  async findByName(name: string): Promise<number | undefined> { if (!this.apiKey) return undefined; const response = await this.fetcher(`https://api.steampowered.com/ISteamApps/GetAppList/v2/?key=${encodeURIComponent(this.apiKey)}`); if (!response.ok) throw new Error(`Steam app list failed (${response.status})`); const body = (await response.json()) as { applist?: { apps?: { appid: number; name: string }[] } }; const normalized = name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); return body.applist?.apps?.find((app) => app.name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() === normalized)?.appid; }
+  constructor(
+    private readonly apiKey: string,
+    private readonly fetcher = fetch,
+  ) {}
+  async details(appId: number): Promise<SteamAppDetailsDto | undefined> {
+    const response = await this.fetcher(
+      `https://store.steampowered.com/api/appdetails?appids=${appId}&cc=br&l=english`,
+    );
+    if (response.status === 404) return undefined;
+    if (!response.ok) throw new Error(`Steam request failed (${response.status})`);
+    const body = (await response.json()) as Record<string, SteamAppDetailsDto>;
+    return body[String(appId)];
+  }
+  async findByName(name: string): Promise<number | undefined> {
+    if (!this.apiKey) return undefined;
+    const response = await this.fetcher(
+      `https://api.steampowered.com/ISteamApps/GetAppList/v2/?key=${encodeURIComponent(this.apiKey)}`,
+    );
+    if (!response.ok) throw new Error(`Steam app list failed (${response.status})`);
+    const body = (await response.json()) as {
+      applist?: {
+        apps?: {
+          appid: number;
+          name: string;
+        }[];
+      };
+    };
+    const normalized = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+    return body.applist?.apps?.find(
+      (app) =>
+        app.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, ' ')
+          .trim() === normalized,
+    )?.appid;
+  }
 }

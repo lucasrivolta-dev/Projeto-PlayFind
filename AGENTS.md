@@ -1272,7 +1272,7 @@ O diretório `backend/` contém a base da integração automática de catálogo.
 
 Os clientes, tipos e mappers ficam separados em `backend/src/modules/integrations/`. As respostas externas são transformadas em `NormalizedGame` antes de chegar ao domínio. `backend/src/modules/sync/game-matcher.service.ts` associa fontes apenas quando nome normalizado, lançamento, desenvolvedora, publisher e plataformas atingem um limite conservador; IDs externos diferentes não justificam duplicar um `Game` nem unir remakes ou edições sem confiança.
 
-`backend/src/modules/sync/game-sync.service.ts` coordena importação, atualização, enriquecimento Steam, matching e registro de sincronização por meio de um repositório. O script `backend/src/scripts/sync-games.ts` é somente uma entrada de desenvolvimento e exige variáveis de ambiente. A persistência projetada está em `backend/prisma/schema.prisma`; antes da primeira migration, revisar o schema e conectar um `GameRepository` Prisma.
+`backend/src/modules/sync/game-sync.service.ts` coordena importação, atualização, enriquecimento Steam, matching e registro de sincronização por meio de um repositório. O script `backend/src/scripts/sync-games.ts` é uma entrada de desenvolvimento e exige variáveis de ambiente. O schema e a primeira migration já estão aplicados; `PrismaGameRepository` persiste o catálogo. A sincronização externa automática de produção continua pendente.
 
 Credenciais devem existir apenas em `.env` local, com nomes documentados em `backend/.env.example`. Não versionar tokens, não chamar IGDB/Steam a partir do Flutter e não expor publicamente um endpoint de sincronização sem autenticação administrativa, limite e logs seguros.
 
@@ -1283,4 +1283,24 @@ Credenciais devem existir apenas em `.env` local, com nomes documentados em `bac
 O frontend Flutter fica nas pastas `lib/`, `android/`, `web/`, `assets/` e `test/`; sua documentação de organização está em `frontend/README.md`. O Flutter permanece com `pubspec.yaml` na raiz para não quebrar o fluxo de desenvolvimento e o wrapper `flutter.ps1`.
 
 O backend fica exclusivamente em `backend/`, com código TypeScript em `backend/src/`, schema e migrations em `backend/prisma/`, dependências em `backend/package.json` e configuração segura em `backend/.env.example`. Não misturar imports, credenciais, regras ou dependências entre as duas áreas.
+
+## Manutenção do protótipo
+
+- `lib/features/feed/feed_comments_sheet.dart` concentra o painel de comentários e descarta seus recursos ao fechar. Curtidas e contagens permanecem no `FeedController` durante a sessão.
+- Abrir os comentários é público. Curtir, responder e enviar exigem autenticação; cancelar o login preserva o rascunho.
+- O contrato `backend/src/modules/games/game.repository.ts` exige o ID persistido nos candidatos; nunca usar título ou slug como ID do banco.
+- O backend possui lockfile pnpm e comandos `typecheck`, `test`, `format` e `format:check`. Dependências e arquivos de `dist/` não são versionados.
+- A API e a persistência Prisma do catálogo/biblioteca estão implementadas. Firebase e a sincronização externa automática de produção continuam pendentes. `x-user-id: dev-user` é identidade temporária de desenvolvimento, não autenticação; a API deve permanecer restrita ao computador local e nunca receber dados reais de usuários neste modo.
+- Feed e Explorar usam a API de jogos, com fallback demonstrativo em falha. Feed e Biblioteca compartilham `LibraryStore`/`ApiLibraryRepository`; o GET restaura status, favoritos, notas e curtidas para jogos com Steam ID ou IGDB ID. Curtidas independem da biblioteca e são devolvidas separadamente no campo `likes`. Avaliar implica PLAYED. Login simulado não muda a identidade da API. Fórum, comentários e perfil permanecem demonstrativos/em memória.
+
+## Primeira migration aplicada
+
+`backend/prisma/migrations/20260912000100_initial_schema/migration.sql` foi
+aplicada ao PostgreSQL local nextplay. O banco contém a estrutura inicial e
+relações explícitas das curtidas, seguidores e pesquisas. IDs relacionados
+usam UUID compatível. Notas são de 1 a 5 e exigem PLAYED; seguir a si mesmo
+é proibido por CHECK, assim como valores inválidos de ofertas e jogadores.
+Esses CHECKs são mantidos no SQL. Não editar migrations já aplicadas.
+
+`pnpm.cmd run test:db` e os testes de API, executados em backend, verificam o PostgreSQL local com transações revertidas. A API e o GameRepository Prisma estão implementados. Nunca editar a migration aplicada nem publicar a identidade temporária `dev-user`.
 

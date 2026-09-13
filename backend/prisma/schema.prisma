@@ -7,92 +7,353 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum LibraryStatus { WANT_TO_PLAY PLAYED }
-enum MediaType { TRAILER GAMEPLAY SCREENSHOT }
+enum LibraryStatus {
+  WANT_TO_PLAY
+  PLAYED
+}
+
+enum MediaType {
+  TRAILER
+  GAMEPLAY
+  SCREENSHOT
+}
 
 model User {
-  id String @id @default(uuid()) @db.Uuid
-  firebaseUid String @unique
-  email String? @unique
-  name String
-  username String @unique
-  avatarUrl String?
-  bio String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  library UserGameLibrary[]
-  comments Comment[]
-  topics ForumTopic[]
-  replies ForumReply[]
-  events RecommendationEvent[]
+  id            String                @id @default(uuid()) @db.Uuid
+  firebaseUid   String                @unique
+  email         String?               @unique
+  name          String
+  username      String                @unique
+  avatarUrl     String?
+  bio           String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  library       UserGameLibrary[]
+  comments      Comment[]
+  topics        ForumTopic[]
+  replies       ForumReply[]
+  events        RecommendationEvent[]
   guestSessions GuestSession[]
+  deletedAt     DateTime?
+  gameLikes     GameLike[]
+  commentLikes  CommentLike[]
+  topicLikes    ForumTopicLike[]
+  replyLikes    ForumReplyLike[]
+  topicFollows  ForumTopicFollow[]
+  following     UserFollow[]          @relation("Following")
+  followers     UserFollow[]          @relation("Followers")
+  searches      SearchQuery[]
 }
 
 model GuestSession {
-  id String @id @default(uuid()) @db.Uuid
-  userId String? @db.Uuid
+  id           String                @id @default(uuid()) @db.Uuid
+  userId       String?               @db.Uuid
   deviceIdHash String?
-  createdAt DateTime @default(now())
-  lastSeenAt DateTime @updatedAt
-  convertedAt DateTime?
-  expiresAt DateTime?
-  user User? @relation(fields: [userId], references: [id])
-  events RecommendationEvent[]
+  createdAt    DateTime              @default(now())
+  lastSeenAt   DateTime              @updatedAt
+  convertedAt  DateTime?
+  expiresAt    DateTime?
+  user         User?                 @relation(fields: [userId], references: [id])
+  events       RecommendationEvent[]
+  searches     SearchQuery[]
+
+  @@index([userId])
 }
 
 model Game {
-  id String @id @default(uuid()) @db.Uuid
-  source String?
-  sourceId String?
-  igdbId Int? @unique
-  steamAppId Int? @unique
-  title String
-  slug String @unique
-  description String?
-  studio String?
-  publisher String?
-  coverUrl String?
-  heroUrl String?
-  rating Float?
-  releaseDate DateTime?
-  mode String?
+  id             String                @id @default(uuid()) @db.Uuid
+  source         String?
+  sourceId       String?
+  igdbId         Int?                  @unique
+  steamAppId     Int?                  @unique
+  title          String
+  slug           String                @unique
+  description    String?
+  studio         String?
+  publisher      String?
+  coverUrl       String?
+  heroUrl        String?
+  rating         Float?
+  releaseDate    DateTime?
+  mode           String?
   playerCountMin Int?
   playerCountMax Int?
-  isFree Boolean @default(false)
-  lastSyncedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  library UserGameLibrary[]
-  media GameMedia[]
-  comments Comment[]
-  topics ForumTopic[]
-  events RecommendationEvent[]
-  genres GameGenre[]
-  platforms GamePlatform[]
-  steamOffers SteamOffer[]
+  isFree         Boolean               @default(false)
+  lastSyncedAt   DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  library        UserGameLibrary[]
+  media          GameMedia[]
+  comments       Comment[]
+  topics         ForumTopic[]
+  events         RecommendationEvent[]
+  genres         GameGenre[]
+  platforms      GamePlatform[]
+  steamOffers    SteamOffer[]
+  likes          GameLike[]
+
+  @@unique([source, sourceId])
 }
 
-model Genre { id String @id @default(uuid()) @db.Uuid name String slug String @unique games GameGenre[] }
-model Platform { id String @id @default(uuid()) @db.Uuid name String slug String @unique games GamePlatform[] }
-model GameGenre { gameId String @db.Uuid genreId String @db.Uuid game Game @relation(fields: [gameId], references: [id]) genre Genre @relation(fields: [genreId], references: [id]) @@id([gameId, genreId]) }
-model GamePlatform { gameId String @db.Uuid platformId String @db.Uuid game Game @relation(fields: [gameId], references: [id]) platform Platform @relation(fields: [platformId], references: [id]) @@id([gameId, platformId]) }
-model GameMedia { id String @id @default(uuid()) @db.Uuid gameId String @db.Uuid type MediaType url String thumbnailUrl String? durationSeconds Int? sortOrder Int @default(0) game Game @relation(fields: [gameId], references: [id]) }
-model SteamOffer { id String @id @default(uuid()) @db.Uuid gameId String @db.Uuid currency String? priceCents Int? discountPercent Int? storeUrl String isAvailable Boolean @default(true) capturedAt DateTime @default(now()) game Game @relation(fields: [gameId], references: [id]) }
+model Genre {
+  id    String      @id @default(uuid()) @db.Uuid
+  name  String
+  slug  String      @unique
+  games GameGenre[]
+}
 
-model UserGameLibrary { userId String @db.Uuid gameId String @db.Uuid status LibraryStatus isFavorite Boolean @default(false) rating Int? reviewText String? reviewUpdatedAt DateTime? createdAt DateTime @default(now()) updatedAt DateTime @updatedAt user User @relation(fields: [userId], references: [id]) game Game @relation(fields: [gameId], references: [id]) @@id([userId, gameId]) @@index([userId, status]) }
-model GameLike { userId String @db.Uuid gameId String @db.Uuid createdAt DateTime @default(now()) @@id([userId, gameId]) }
-model Comment { id String @id @default(uuid()) @db.Uuid userId String @db.Uuid gameId String @db.Uuid parentId String? @db.Uuid body String createdAt DateTime @default(now()) updatedAt DateTime @updatedAt deletedAt DateTime? user User @relation(fields: [userId], references: [id]) game Game @relation(fields: [gameId], references: [id]) parent Comment? @relation("CommentReplies", fields: [parentId], references: [id]) replies Comment[] @relation("CommentReplies") @@index([gameId, createdAt]) }
-model CommentLike { userId String @db.Uuid commentId String @db.Uuid createdAt DateTime @default(now()) @@id([userId, commentId]) }
+model Platform {
+  id    String         @id @default(uuid()) @db.Uuid
+  name  String
+  slug  String         @unique
+  games GamePlatform[]
+}
 
-model ForumCategory { id String @id @default(uuid()) @db.Uuid name String slug String @unique sortOrder Int @default(0) isActive Boolean @default(true) topics ForumTopic[] }
-model ForumTopic { id String @id @default(uuid()) @db.Uuid userId String @db.Uuid categoryId String @db.Uuid gameId String? @db.Uuid title String body String createdAt DateTime @default(now()) updatedAt DateTime @updatedAt lastActivityAt DateTime @default(now()) isPinned Boolean @default(false) deletedAt DateTime? user User @relation(fields: [userId], references: [id]) category ForumCategory @relation(fields: [categoryId], references: [id]) game Game? @relation(fields: [gameId], references: [id]) replies ForumReply[] tags ForumTopicTag[] @@index([categoryId, lastActivityAt]) }
-model ForumTag { id String @id @default(uuid()) name String slug String @unique topics ForumTopicTag[] }
-model ForumTopicTag { topicId String @db.Uuid tagId String @db.Uuid topic ForumTopic @relation(fields: [topicId], references: [id]) tag ForumTag @relation(fields: [tagId], references: [id]) @@id([topicId, tagId]) }
-model ForumReply { id String @id @default(uuid()) topicId String @db.Uuid userId String @db.Uuid parentId String? @db.Uuid body String createdAt DateTime @default(now()) updatedAt DateTime @updatedAt deletedAt DateTime? topic ForumTopic @relation(fields: [topicId], references: [id]) user User @relation(fields: [userId], references: [id]) parent ForumReply? @relation("ReplyTree", fields: [parentId], references: [id]) children ForumReply[] @relation("ReplyTree") }
-model ForumTopicLike { userId String @db.Uuid topicId String @db.Uuid createdAt DateTime @default(now()) @@id([userId, topicId]) }
-model ForumReplyLike { userId String @db.Uuid replyId String @db.Uuid createdAt DateTime @default(now()) @@id([userId, replyId]) }
-model ForumTopicFollow { userId String @db.Uuid topicId String @db.Uuid createdAt DateTime @default(now()) @@id([userId, topicId]) }
-model UserFollow { followerId String @db.Uuid followingId String @db.Uuid createdAt DateTime @default(now()) @@id([followerId, followingId]) }
+model GameGenre {
+  gameId  String @db.Uuid
+  genreId String @db.Uuid
+  game    Game   @relation(fields: [gameId], references: [id])
+  genre   Genre  @relation(fields: [genreId], references: [id])
 
-model RecommendationEvent { id String @id @default(uuid()) @db.Uuid userId String? @db.Uuid guestSessionId String? @db.Uuid gameId String? @db.Uuid eventType String position Int? watchDurationMs Int? metadata Json? createdAt DateTime @default(now()) user User? @relation(fields: [userId], references: [id]) guestSession GuestSession? @relation(fields: [guestSessionId], references: [id]) game Game? @relation(fields: [gameId], references: [id]) @@index([userId, createdAt]) @@index([gameId, eventType]) }
-model SearchQuery { id String @id @default(uuid()) @db.Uuid userId String? @db.Uuid guestSessionId String? @db.Uuid query String parsedFilters Json? resultCount Int @default(0) createdAt DateTime @default(now()) }
+  @@id([gameId, genreId])
+}
+
+model GamePlatform {
+  gameId     String   @db.Uuid
+  platformId String   @db.Uuid
+  game       Game     @relation(fields: [gameId], references: [id])
+  platform   Platform @relation(fields: [platformId], references: [id])
+
+  @@id([gameId, platformId])
+}
+
+model GameMedia {
+  id              String    @id @default(uuid()) @db.Uuid
+  gameId          String    @db.Uuid
+  type            MediaType
+  url             String
+  thumbnailUrl    String?
+  durationSeconds Int?
+  sortOrder       Int       @default(0)
+  game            Game      @relation(fields: [gameId], references: [id])
+  createdAt       DateTime  @default(now())
+
+  @@index([gameId, sortOrder])
+}
+
+model SteamOffer {
+  id              String   @id @default(uuid()) @db.Uuid
+  gameId          String   @db.Uuid
+  currency        String?
+  priceCents      Int?
+  discountPercent Int?
+  storeUrl        String
+  isAvailable     Boolean  @default(true)
+  capturedAt      DateTime @default(now())
+  game            Game     @relation(fields: [gameId], references: [id])
+
+  @@index([gameId, capturedAt])
+}
+
+model UserGameLibrary {
+  userId          String        @db.Uuid
+  gameId          String        @db.Uuid
+  status          LibraryStatus
+  isFavorite      Boolean       @default(false)
+  rating          Int?
+  reviewText      String?
+  reviewUpdatedAt DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  user            User          @relation(fields: [userId], references: [id])
+  game            Game          @relation(fields: [gameId], references: [id])
+
+  @@id([userId, gameId])
+  @@index([userId, status])
+}
+
+model GameLike {
+  userId    String   @db.Uuid
+  gameId    String   @db.Uuid
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  game      Game     @relation(fields: [gameId], references: [id])
+
+  @@id([userId, gameId])
+  @@index([gameId])
+}
+
+model Comment {
+  id        String        @id @default(uuid()) @db.Uuid
+  userId    String        @db.Uuid
+  gameId    String        @db.Uuid
+  parentId  String?       @db.Uuid
+  body      String
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  deletedAt DateTime?
+  user      User          @relation(fields: [userId], references: [id])
+  game      Game          @relation(fields: [gameId], references: [id])
+  parent    Comment?      @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[]     @relation("CommentReplies")
+  likes     CommentLike[]
+
+  @@index([gameId, createdAt])
+  @@index([parentId])
+}
+
+model CommentLike {
+  userId    String   @db.Uuid
+  commentId String   @db.Uuid
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  comment   Comment  @relation(fields: [commentId], references: [id])
+
+  @@id([userId, commentId])
+  @@index([commentId])
+}
+
+model ForumCategory {
+  id        String       @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String       @unique
+  sortOrder Int          @default(0)
+  isActive  Boolean      @default(true)
+  topics    ForumTopic[]
+}
+
+model ForumTopic {
+  id             String             @id @default(uuid()) @db.Uuid
+  userId         String             @db.Uuid
+  categoryId     String             @db.Uuid
+  gameId         String?            @db.Uuid
+  title          String
+  body           String
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  lastActivityAt DateTime           @default(now())
+  isPinned       Boolean            @default(false)
+  deletedAt      DateTime?
+  user           User               @relation(fields: [userId], references: [id])
+  category       ForumCategory      @relation(fields: [categoryId], references: [id])
+  game           Game?              @relation(fields: [gameId], references: [id])
+  replies        ForumReply[]
+  tags           ForumTopicTag[]
+  likes          ForumTopicLike[]
+  follows        ForumTopicFollow[]
+
+  @@index([categoryId, lastActivityAt])
+  @@index([gameId, createdAt])
+}
+
+model ForumTag {
+  id     String          @id @default(uuid()) @db.Uuid
+  name   String
+  slug   String          @unique
+  topics ForumTopicTag[]
+}
+
+model ForumTopicTag {
+  topicId String     @db.Uuid
+  tagId   String     @db.Uuid
+  topic   ForumTopic @relation(fields: [topicId], references: [id])
+  tag     ForumTag   @relation(fields: [tagId], references: [id])
+
+  @@id([topicId, tagId])
+}
+
+model ForumReply {
+  id        String           @id @default(uuid()) @db.Uuid
+  topicId   String           @db.Uuid
+  userId    String           @db.Uuid
+  parentId  String?          @db.Uuid
+  body      String
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  deletedAt DateTime?
+  topic     ForumTopic       @relation(fields: [topicId], references: [id])
+  user      User             @relation(fields: [userId], references: [id])
+  parent    ForumReply?      @relation("ReplyTree", fields: [parentId], references: [id])
+  children  ForumReply[]     @relation("ReplyTree")
+  likes     ForumReplyLike[]
+
+  @@index([topicId, createdAt])
+  @@index([parentId])
+}
+
+model ForumTopicLike {
+  userId    String     @db.Uuid
+  topicId   String     @db.Uuid
+  createdAt DateTime   @default(now())
+  user      User       @relation(fields: [userId], references: [id])
+  topic     ForumTopic @relation(fields: [topicId], references: [id])
+
+  @@id([userId, topicId])
+  @@index([topicId])
+}
+
+model ForumReplyLike {
+  userId    String     @db.Uuid
+  replyId   String     @db.Uuid
+  createdAt DateTime   @default(now())
+  user      User       @relation(fields: [userId], references: [id])
+  reply     ForumReply @relation(fields: [replyId], references: [id])
+
+  @@id([userId, replyId])
+  @@index([replyId])
+}
+
+model ForumTopicFollow {
+  userId    String     @db.Uuid
+  topicId   String     @db.Uuid
+  createdAt DateTime   @default(now())
+  user      User       @relation(fields: [userId], references: [id])
+  topic     ForumTopic @relation(fields: [topicId], references: [id])
+
+  @@id([userId, topicId])
+  @@index([topicId])
+}
+
+model UserFollow {
+  followerId  String   @db.Uuid
+  followingId String   @db.Uuid
+  createdAt   DateTime @default(now())
+  follower    User     @relation("Following", fields: [followerId], references: [id])
+  following   User     @relation("Followers", fields: [followingId], references: [id])
+
+  @@id([followerId, followingId])
+  @@index([followingId])
+}
+
+model RecommendationEvent {
+  id              String        @id @default(uuid()) @db.Uuid
+  userId          String?       @db.Uuid
+  guestSessionId  String?       @db.Uuid
+  gameId          String?       @db.Uuid
+  eventType       String
+  position        Int?
+  watchDurationMs Int?
+  metadata        Json?
+  createdAt       DateTime      @default(now())
+  user            User?         @relation(fields: [userId], references: [id])
+  guestSession    GuestSession? @relation(fields: [guestSessionId], references: [id])
+  game            Game?         @relation(fields: [gameId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([gameId, eventType])
+}
+
+model SearchQuery {
+  id             String        @id @default(uuid()) @db.Uuid
+  userId         String?       @db.Uuid
+  guestSessionId String?       @db.Uuid
+  query          String
+  parsedFilters  Json?
+  resultCount    Int           @default(0)
+  createdAt      DateTime      @default(now())
+  user           User?         @relation(fields: [userId], references: [id])
+  guestSession   GuestSession? @relation(fields: [guestSessionId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([guestSessionId, createdAt])
+}

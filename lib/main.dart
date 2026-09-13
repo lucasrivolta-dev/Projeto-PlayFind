@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
+
 import 'features/game_detail/game_detail_screen.dart';
 import 'package:flutter/material.dart';
 import 'design_system/theme.dart';
@@ -10,37 +14,79 @@ import 'features/feed/feed_screen.dart';
 import 'features/forum/forum_controller.dart';
 import 'features/forum/forum_screen.dart';
 import 'features/auth/auth_controller.dart';
+import 'features/library/library_repository.dart';
 import 'features/library/library_store.dart';
 import 'features/library/library_screen.dart';
 import 'features/profile/profile_controller.dart';
 import 'features/profile/profile_repository.dart';
 import 'features/profile/profile_screen.dart';
 
-void main() => runApp(const NextPlayApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  runApp(const NextPlayApp());
+}
 
 class NextPlayApp extends StatefulWidget {
-  const NextPlayApp({super.key});
+  const NextPlayApp({super.key, this.exploreRepository, this.libraryRepository, this.authController});
+  final ExploreRepository? exploreRepository;
+  final LibraryRepository? libraryRepository;
+  final AuthController? authController;
 
   @override
   State<NextPlayApp> createState() => _NextPlayAppState();
 }
 
 class _NextPlayAppState extends State<NextPlayApp> {
-  final library = LibraryStore();
-  final auth = AuthController();
-  late final ProfileController controller =
-      ProfileController(DemoProfileRepository())..load();
-  late final ExploreController explore =
-      ExploreController(DemoExploreRepository(), library: library)..load();
-  late final FeedController feed =
-      FeedController(DemoExploreRepository().load, library: library)..load();
+  late final ApiLibraryRepository _libraryRepo;
+  late final LibraryStore library;
+  late final AuthController auth;
+  late final ExploreRepository _repo;
+  late final ProfileController controller;
+  late final ExploreController explore;
+  late final FeedController feed;
+
+  @override
+  void initState() {
+    super.initState();
+    auth = widget.authController ?? AuthController();
+    auth.addListener(_onAuthChanged);
+    _libraryRepo = ApiLibraryRepository(tokenProvider: auth.getIdToken);
+    library = LibraryStore(repo: widget.libraryRepository ?? _libraryRepo);
+    _repo = widget.exploreRepository ?? ApiExploreRepository();
+    controller = ProfileController(DemoProfileRepository())..load();
+    explore = ExploreController(_repo, library: library)..load();
+    feed = FeedController(_repo.load, library: library)..load();
+    // O primeiro carregamento acontece somente quando authStateChanges
+    // confirma uma identidade autenticada.
+    // Quando a sessão já foi restaurada antes da criação do shell, não há
+    // uma nova transição para disparar o listener; inicialize explicitamente.
+    if (auth.isAuthenticated) _onAuthChanged();
+  }
+
+  void _onAuthChanged() {
+    if (auth.isAuthenticated) {
+      unawaited((widget.libraryRepository ?? _libraryRepo)
+          .loadInto(library)
+          .catchError((Object error) {
+        debugPrint('Falha ao carregar biblioteca autenticada: $error');
+      }));
+    } else {
+      library.clearPrivateState();
+    }
+  }
 
   @override
   void dispose() {
+    _libraryRepo.dispose();
+    if (_repo is ApiExploreRepository) {
+      _repo.dispose();
+    }
     controller.dispose();
     explore.dispose();
     feed.dispose();
     library.dispose();
+    auth.removeListener(_onAuthChanged);
     auth.dispose();
     super.dispose();
   }
@@ -88,6 +134,7 @@ class _AppShellState extends State<_AppShell> {
   @override
   Widget build(BuildContext context) => GameDetailScope(
       forum: forum,
+      auth: widget.auth,
       child: Scaffold(
         body: ListenableBuilder(
             listenable: widget.explore,
@@ -95,16 +142,17 @@ class _AppShellState extends State<_AppShell> {
                   index: pageIndex,
                   children: [
                     FeedScreen(controller: widget.feed, auth: widget.auth),
-                    ExploreScreen(controller: widget.explore),
+                    ExploreScreen(controller: widget.explore, auth: widget.auth),
                     ProfileScreen(
                         controller: widget.profile,
                         embedded: true,
+                        auth: widget.auth,
                         extraSaved: widget.explore.saved.length),
                     LibraryScreen(
                         controller: widget.explore,
                         onExplore: () =>
                             setState(() => selected = AppDestination.explore)),
-                    ForumScreen(controller: forum, games: widget.explore.games),
+                    ForumScreen(controller: forum, games: widget.explore.games, auth: widget.auth),
                   ],
                 )),
         bottomNavigationBar: AppBottomNavigation(

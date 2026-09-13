@@ -1,0 +1,259 @@
+import type { Prisma } from '@prisma/client';
+import type { PrismaDbClient } from './prisma-game.repository.js';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface ListGamesOptions {
+  page?: number;
+  limit?: number;
+  genre?: string;
+  platform?: string;
+  search?: string;
+}
+
+export interface GameSummaryDto {
+  id: string;
+  slug: string;
+  title: string;
+  studio?: string;
+  publisher?: string;
+  description?: string;
+  rating?: number;
+  releaseDate?: Date;
+  coverUrl?: string;
+  heroUrl?: string;
+  steamAppId?: number;
+  igdbId?: number;
+  genres: string[];
+  platforms: string[];
+  steam?: {
+    storeUrl: string;
+    priceCents?: number;
+    discountPercent?: number;
+    currency?: string;
+    isAvailable: boolean;
+  };
+}
+
+export interface GameDetailDto extends GameSummaryDto {
+  screenshots: string[];
+  trailers: string[];
+}
+
+export class GameService {
+  constructor(private readonly prisma: PrismaDbClient) {}
+
+  async listGames(options: ListGamesOptions = {}) {
+    const page = Math.max(1, options.page ?? 1);
+    const limit = Math.min(100, Math.max(1, options.limit ?? 20));
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.GameWhereInput = {};
+
+    if (options.search?.trim()) {
+      const term = options.search.trim();
+      where.OR = [
+        { title: { contains: term, mode: 'insensitive' } },
+        { description: { contains: term, mode: 'insensitive' } },
+      ];
+    }
+
+    if (options.genre?.trim()) {
+      const genreTerm = options.genre.trim().toLowerCase();
+      where.genres = {
+        some: {
+          genre: {
+            OR: [
+              { slug: genreTerm },
+              { name: { equals: options.genre.trim(), mode: 'insensitive' } },
+            ],
+          },
+        },
+      };
+    }
+
+    if (options.platform?.trim()) {
+      const platformTerm = options.platform.trim().toLowerCase();
+      where.platforms = {
+        some: {
+          platform: {
+            OR: [
+              { slug: platformTerm },
+              { name: { equals: options.platform.trim(), mode: 'insensitive' } },
+            ],
+          },
+        },
+      };
+    }
+
+    const [total, records] = await Promise.all([
+      this.prisma.game.count({ where }),
+      this.prisma.game.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [{ rating: 'desc' }, { createdAt: 'desc' }],
+        include: {
+          genres: { include: { genre: true } },
+          platforms: { include: { platform: true } },
+          steamOffers: { orderBy: { capturedAt: 'desc' }, take: 1 },
+        },
+      }),
+    ]);
+
+    const data: GameSummaryDto[] = records.map((record) => {
+      const latestSteam = record.steamOffers[0];
+      return {
+        id: record.id,
+        slug: record.slug,
+        title: record.title,
+        studio: record.studio ?? undefined,
+        publisher: record.publisher ?? undefined,
+        description: record.description ?? undefined,
+        rating: record.rating ?? undefined,
+        releaseDate: record.releaseDate ?? undefined,
+        coverUrl: record.coverUrl ?? undefined,
+        heroUrl: record.heroUrl ?? undefined,
+        steamAppId: record.steamAppId ?? undefined,
+        igdbId: record.igdbId ?? undefined,
+        genres: record.genres.map((g) => g.genre.name),
+        platforms: record.platforms.map((p) => p.platform.name),
+        steam: latestSteam
+          ? {
+              storeUrl: latestSteam.storeUrl,
+              priceCents: latestSteam.priceCents ?? undefined,
+              discountPercent: latestSteam.discountPercent ?? undefined,
+              currency: latestSteam.currency ?? undefined,
+              isAvailable: latestSteam.isAvailable,
+            }
+          : undefined,
+      };
+    });
+
+    return {
+      data,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getGameById(idOrSlug: string): Promise<GameDetailDto | null> {
+    const trimmed = idOrSlug.trim();
+    let where: Prisma.GameWhereUniqueInput;
+
+    if (UUID_REGEX.test(trimmed)) {
+      where = { id: trimmed };
+    } else if (/^\d+$/.test(trimmed)) {
+      const num = Number(trimmed);
+      const bySteam = await this.prisma.game.findUnique({ where: { steamAppId: num } });
+      if (bySteam) {
+        where = { id: bySteam.id };
+      } else {
+        const byIgdb = await this.prisma.game.findUnique({ where: { igdbId: num } });
+        if (byIgdb) {
+          where = { id: byIgdb.id };
+        } else {
+          where = { slug: trimmed };
+        }
+      }
+    } else {
+      where = { slug: trimmed };
+    }
+
+    const record = await this.prisma.game.findUnique({
+      where,
+      include: {
+        genres: { include: { genre: true } },
+        platforms: { include: { platform: true } },
+        media: { orderBy: { sortOrder: 'asc' } },
+        steamOffers: { orderBy: { capturedAt: 'desc' }, take: 1 },
+      },
+    });
+
+    if (!record) return null;
+
+    const latestSteam = record.steamOffers[0];
+    const screenshots = record.media.filter((m) => m.type === 'SCREENSHOT').map((m) => m.url);
+    const trailers = record.media
+      .filter((m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY')
+      .map((m) => m.url);
+
+    return {
+      id: record.id,
+      slug: record.slug,
+      title: record.title,
+      studio: record.studio ?? undefined,
+      publisher: record.publisher ?? undefined,
+      description: record.description ?? undefined,
+      rating: record.rating ?? undefined,
+      releaseDate: record.releaseDate ?? undefined,
+      coverUrl: record.coverUrl ?? undefined,
+      heroUrl: record.heroUrl ?? undefined,
+      steamAppId: record.steamAppId ?? undefined,
+      igdbId: record.igdbId ?? undefined,
+      genres: record.genres.map((g) => g.genre.name),
+      platforms: record.platforms.map((p) => p.platform.name),
+      screenshots,
+      trailers,
+      steam: latestSteam
+        ? {
+            storeUrl: latestSteam.storeUrl,
+            priceCents: latestSteam.priceCents ?? undefined,
+            discountPercent: latestSteam.discountPercent ?? undefined,
+            currency: latestSteam.currency ?? undefined,
+            isAvailable: latestSteam.isAvailable,
+          }
+        : undefined,
+    };
+  }
+
+  async getFeedGames(limit = 20) {
+    const safeLimit = Math.min(50, Math.max(1, limit));
+    const records = await this.prisma.game.findMany({
+      take: safeLimit,
+      orderBy: [{ rating: 'desc' }, { createdAt: 'desc' }],
+      include: {
+        genres: { include: { genre: true } },
+        platforms: { include: { platform: true } },
+        media: { orderBy: { sortOrder: 'asc' } },
+        steamOffers: { orderBy: { capturedAt: 'desc' }, take: 1 },
+      },
+    });
+
+    return records.map((record) => {
+      const latestSteam = record.steamOffers[0];
+      const screenshots = record.media.filter((m) => m.type === 'SCREENSHOT').map((m) => m.url);
+
+      return {
+        id: record.id,
+        slug: record.slug,
+        title: record.title,
+        studio: record.studio ?? '',
+        publisher: record.publisher ?? '',
+        description: record.description ?? '',
+        rating: record.rating ? Number(record.rating.toFixed(1)) : null,
+        coverUrl: record.coverUrl ?? null,
+        heroUrl: record.heroUrl ?? null,
+        steamAppId: record.steamAppId ?? null,
+        igdbId: record.igdbId ?? null,
+        genres: record.genres.map((g) => g.genre.name),
+        platforms: record.platforms.map((p) => p.platform.name),
+        screenshots,
+        matchScore: 95, // Editorial baseline for MVP feed
+        steam: latestSteam
+          ? {
+              storeUrl: latestSteam.storeUrl,
+              priceCents: latestSteam.priceCents ?? null,
+              discountPercent: latestSteam.discountPercent ?? null,
+              currency: latestSteam.currency ?? null,
+              isAvailable: latestSteam.isAvailable,
+            }
+          : null,
+      };
+    });
+  }
+}

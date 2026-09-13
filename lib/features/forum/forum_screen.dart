@@ -4,16 +4,19 @@ import '../../design_system/theme.dart';
 import '../explore/explore_data.dart';
 import 'forum_controller.dart';
 import 'forum_topic_screen.dart';
+import '../auth/auth_controller.dart';
+import '../auth/auth_guard.dart';
 
 class ForumScreen extends StatelessWidget {
-  const ForumScreen({super.key, required this.controller, required this.games});
+  const ForumScreen({super.key, required this.controller, required this.games, this.auth});
   final ForumController controller;
   final List<DiscoveryGame> games;
+  final AuthController? auth;
 
   void open(BuildContext context, ForumTopic topic) =>
       Navigator.of(context).push(MaterialPageRoute<void>(
           builder: (_) =>
-              ForumTopicScreen(controller: controller, topic: topic)));
+              ForumTopicScreen(controller: controller, topic: topic, auth: auth)));
   @override
   Widget build(BuildContext context) => SafeArea(
       bottom: false,
@@ -43,13 +46,17 @@ class ForumScreen extends StatelessWidget {
                               const SizedBox(height: AppSpacing.md),
                               FilledButton.icon(
                                   onPressed: () async {
-                                    final topic = await Navigator.of(context)
-                                        .push<ForumTopic>(MaterialPageRoute(
-                                            builder: (_) => CreateTopicScreen(
-                                                controller: controller,
-                                                games: games)));
-                                    if (topic != null && context.mounted) {
-                                      open(context, topic);
+                                    ForumTopic? topic;
+                                    await requireAuthentication(context, auth, () async {
+                                      topic = await Navigator.of(context)
+                                          .push<ForumTopic>(MaterialPageRoute(
+                                              builder: (_) => CreateTopicScreen(
+                                                  controller: controller,
+                                                  games: games)));
+                                    });
+                                    final createdTopic = topic;
+                                    if (createdTopic != null && context.mounted) {
+                                      open(context, createdTopic);
                                     }
                                   },
                                   icon: const Icon(Icons.add),
@@ -90,7 +97,7 @@ class ForumScreen extends StatelessWidget {
                                     child: ForumTopicCard(
                                         topic: topic,
                                         onTap: () => open(context, topic),
-                                        onLike: () => controller.like(topic)))),
+                                        onLike: () => requireAuthentication(context, auth, () => controller.like(topic))))),
                                 const SectionHeading(
                                     title: 'Tópicos recentes',
                                     icon: Icons.forum_outlined),
@@ -140,7 +147,7 @@ class ForumScreen extends StatelessWidget {
                                     child: ForumTopicCard(
                                         topic: topic,
                                         onTap: () => open(context, topic),
-                                        onLike: () => controller.like(topic)));
+                                        onLike: () => requireAuthentication(context, auth, () => controller.like(topic))));
                               })),
                     const SliverToBoxAdapter(
                         child: SizedBox(height: AppSpacing.lg)),

@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../../config/api_config.dart';
+
 class DiscoveryGame {
   const DiscoveryGame(
       {required this.id,
@@ -13,12 +17,73 @@ class DiscoveryGame {
       this.free = false,
       this.releaseDate,
       this.mode,
-      this.publisher});
-  final String? releaseDate, mode, publisher;
+      this.publisher,
+      this.matchScore,
+      this.slug,
+      this.coverUrl,
+      this.heroUrl});
+  final String? releaseDate, mode, publisher, slug, coverUrl, heroUrl;
   final int id;
   final String title, studio, genre, description, rating, collection;
   final List<String> tags, platforms;
   final bool offer, free;
+  /// Percentual de compatibilidade retornado pela API (0–100).
+  /// Null quando o dado vem de fontes locais/mock.
+  final int? matchScore;
+
+  factory DiscoveryGame.fromJson(Map<String, dynamic> json) {
+    final steamAppId = json['steamAppId'] as int?;
+    final igdbId = json['igdbId'] as int?;
+    final rawId = json['id'];
+    final int id;
+    if (steamAppId != null && steamAppId > 0) {
+      id = steamAppId;
+    } else if (igdbId != null && igdbId > 0) {
+      id = igdbId;
+    } else if (rawId is int) {
+      id = rawId;
+    } else if (rawId is String) {
+      id = rawId.hashCode.abs();
+    } else {
+      id = 0;
+    }
+
+    final genres = (json['genres'] as List<dynamic>?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const [];
+    final platforms = (json['platforms'] as List<dynamic>?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const ['PC'];
+    final rating = json['rating'] != null ? json['rating'].toString() : '8.5';
+    final steam = json['steam'] as Map<String, dynamic>?;
+    final offer = steam != null && (steam['discountPercent'] as int? ?? 0) > 0;
+    final free = json['isFree'] as bool? ?? false;
+
+    return DiscoveryGame(
+      id: id,
+      title: json['title'] as String? ?? 'Sem título',
+      studio: json['studio'] as String? ??
+          json['developer'] as String? ??
+          'Desconhecido',
+      genre: genres.isNotEmpty ? genres.first : 'Geral',
+      description: json['description'] as String? ?? '',
+      rating: rating,
+      tags: genres,
+      platforms: platforms,
+      collection: offer ? 'ofertas' : 'destaques',
+      offer: offer,
+      free: free,
+      releaseDate: json['releaseDate']?.toString(),
+      mode: json['mode'] as String?,
+      publisher: json['publisher'] as String?,
+      matchScore: json['matchScore'] as int?,
+      slug: json['slug'] as String?,
+      coverUrl: json['coverUrl'] as String?,
+      heroUrl: json['heroUrl'] as String?,
+    );
+  }
 }
 
 abstract interface class ExploreRepository {
@@ -27,6 +92,7 @@ abstract interface class ExploreRepository {
 
 /// Editorial demo catalog. No live prices or personalized ranking are claimed.
 class DemoExploreRepository implements ExploreRepository {
+  const DemoExploreRepository();
   @override
   Future<List<DiscoveryGame>> load() async => const [
         DiscoveryGame(
@@ -161,4 +227,58 @@ class DemoExploreRepository implements ExploreRepository {
             description:
                 'Pacific Drive é um jogo de sobrevivência em primeira pessoa baseado em viagens de carro, ambientado na misteriosa e surreal Zona de Exclusão Olímpica. Sua única companhia e salvação é uma perua vintage que você deve customizar, consertar e proteger contra anomalias radioativas sobrenaturais.'),
       ];
+}
+
+class ApiExploreRepository implements ExploreRepository {
+  ApiExploreRepository({
+    String? baseUrl,
+    http.Client? client,
+    this.fallback = const DemoExploreRepository(),
+    this.timeout = const Duration(seconds: 2),
+  })  : baseUrl = baseUrl ?? ApiConfig.baseUrl,
+        _client = client ?? http.Client(),
+        _ownsClient = client == null;
+
+  final String baseUrl;
+  final http.Client _client;
+  final bool _ownsClient;
+  final ExploreRepository fallback;
+  final Duration timeout;
+
+  @override
+  Future<List<DiscoveryGame>> load() async {
+    try {
+      final uri = Uri.parse('$baseUrl/feed');
+      final response = await _client.get(uri).timeout(timeout);
+
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        final List<dynamic>? rawList;
+        if (decoded is Map<String, dynamic> && decoded['data'] is List) {
+          rawList = decoded['data'] as List<dynamic>;
+        } else if (decoded is List) {
+          rawList = decoded;
+        } else {
+          rawList = null;
+        }
+
+        if (rawList != null && rawList.isNotEmpty) {
+          return rawList
+              .whereType<Map<String, dynamic>>()
+              .map(DiscoveryGame.fromJson)
+              .toList();
+        }
+      }
+    } catch (_) {
+      // Fallback gracioso quando a API estiver offline ou em caso de timeout.
+    }
+
+    return fallback.load();
+  }
+
+  void dispose() {
+    if (_ownsClient) {
+      _client.close();
+    }
+  }
 }

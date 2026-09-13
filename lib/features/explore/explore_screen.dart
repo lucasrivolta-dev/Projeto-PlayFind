@@ -5,10 +5,13 @@ import '../../design_system/theme.dart';
 import 'explore_controller.dart';
 import 'explore_data.dart';
 import 'explore_widgets.dart';
+import '../auth/auth_controller.dart';
+import '../auth/auth_guard.dart';
 
 class ExploreScreen extends StatefulWidget {
-  const ExploreScreen({super.key, required this.controller});
+  const ExploreScreen({super.key, required this.controller, this.auth});
   final ExploreController controller;
+  final AuthController? auth;
   @override
   State<ExploreScreen> createState() => _ExploreScreenState();
 }
@@ -327,7 +330,15 @@ class _ExploreScreenState extends State<ExploreScreen> {
                                         : DiscoverySwipeCard(
                                             key: ValueKey(nextGame.id),
                                             game: nextGame,
-                                            onChoice: controller.choose,
+                                            onChoice: (choice) {
+                                              final auth = widget.auth;
+                                              if (auth == null) {
+                                                controller.choose(choice);
+                                              } else {
+                                                requireAuthentication(context, auth,
+                                                    () => controller.choose(choice));
+                                              }
+                                            },
                                             onDetails: () =>
                                                 showGame(nextGame))),
                                 const SizedBox(height: AppSpacing.xs),

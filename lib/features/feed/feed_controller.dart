@@ -28,7 +28,8 @@ class FeedItem {
 
 class FeedController extends ChangeNotifier {
   FeedController(this.repository, {LibraryStore? library})
-      : library = library ?? LibraryStore(), _ownsLibrary = library == null {
+      : library = library ?? LibraryStore(),
+        _ownsLibrary = library == null {
     this.library.addListener(_emit);
   }
   final LibraryStore library;
@@ -38,10 +39,24 @@ class FeedController extends ChangeNotifier {
   bool error = false;
   List<FeedItem> items = [];
   int current = 0;
-  final Set<int> liked = {};
+  Set<int> get liked => library.liked;
   Set<int> get saved => library.saved;
   Set<int> get played => library.played;
   final Map<int, List<FeedComment>> addedComments = {};
+  final Map<int, Set<FeedComment>> _likedComments = {};
+
+  bool isCommentLiked(int gameId, FeedComment comment) =>
+      _likedComments[gameId]?.contains(comment) ?? false;
+
+  int commentLikeCount(int gameId, FeedComment comment) =>
+      comment.likes + (isCommentLiked(gameId, comment) ? 1 : 0);
+
+  void toggleCommentLike(int gameId, FeedComment comment) {
+    final likes = _likedComments.putIfAbsent(gameId, () => {});
+    if (!likes.add(comment)) likes.remove(comment);
+    _emit();
+  }
+
   bool _disposed = false;
 
   void _emit() {
@@ -54,7 +69,8 @@ class FeedController extends ChangeNotifier {
     _emit();
     try {
       final games = await repository();
-      items = games.take(6).toList().asMap().entries.map((entry) {
+      items = games.asMap().entries.map((entry) {
+        final index = entry.key;
         final game = entry.value;
         final comments = [
           FeedComment(
@@ -69,17 +85,27 @@ class FeedController extends ChangeNotifier {
               likes: 7,
               reply: true),
         ];
+        // Captions editoriais rotativos — funcionam para qualquer N de jogos.
+        const captions = [
+          'Uma aventura que recompensa cada minuto de exploração.',
+          'Quando você quer uma história para esquecer do mundo por algumas horas.',
+          'Encontre seu esquadrão. A próxima missão começa agora.',
+          'Pequeno no tamanho. Gigante nos segredos.',
+          'Uma mão nunca é igual à outra.',
+          'O mundo está esperando por você.',
+          'Horas se passam sem você perceber.',
+          'Difícil de largár depois do primeiro nível.',
+          'Uma experiência que fica na memória.',
+          'Descubra o que está além do horizonte.',
+        ];
+        // matchScore vem da API quando disponível; caso contrário usa valor editorial rotativo.
+        const fallbackMatches = [94, 87, 91, 82, 89, 78, 85, 92, 88, 80];
+        final match =
+            game.matchScore ?? fallbackMatches[index % fallbackMatches.length];
         return FeedItem(
             game: game,
-            match: [94, 87, 91, 82, 89, 78][entry.key],
-            caption: [
-              'Uma aventura que recompensa cada minuto de exploração.',
-              'Quando você quer uma história para esquecer do mundo por algumas horas.',
-              'Encontre seu esquadrão. A próxima missão começa agora.',
-              'Pequeno no tamanho. Gigante nos segredos.',
-              'Uma mão nunca é igual à outra.',
-              'O mundo está esperando por você.',
-            ][entry.key],
+            match: match,
+            caption: captions[index % captions.length],
             comments: comments);
       }).toList();
     } catch (_) {
@@ -90,13 +116,12 @@ class FeedController extends ChangeNotifier {
   }
 
   void setCurrent(int index) {
-    current = index.clamp(0, items.length - 1);
+    current = items.isEmpty ? 0 : index.clamp(0, items.length - 1);
     _emit();
   }
 
   void toggleLike(int id) {
-    if (!liked.add(id)) liked.remove(id);
-    _emit();
+    library.toggleLike(id);
   }
 
   void toggleSave(int id) {

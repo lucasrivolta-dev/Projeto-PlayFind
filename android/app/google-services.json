@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "180105971879",
+    "project_id": "nextplay-da668",
+    "storage_bucket": "nextplay-da668.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:180105971879:android:da644f3f7e025a476a3382",
+        "android_client_info": {
+          "package_name": "com.lucasrivolta.nextplay"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "180105971879-gtkcshckgfq3070b2qpjoaefqrriop3c.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.lucasrivolta.nextplay",
+            "certificate_hash": "9b7f395ea1fd2b47d2d31641bf632b6be0c3e270"
+          }
+        },
+        {
+          "client_id": "180105971879-i8qm58bdc1gm8rde7e9a4da2cq85pgdk.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD9Yi0auwIFi-_EzGumR-a7aiFO0zlMtwY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "180105971879-i8qm58bdc1gm8rde7e9a4da2cq85pgdk.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

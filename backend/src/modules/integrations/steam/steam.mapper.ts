@@ -1,4 +1,29 @@
 import type { NormalizedGame } from '../../games/normalized-game.js';
 import type { SteamAppDetailsDto } from './steam.types.js';
-export function enrichWithSteam(game: NormalizedGame, appId: number, dto?: SteamAppDetailsDto): NormalizedGame { const data = dto?.success ? dto.data : undefined; return { ...game, steamAppId: appId, steam: { storeUrl: `https://store.steampowered.com/app/${appId}/`, priceCents: data?.price_overview?.final, discountPercent: data?.price_overview?.discount_percent, currency: data?.price_overview?.currency, isAvailable: Boolean(data) }, coverUrl: game.coverUrl ?? data?.header_image, description: game.description ?? data?.short_description, developer: game.developer ?? data?.developers?.[0], publisher: game.publisher ?? data?.publishers?.[0], genres: game.genres.length ? game.genres : (data?.genres ?? []).map((item) => item.description).filter((value): value is string => Boolean(value)) };
+export function enrichWithSteam(
+  game: NormalizedGame,
+  appId: number,
+  dto?: SteamAppDetailsDto,
+): NormalizedGame {
+  const data = dto?.success ? dto.data : undefined;
+  return {
+    ...game,
+    steamAppId: appId,
+    steam: {
+      storeUrl: `https://store.steampowered.com/app/${appId}/`,
+      priceCents: data?.price_overview?.final,
+      discountPercent: data?.price_overview?.discount_percent,
+      currency: data?.price_overview?.currency,
+      isAvailable: Boolean(data),
+    },
+    coverUrl: game.coverUrl ?? data?.header_image,
+    description: game.description ?? data?.short_description,
+    developer: game.developer ?? data?.developers?.[0],
+    publisher: game.publisher ?? data?.publishers?.[0],
+    genres: game.genres.length
+      ? game.genres
+      : (data?.genres ?? [])
+          .map((item) => item.description)
+          .filter((value): value is string => Boolean(value)),
+  };
 }

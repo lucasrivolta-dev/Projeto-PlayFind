@@ -55,7 +55,11 @@ void main() {
       await tester.enterText(find.byType(TextFormField).at(1),
           'Encontrei um jogo muito interessante.');
       await tester.scrollUntilVisible(find.text('Publicar tópico'), 300,
-          scrollable: find.descendant(of: find.byType(CreateTopicScreen), matching: find.byType(Scrollable)).first);
+          scrollable: find
+              .descendant(
+                  of: find.byType(CreateTopicScreen),
+                  matching: find.byType(Scrollable))
+              .first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Publicar tópico'));
       await tester.pumpAndSettle();
@@ -69,4 +73,3 @@ void main() {
     });
   }
 }
-

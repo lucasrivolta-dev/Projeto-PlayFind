@@ -1,4 +1,4 @@
-package com.example.nextplay
+package com.lucasrivolta.nextplay
 
 import io.flutter.embedding.android.FlutterActivity
 

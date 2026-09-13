@@ -1,5 +1,4 @@
 export type GamePlatform = 'PC' | 'PlayStation' | 'Xbox' | 'Switch' | 'Mobile' | 'Other';
-
 export interface NormalizedGame {
   title: string;
   slug?: string;
@@ -15,5 +14,11 @@ export interface NormalizedGame {
   rating?: number;
   igdbId?: number;
   steamAppId?: number;
-  steam?: { storeUrl: string; priceCents?: number; discountPercent?: number; currency?: string; isAvailable: boolean };
+  steam?: {
+    storeUrl: string;
+    priceCents?: number;
+    discountPercent?: number;
+    currency?: string;
+    isAvailable: boolean;
+  };
 }
