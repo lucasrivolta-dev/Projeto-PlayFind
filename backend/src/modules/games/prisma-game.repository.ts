@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { GameRepository, StoredGame } from './game.repository.js';
-import type { NormalizedGame, GamePlatform } from './normalized-game.js';
+import { describeTrailer, type NormalizedGame, type GamePlatform } from './normalized-game.js';
 
 export type PrismaDbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -15,16 +15,26 @@ export function slugify(text: string): string {
   );
 }
 
+function validExternalId(value?: number): value is number {
+  return value !== undefined && Number.isSafeInteger(value) && value > 0;
+}
+
+function trailerUrls(game: NormalizedGame): string[] {
+  const urls = game.trailers ?? [];
+  if (urls.length > 0) return urls;
+  return (game.trailerDetails ?? []).map((trailer) => trailer.url);
+}
+
 export class PrismaGameRepository implements GameRepository {
   constructor(private readonly client: PrismaDbClient) {}
 
   async findCandidates(game: NormalizedGame): Promise<StoredGame[]> {
     const orConditions: Prisma.GameWhereInput[] = [];
 
-    if (game.igdbId) {
+    if (validExternalId(game.igdbId)) {
       orConditions.push({ igdbId: game.igdbId });
     }
-    if (game.steamAppId) {
+    if (validExternalId(game.steamAppId)) {
       orConditions.push({ steamAppId: game.steamAppId });
     }
 
@@ -55,12 +65,19 @@ export class PrismaGameRepository implements GameRepository {
         coverUrl: record.coverUrl ?? undefined,
         heroUrl: record.heroUrl ?? undefined,
         rating: record.rating ?? undefined,
+        isFree: record.isFree,
         releaseDate: record.releaseDate ?? undefined,
         igdbId: record.igdbId ?? undefined,
         steamAppId: record.steamAppId ?? undefined,
         genres: record.genres.map((g) => g.genre.name),
         platforms: record.platforms.map((p) => p.platform.name as GamePlatform),
         screenshots: record.media.filter((m) => m.type === 'SCREENSHOT').map((m) => m.url),
+        trailers: record.media
+          .filter((m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY')
+          .map((m) => m.url),
+        trailerDetails: record.media
+          .filter((m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY')
+          .map((m) => describeTrailer(m.url)),
         steam: latestSteam
           ? {
               storeUrl: latestSteam.storeUrl,
@@ -76,18 +93,35 @@ export class PrismaGameRepository implements GameRepository {
 
   async upsertByExternalId(game: NormalizedGame): Promise<NormalizedGame> {
     const baseSlug = game.slug || slugify(game.title);
+    const igdbId = validExternalId(game.igdbId) ? game.igdbId : undefined;
+    const steamAppId = validExternalId(game.steamAppId) ? game.steamAppId : undefined;
 
     // 1. Locate existing game if any
-    let existing = null;
-    if (game.igdbId) {
-      existing = await this.client.game.findUnique({ where: { igdbId: game.igdbId } });
+    const byIgdb = igdbId ? await this.client.game.findUnique({ where: { igdbId } }) : null;
+    const bySteam = steamAppId
+      ? await this.client.game.findUnique({ where: { steamAppId } })
+      : null;
+    if (byIgdb && bySteam && byIgdb.id !== bySteam.id) {
+      throw new Error(
+        `External IDs point to different games (IGDB ${igdbId}, Steam ${steamAppId}).`,
+      );
     }
-    if (!existing && game.steamAppId) {
-      existing = await this.client.game.findUnique({ where: { steamAppId: game.steamAppId } });
-    }
-    if (!existing) {
+    let existing = byIgdb ?? bySteam;
+    // A source record with an external ID must not silently reuse a slug-only
+    // row: that could merge a remake, edition or demo that deliberately did
+    // not pass the conservative metadata matcher. Slug upserts remain useful
+    // for local/legacy fixtures that have no external identity.
+    if (!existing && igdbId === undefined && steamAppId === undefined) {
       existing = await this.client.game.findUnique({ where: { slug: baseSlug } });
     }
+
+    const source = igdbId !== undefined ? 'IGDB' : steamAppId !== undefined ? 'STEAM' : undefined;
+    const sourceId =
+      igdbId !== undefined
+        ? String(igdbId)
+        : steamAppId !== undefined
+          ? String(steamAppId)
+          : undefined;
 
     let gameId: string;
 
@@ -103,9 +137,12 @@ export class PrismaGameRepository implements GameRepository {
           coverUrl: game.coverUrl ?? existing.coverUrl,
           heroUrl: game.heroUrl ?? existing.heroUrl,
           rating: game.rating ?? existing.rating,
+          isFree: game.isFree ?? existing.isFree,
           releaseDate: game.releaseDate ?? existing.releaseDate,
-          igdbId: game.igdbId ?? existing.igdbId,
-          steamAppId: game.steamAppId ?? existing.steamAppId,
+          igdbId: igdbId ?? existing.igdbId,
+          steamAppId: steamAppId ?? existing.steamAppId,
+          source: existing.source ?? source,
+          sourceId: existing.sourceId ?? sourceId,
           lastSyncedAt: new Date(),
         },
       });
@@ -113,7 +150,7 @@ export class PrismaGameRepository implements GameRepository {
       let finalSlug = baseSlug;
       const slugClash = await this.client.game.findUnique({ where: { slug: finalSlug } });
       if (slugClash) {
-        finalSlug = `${baseSlug}-${game.igdbId ?? game.steamAppId ?? Date.now()}`;
+        finalSlug = `${baseSlug}-${igdbId ?? steamAppId ?? Date.now()}`;
       }
 
       const created = await this.client.game.create({
@@ -126,9 +163,12 @@ export class PrismaGameRepository implements GameRepository {
           coverUrl: game.coverUrl,
           heroUrl: game.heroUrl,
           rating: game.rating,
+          isFree: game.isFree,
           releaseDate: game.releaseDate,
-          igdbId: game.igdbId,
-          steamAppId: game.steamAppId,
+          igdbId,
+          steamAppId,
+          source,
+          sourceId,
           lastSyncedAt: new Date(),
         },
       });
@@ -166,37 +206,40 @@ export class PrismaGameRepository implements GameRepository {
     }
 
     // 4. Synchronize screenshots
-    if (game.screenshots?.length) {
-      for (let i = 0; i < game.screenshots.length; i++) {
-        const url = game.screenshots[i];
-        const mediaExists = await this.client.gameMedia.findFirst({
-          where: { gameId, url },
+    const media = [
+      ...(game.screenshots ?? []).map((url) => ({ type: 'SCREENSHOT' as const, url })),
+      ...trailerUrls(game).map((url) => ({ type: 'TRAILER' as const, url })),
+    ];
+    for (let i = 0; i < media.length; i++) {
+      const { type, url } = media[i];
+      if (!url?.trim()) continue;
+      const mediaExists = await this.client.gameMedia.findFirst({
+        where: { gameId, url },
+      });
+      if (!mediaExists) {
+        await this.client.gameMedia.create({
+          data: {
+            gameId,
+            type,
+            url,
+            sortOrder: i,
+          },
         });
-        if (!mediaExists) {
-          await this.client.gameMedia.create({
-            data: {
-              gameId,
-              type: 'SCREENSHOT',
-              url,
-              sortOrder: i,
-            },
-          });
-        }
       }
     }
 
     // 5. Record steam offer if present
     if (game.steam) {
-      await this.client.steamOffer.create({
-        data: {
-          gameId,
-          storeUrl: game.steam.storeUrl,
-          priceCents: game.steam.priceCents,
-          discountPercent: game.steam.discountPercent,
-          currency: game.steam.currency,
-          isAvailable: game.steam.isAvailable,
-        },
-      });
+      const offer = {
+        gameId,
+        storeUrl: game.steam.storeUrl,
+        priceCents: game.steam.priceCents ?? null,
+        discountPercent: game.steam.discountPercent ?? null,
+        currency: game.steam.currency ?? null,
+        isAvailable: game.steam.isAvailable,
+      };
+      const offerExists = await this.client.steamOffer.findFirst({ where: offer });
+      if (!offerExists) await this.client.steamOffer.create({ data: offer });
     }
 
     return game;

@@ -5,6 +5,16 @@ export interface SteamAppDetailsDto {
     steam_appid?: number;
     short_description?: string;
     header_image?: string;
+    screenshots?: {
+      path_thumbnail?: string;
+      path_full?: string;
+    }[];
+    movies?: {
+      id?: number;
+      thumbnail?: string;
+      webm?: { max?: string; ['480']?: string };
+      mp4?: { max?: string; ['480']?: string };
+    }[];
     developers?: string[];
     publishers?: string[];
     release_date?: {

@@ -50,6 +50,8 @@ try {
       genres: ['RPG', 'Adventure'],
       platforms: ['PC', 'PlayStation'],
       screenshots: ['https://example.com/api-shot.jpg'],
+      trailers: ['https://example.com/api-trailer.mp4'],
+      isFree: true,
       steamAppId: 999123,
       steam: {
         storeUrl: 'https://store.steampowered.com/app/999123/',
@@ -104,6 +106,8 @@ try {
     const detailBody = JSON.parse(detailRes.payload);
     assert.equal(detailBody.title, `API Test Game ${token}`);
     assert.equal(detailBody.screenshots.length, 1);
+    assert.deepEqual(detailBody.trailers, ['https://example.com/api-trailer.mp4']);
+    assert.equal(detailBody.isFree, true);
     assert.equal(detailBody.steam?.priceCents, 4999);
 
     // 5. Detalhes de jogo por Steam AppId
@@ -133,6 +137,8 @@ try {
     const feedGame = feedBody.data.find((g) => g.slug === `api-test-game-${token}`);
     assert.ok(feedGame, 'Jogo criado deve estar disponível no feed');
     assert.equal(feedGame.matchScore, 95);
+    assert.deepEqual(feedGame.trailers, ['https://example.com/api-trailer.mp4']);
+    assert.equal(feedGame.isFree, true);
 
     await app.close();
   });

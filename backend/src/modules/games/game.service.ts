@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import type { PrismaDbClient } from './prisma-game.repository.js';
+import { describeTrailer, type NormalizedTrailer } from './normalized-game.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -22,6 +23,7 @@ export interface GameSummaryDto {
   releaseDate?: Date;
   coverUrl?: string;
   heroUrl?: string;
+  isFree: boolean;
   steamAppId?: number;
   igdbId?: number;
   genres: string[];
@@ -38,6 +40,12 @@ export interface GameSummaryDto {
 export interface GameDetailDto extends GameSummaryDto {
   screenshots: string[];
   trailers: string[];
+  trailerDetails: NormalizedTrailer[];
+  primaryTrailer?: NormalizedTrailer;
+}
+
+function orderedTrailerDetails(urls: string[]): NormalizedTrailer[] {
+  return urls.map(describeTrailer).sort((a, b) => Number(a.provider !== 'YOUTUBE') - Number(b.provider !== 'YOUTUBE'));
 }
 
 export class GameService {
@@ -114,6 +122,7 @@ export class GameService {
         releaseDate: record.releaseDate ?? undefined,
         coverUrl: record.coverUrl ?? undefined,
         heroUrl: record.heroUrl ?? undefined,
+        isFree: record.isFree,
         steamAppId: record.steamAppId ?? undefined,
         igdbId: record.igdbId ?? undefined,
         genres: record.genres.map((g) => g.genre.name),
@@ -181,6 +190,7 @@ export class GameService {
     const trailers = record.media
       .filter((m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY')
       .map((m) => m.url);
+    const trailerDetails = orderedTrailerDetails(trailers);
 
     return {
       id: record.id,
@@ -193,12 +203,15 @@ export class GameService {
       releaseDate: record.releaseDate ?? undefined,
       coverUrl: record.coverUrl ?? undefined,
       heroUrl: record.heroUrl ?? undefined,
+      isFree: record.isFree,
       steamAppId: record.steamAppId ?? undefined,
       igdbId: record.igdbId ?? undefined,
       genres: record.genres.map((g) => g.genre.name),
       platforms: record.platforms.map((p) => p.platform.name),
       screenshots,
       trailers,
+      trailerDetails,
+      primaryTrailer: trailerDetails[0],
       steam: latestSteam
         ? {
             storeUrl: latestSteam.storeUrl,
@@ -228,6 +241,10 @@ export class GameService {
       const latestSteam = record.steamOffers[0];
       const screenshots = record.media.filter((m) => m.type === 'SCREENSHOT').map((m) => m.url);
 
+      const trailers = record.media
+        .filter((m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY')
+        .map((m) => m.url);
+      const trailerDetails = orderedTrailerDetails(trailers);
       return {
         id: record.id,
         slug: record.slug,
@@ -238,11 +255,15 @@ export class GameService {
         rating: record.rating ? Number(record.rating.toFixed(1)) : null,
         coverUrl: record.coverUrl ?? null,
         heroUrl: record.heroUrl ?? null,
+        isFree: record.isFree,
         steamAppId: record.steamAppId ?? null,
         igdbId: record.igdbId ?? null,
         genres: record.genres.map((g) => g.genre.name),
         platforms: record.platforms.map((p) => p.platform.name),
         screenshots,
+        trailers,
+        trailerDetails,
+        primaryTrailer: trailerDetails[0],
         matchScore: 95, // Editorial baseline for MVP feed
         steam: latestSteam
           ? {

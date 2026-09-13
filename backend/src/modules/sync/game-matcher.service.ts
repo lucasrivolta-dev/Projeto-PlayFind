@@ -19,11 +19,14 @@ export function matchGames(a: NormalizedGame, b: NormalizedGame): MatchResult {
     score += 50;
     reasons.push('nome normalizado');
   } else return { matched: false, score: 0, reasons: ['nome incompatível'] };
-  if (
-    a.releaseDate &&
-    b.releaseDate &&
-    Math.abs(a.releaseDate.getTime() - b.releaseDate.getTime()) < 1000 * 60 * 60 * 24 * 730
-  ) {
+  if (a.releaseDate && b.releaseDate) {
+    const releaseDistance = Math.abs(a.releaseDate.getTime() - b.releaseDate.getTime());
+    if (releaseDistance > 1000 * 60 * 60 * 24 * 730) {
+      // Identical names separated by more than two years are commonly remakes,
+      // re-releases or different products. Keep them separate without a
+      // trusted external ID instead of relying on the remaining metadata.
+      return { matched: false, score, reasons: ['lançamentos distantes'] };
+    }
     score += 20;
     reasons.push('lançamento próximo');
   }

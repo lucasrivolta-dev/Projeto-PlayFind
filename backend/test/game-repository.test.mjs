@@ -47,6 +47,8 @@ try {
       genres: ['Action', 'Roguelike', 'Indie'],
       platforms: ['PC', 'Switch'],
       screenshots: ['https://example.com/hades-shot-1.jpg', 'https://example.com/hades-shot-2.jpg'],
+      trailers: ['https://example.com/hades-trailer.mp4'],
+      isFree: false,
       igdbId: 100000 + Math.floor(Math.random() * 800000),
       steamAppId: 200000 + Math.floor(Math.random() * 800000),
       steam: {
@@ -71,7 +73,12 @@ try {
     assert.deepEqual(stored.genres.sort(), ['Action', 'Indie', 'Roguelike']);
     assert.deepEqual(stored.platforms.sort(), ['PC', 'Switch']);
     assert.equal(stored.screenshots.length, 2);
+    assert.deepEqual(stored.trailers, ['https://example.com/hades-trailer.mp4']);
     assert.equal(stored.steam?.priceCents, 7399);
+    const persisted = await tx.game.findUnique({ where: { id: stored.id } });
+    assert.equal(persisted?.source, 'IGDB');
+    assert.equal(persisted?.sourceId, String(mockGame.igdbId));
+    assert.equal(persisted?.isFree, false);
 
     // 3. Atualização idempotente
     const updatedGame = {
@@ -91,6 +98,17 @@ try {
     assert.ok(updatedStored);
     assert.equal(updatedStored.rating, 9.5);
     assert.ok(updatedStored.genres.includes('RPG'));
+
+    const mediaCount = await tx.gameMedia.count({ where: { gameId: stored.id } });
+    assert.equal(mediaCount, 3, 'Mídia repetida deve permanecer idempotente');
+    const offerCount = await tx.steamOffer.count({ where: { gameId: stored.id } });
+    assert.equal(offerCount, 2, 'Uma nova cotação deve criar apenas um novo snapshot');
+    await repo.upsertByExternalId(updatedGame);
+    assert.equal(
+      await tx.steamOffer.count({ where: { gameId: stored.id } }),
+      2,
+      'O mesmo snapshot Steam não deve ser duplicado',
+    );
 
     // 4. Vinculação de IDs externos
     const newIgdbId = 999999;
