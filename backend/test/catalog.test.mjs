@@ -134,7 +134,10 @@ test('Steam enrichment keeps IGDB data and adds valid media and offer fields', (
     'https://youtube.example/igdb-trailer',
     'https://steam.example/trailer.mp4',
   ]);
-  assert.deepEqual(enriched.trailerDetails.map((trailer) => trailer.provider), ['OTHER', 'STEAM']);
+  assert.deepEqual(
+    enriched.trailerDetails.map((trailer) => trailer.provider),
+    ['OTHER', 'STEAM'],
+  );
   assert.equal(enriched.isFree, true);
   assert.equal(enriched.steam.priceCents, 1999);
 });
@@ -159,8 +162,55 @@ test('YouTube remains primary, Steam is fallback, and repeated videos are dedupl
   );
   assert.equal(steamFallback.trailerDetails[0].provider, 'STEAM');
 
-  const repeated = mapIgdbGame({ id: 9, name: 'Repeated', videos: [{ video_id: 'same' }, { video_id: 'same' }] });
+  const repeated = mapIgdbGame({
+    id: 9,
+    name: 'Repeated',
+    videos: [{ video_id: 'same' }, { video_id: 'same' }],
+  });
   assert.equal(repeated.trailerDetails.length, 1);
+});
+
+test('Multiple Steam IDs are preserved for later validation instead of aborting mapping', () => {
+  const game = mapIgdbGame({
+    id: 194821,
+    name: 'Nine Sols',
+    external_games: [
+      { uid: '1913920', external_game_source: { name: 'Steam' } },
+      { uid: '1809540', external_game_source: { name: 'Steam' } },
+    ],
+  });
+  assert.equal(game.steamAppId, undefined);
+  assert.deepEqual(game.steamAppIds, [1913920, 1809540]);
+});
+
+test('Steam validation chooses the exact primary app and rejects playtest candidates', async () => {
+  const client = new SteamClient('', async (url) => {
+    const id = Number(new URL(String(url)).searchParams.get('appids'));
+    const name = id === 1809540 ? 'Nine Sols' : 'Nine Sols Playtest';
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ [id]: { success: true, data: { name, steam_appid: id } } }),
+    };
+  });
+  assert.equal(await client.resolvePrimaryApp('Nine Sols', [1913920, 1809540]), 1809540);
+  // Rejecting the playtest leaves one usable app, even without an exact name match.
+  assert.equal(await client.resolvePrimaryApp('Unknown', [1913920, 1809540]), 1809540);
+  assert.equal(await client.resolvePrimaryApp('Nine Sols', [1913920]), undefined);
+});
+
+test('Steam validation leaves genuinely ambiguous candidates unresolved', async () => {
+  const client = new SteamClient('', async (url) => {
+    const id = Number(new URL(String(url)).searchParams.get('appids'));
+    const name = id === 10 ? 'Candidate One' : 'Candidate Two';
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ [id]: { success: true, data: { name, steam_appid: id } } }),
+    };
+  });
+  assert.equal(await client.resolvePrimaryApp('Unknown', [10, 20]), undefined);
+  assert.equal(await client.resolvePrimaryApp('Unknown', [20, 10]), undefined);
 });
 
 test('Steam client returns only successful details and matches normalized names', async () => {

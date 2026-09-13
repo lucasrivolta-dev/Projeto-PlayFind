@@ -55,6 +55,8 @@ export interface NormalizedGame {
   isFree?: boolean;
   igdbId?: number;
   steamAppId?: number;
+  /** All valid Steam candidates from IGDB when more than one external app exists. */
+  steamAppIds?: number[];
   steam?: {
     storeUrl: string;
     priceCents?: number;

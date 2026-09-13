@@ -221,8 +221,7 @@ test('Mapper skips malformed IDs and rejects ambiguous Steam identities', () => 
   for (const uid of [0, -1, 1.5, '1e3', '', Number.MAX_SAFE_INTEGER + 1]) {
     assert.equal(mapIgdbGame({ ...modern, external_games: [steam(uid)] }).steamAppId, undefined);
   }
-  assert.throws(
-    () => mapIgdbGame({ ...modern, external_games: [steam('1145360'), steam('123')] }),
-    /Conflicting Steam IDs/,
-  );
+  const ambiguous = mapIgdbGame({ ...modern, external_games: [steam('1145360'), steam('123')] });
+  assert.equal(ambiguous.steamAppId, undefined);
+  assert.deepEqual(ambiguous.steamAppIds, [1145360, 123]);
 });

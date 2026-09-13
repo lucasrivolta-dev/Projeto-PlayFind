@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import {
+  buildSyncQuery,
+  ensureVideoField,
+  parseSyncArgs,
+  rankDiscoverCandidates,
+} from '../dist/modules/integrations/igdb/igdb-query.js';
 
 test('Default IGDB sync query preserves catalog fields without invalid popularity', async () => {
   // Inspect the CLI default without executing a real sync or loading credentials.
@@ -15,8 +21,74 @@ test('Default IGDB sync query preserves catalog fields without invalid popularit
   assert.doesNotMatch(query, /\bpopularity\b/);
   assert.equal(
     query,
-    'fields name,slug,summary,cover.url,artworks.url,screenshots.url,videos.video_id,external_games.uid,external_games.external_game_source.name,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,total_rating; where version_parent = null; limit 50;',
+    'fields name,slug,summary,cover.url,artworks.url,screenshots.url,videos.video_id,external_games.uid,external_games.external_game_source.name,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,rating_count,total_rating,total_rating_count; where version_parent = null; limit 50;',
   );
   assert.match(querySource, /videos\\.video_id/);
   assert.match(source, /ensureVideoField\(process\.env\.IGDB_SYNC_QUERY/);
+  assert.match(query, /rating_count/);
+  assert.match(query, /total_rating_count/);
+  assert.match(query, /videos\.video_id/);
+});
+
+test('Controlled CLI modes validate limits and generate safe IGDB queries', () => {
+  assert.deepEqual(parseSyncArgs(['--id', '113112']), {
+    mode: 'id',
+    limit: 1,
+    dryRun: false,
+    igdbId: 113112,
+  });
+  assert.equal(parseSyncArgs(['--', '--mode', 'discover']).mode, 'discover');
+  assert.throws(() => parseSyncArgs(['--unknown']));
+  assert.equal(
+    buildSyncQuery(parseSyncArgs(['--id', '113112'])).includes('where id = 113112; limit 1;'),
+    true,
+  );
+  const popular = buildSyncQuery(parseSyncArgs(['--mode', 'popular', '--limit', '5']));
+  assert.match(popular, /total_rating_count != null/);
+  assert.match(popular, /sort total_rating_count desc/);
+  assert.doesNotMatch(popular, /sort rating desc/);
+  assert.doesNotMatch(popular, /\bpopularity\b/);
+  const recent = buildSyncQuery(
+    parseSyncArgs(['--mode', 'recent', '--limit', '5']),
+    new Date('2026-09-13T00:00:00Z'),
+  );
+  assert.match(recent, /first_release_date >= \d+ & first_release_date <= \d+/);
+  assert.match(recent, /sort first_release_date desc/);
+  assert.throws(() => parseSyncArgs(['--limit', '0']));
+  assert.throws(() => parseSyncArgs(['--limit', '101']));
+  assert.throws(() => parseSyncArgs(['--limit', '1.5']));
+  assert.throws(() => parseSyncArgs(['--id', '113112', '--mode', 'recent']));
+  assert.equal(ensureVideoField('fields name; limit 5;'), 'fields name,videos.video_id; limit 5;');
+  assert.equal(
+    ensureVideoField('fields name,videos.video_id; limit 5;'),
+    'fields name,videos.video_id; limit 5;',
+  );
+});
+
+test('Discover uses a bounded pool and Bayesian deterministic ranking', () => {
+  const query = buildSyncQuery(
+    parseSyncArgs(['--mode', 'discover', '--limit', '20']),
+    new Date('2026-09-13T00:00:00Z'),
+  );
+  assert.match(query, /game_type = 0/);
+  assert.match(query, /first_release_date >= \d+ & first_release_date <= \d+/);
+  assert.match(query, /total_rating >= 70/);
+  assert.match(query, /total_rating_count >= 20 & total_rating_count <= 500/);
+  assert.match(query, /limit 100/);
+  assert.doesNotMatch(query, /popularity|sort rating desc/);
+  const ranked = rankDiscoverCandidates([
+    { id: 1, name: 'Tiny', total_rating: 99, total_rating_count: 20 },
+    { id: 2, name: 'Evidence', total_rating: 90, total_rating_count: 200 },
+    { id: 3, name: 'Tie A', total_rating: 80, total_rating_count: 50 },
+    { id: 4, name: 'Tie B', total_rating: 80, total_rating_count: 50 },
+  ]);
+  assert.ok(
+    ranked.find((item) => item.id === 1).adjustedRating <
+      ranked.find((item) => item.id === 2).adjustedRating,
+  );
+  assert.deepEqual(
+    ranked.slice(-2).map((item) => item.id),
+    [3, 4],
+  );
+  assert.equal(parseSyncArgs(['--mode', 'discover', '--limit', '20', '--dry-run']).dryRun, true);
 });

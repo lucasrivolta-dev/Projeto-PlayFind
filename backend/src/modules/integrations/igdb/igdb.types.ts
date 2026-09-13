@@ -1,10 +1,13 @@
 export interface IgdbGameDto {
   id: number;
   name: string;
+  game_type?: number;
   slug?: string;
   summary?: string;
   rating?: number;
   total_rating?: number;
+  rating_count?: number;
+  total_rating_count?: number;
   popularity?: number;
   first_release_date?: number;
   cover?: {

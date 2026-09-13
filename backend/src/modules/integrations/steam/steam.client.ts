@@ -32,6 +32,23 @@ export class SteamClient {
     const normalized = normalizeName(name);
     return body.applist?.apps?.find((app) => normalizeName(app.name) === normalized)?.appid;
   }
+
+  async resolvePrimaryApp(name: string, candidates: number[]): Promise<number | undefined> {
+    const valid = [...new Set(candidates)].filter((id) => Number.isSafeInteger(id) && id > 0);
+    const details = await Promise.all(
+      valid.map(async (id) => ({ id, detail: await this.details(id) })),
+    );
+    const normalized = normalizeName(name);
+    const usable = details.filter(({ detail }) => {
+      const value = normalizeName(detail?.data?.name ?? '');
+      return value && !/(playtest|beta|demo|dlc|soundtrack|tool)/i.test(value);
+    });
+    const exact = usable.find(
+      ({ detail }) => normalizeName(detail?.data?.name ?? '') === normalized,
+    );
+    if (exact) return exact.id;
+    return usable.length === 1 ? usable[0].id : undefined;
+  }
 }
 
 function normalizeName(name: string) {

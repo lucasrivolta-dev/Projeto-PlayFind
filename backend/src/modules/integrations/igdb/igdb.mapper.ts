@@ -43,8 +43,8 @@ export function mapIgdbGame(dto: IgdbGameDto): NormalizedGame {
     const id = Number(uid);
     if (Number.isSafeInteger(id) && id > 0) steamIds.add(id);
   }
-  if (steamIds.size > 1) throw new Error(`Conflicting Steam IDs for IGDB ${dto.id}`);
-  const steamAppId = steamIds.values().next().value;
+  const steamAppIds = [...steamIds];
+  const steamAppId = steamAppIds.length === 1 ? steamAppIds[0] : undefined;
   const trailerDetails: NormalizedTrailer[] = [];
   for (const video of dto.videos ?? []) {
     const videoId = video.video_id?.trim();
@@ -65,6 +65,7 @@ export function mapIgdbGame(dto: IgdbGameDto): NormalizedGame {
     rating: rating(dto.rating ?? dto.total_rating),
     igdbId: dto.id,
     steamAppId,
+    ...(steamAppIds.length > 1 ? { steamAppIds } : {}),
     coverUrl: image(dto.cover?.url),
     heroUrl: image(dto.artworks?.[0]?.url),
     screenshots: (dto.screenshots ?? [])
