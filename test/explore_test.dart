@@ -50,7 +50,7 @@ void main() {
 
       await controller.load();
 
-      final ids = <int>{};
+      final ids = <String>{};
 
       while (controller.nextGame != null) {
         expect(ids.add(controller.nextGame!.id), isTrue);

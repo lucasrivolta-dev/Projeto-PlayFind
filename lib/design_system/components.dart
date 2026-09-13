@@ -40,15 +40,31 @@ class GenreChip extends StatelessWidget {
 class GameArtwork extends StatelessWidget {
   const GameArtwork(
       {super.key,
-      required this.appId,
+      this.appId,
+      this.heroUrl,
+      this.coverUrl,
       required this.title,
       this.cover = false});
-  final int appId;
+  /// Explicit Steam App ID only. Never pass a generic game/IGDB ID.
+  final int? appId;
+  final String? heroUrl, coverUrl;
   final String title;
   final bool cover;
   @override
-  Widget build(BuildContext context) => Image.network(
+  Widget build(BuildContext context) {
+    final urls = [heroUrl, coverUrl,
+      if (appId != null && appId! > 0)
         'https://cdn.akamai.steamstatic.com/steam/apps/$appId/${cover ? 'library_600x900_2x.jpg' : 'header.jpg'}',
+    ].whereType<String>().where((url) {
+      final uri = Uri.tryParse(url);
+      return uri != null && uri.host.isNotEmpty &&
+          (uri.scheme == 'https' || uri.scheme == 'http');
+    }).toSet().toList();
+    final placeholder = ColoredBox(color: AppColors.high,
+      child: Center(child: Padding(padding: const EdgeInsets.all(AppSpacing.xs),
+        child: Text(title, textAlign: TextAlign.center, style: AppTypography.label(10)))));
+    Widget at(int index) => index >= urls.length ? placeholder : Image.network(
+        urls[index],
         fit: BoxFit.cover,
         semanticLabel: 'Capa de $title',
         loadingBuilder: (context, child, progress) => progress == null
@@ -58,15 +74,10 @@ class GameArtwork extends StatelessWidget {
                 child: Center(
                     child: Icon(Icons.sports_esports_outlined,
                         color: AppColors.muted))),
-        errorBuilder: (context, error, stack) => ColoredBox(
-            color: AppColors.high,
-            child: Center(
-                child: Padding(
-                    padding: const EdgeInsets.all(AppSpacing.xs),
-                    child: Text(title,
-                        textAlign: TextAlign.center,
-                        style: AppTypography.label(10))))),
+        errorBuilder: (context, error, stack) => at(index + 1),
       );
+    return at(0);
+  }
 }
 
 class SectionHeading extends StatelessWidget {

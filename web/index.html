@@ -7,7 +7,17 @@
   <meta name="description" content="Seu universo gamer. Descubra jogos e encontre sua próxima aventura no NextPlay.">
   <meta name="theme-color" content="#0B0E14">
   <title>NextPlay · Perfil</title>
-  <style>html,body { background: #0B0E14; margin: 0; height: 100%; }</style>
+  <style>
+    html,body { background: #0B0E14; margin: 0; height: 100%; }
+    /* O player de trailer do YouTube e as platform views sao puramente audiovisuais no feed.
+       Desabilitar eventos de ponteiro no DOM nativo impede que o iframe capture foco,
+       bloqueie wheel scroll ou congele a arena de gestos do Flutter. */
+    flt-platform-view,
+    flt-platform-view iframe,
+    iframe[id^="youtube-"] {
+      pointer-events: none !important;
+    }
+  </style>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>

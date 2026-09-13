@@ -41,7 +41,7 @@ void main() {
 
       final game = DiscoveryGame.fromJson(json);
 
-      expect(game.id, 1145350);
+      expect(game.id, 'a1b2c3d4-e5f6-7890-abcd-ef1234567890');
       expect(game.title, 'Hades II');
       expect(game.studio, 'Supergiant Games');
       expect(game.genre, 'Roguelike');
@@ -52,16 +52,38 @@ void main() {
       expect(game.free, isFalse);
     });
 
-    test('gera ID numérico consistente caso steamAppId e igdbId não existam', () {
+    test('preserva ID interno mesmo sem IDs externos', () {
       final json = {
         'id': 'some-uuid-string-identifier',
         'title': 'Indie Game',
       };
 
       final game = DiscoveryGame.fromJson(json);
-      expect(game.id, isPositive);
+      expect(game.id, 'some-uuid-string-identifier');
       expect(game.title, 'Indie Game');
       expect(game.genre, 'Geral');
+    });
+
+    test('ID interno permanece igual com Steam, IGDB ou ambos', () {
+      const id = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+      for (final externalIds in [
+        {'steamAppId': 1145360, 'igdbId': 113112},
+        {'steamAppId': 1145360},
+        {'igdbId': 113112},
+        <String, int>{},
+      ]) {
+        final game = DiscoveryGame.fromJson({'id': id, ...externalIds});
+        expect(game.id, id);
+        expect(game.steamAppId, externalIds['steamAppId']);
+        expect(game.igdbId, externalIds['igdbId']);
+      }
+    });
+
+    test('não inventa identidade quando a API omite ID interno', () {
+      expect(
+        () => DiscoveryGame.fromJson({'steamAppId': 1145360}),
+        throwsFormatException,
+      );
     });
   });
 
@@ -97,7 +119,7 @@ void main() {
 
       expect(games.length, 1);
       expect(games.first.title, 'API Game Test');
-      expect(games.first.id, 123456);
+      expect(games.first.id, 'test-id-1');
       // Campos adicionados na integração com a API real.
       expect(games.first.slug, 'api-game-test');
       expect(games.first.coverUrl, 'https://example.com/cover.jpg');

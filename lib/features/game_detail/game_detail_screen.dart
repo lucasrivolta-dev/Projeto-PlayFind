@@ -230,7 +230,7 @@ class GameDetailScreen extends StatelessWidget {
                                         child: AspectRatio(
                                             aspectRatio: 16 / 9,
                                             child: GameArtwork(
-                                                appId: game.id,
+                                                appId: game.steamAppId, heroUrl: game.heroUrl, coverUrl: game.coverUrl,
                                                 title: game.title))),
                                     const SizedBox(height: AppSpacing.sm),
                                     Text('Explore o universo de ${game.title}',
@@ -314,7 +314,7 @@ class _GameHero extends StatelessWidget {
         AspectRatio(
             aspectRatio: 16 / 9,
             child: Stack(fit: StackFit.expand, children: [
-              GameArtwork(appId: game.id, title: game.title),
+              GameArtwork(appId: game.steamAppId, heroUrl: game.heroUrl, coverUrl: game.coverUrl, title: game.title),
               const DecoratedBox(
                   decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -332,7 +332,7 @@ class _GameHero extends StatelessWidget {
                       child: AspectRatio(
                           aspectRatio: 2 / 3,
                           child: GameArtwork(
-                              appId: game.id,
+                              appId: game.steamAppId, heroUrl: game.heroUrl, coverUrl: game.coverUrl,
                               title: game.title,
                               cover: true)))),
               const SizedBox(width: AppSpacing.sm),
@@ -422,7 +422,7 @@ class _SimilarGames extends StatelessWidget {
                                       AspectRatio(
                                           aspectRatio: 2 / 3,
                                           child: GameArtwork(
-                                              appId: other.id,
+                                              appId: other.steamAppId, heroUrl: other.heroUrl, coverUrl: other.coverUrl,
                                               title: other.title,
                                               cover: true)),
                                       Padding(

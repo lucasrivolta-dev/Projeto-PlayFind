@@ -16,8 +16,8 @@ class ExploreController extends ChangeNotifier {
   ExploreStatus status = ExploreStatus.loading;
   List<DiscoveryGame> games = [];
   String query = '', category = 'Todos', platform = 'Todas';
-  final Map<int, bool> choices = {};
-  Set<int> get saved => library.saved;
+  final Map<String, bool> choices = {};
+  Set<String> get saved => library.saved;
   bool _disposed = false;
   void _emit() {
     if (!_disposed) notifyListeners();
@@ -116,7 +116,7 @@ class ExploreController extends ChangeNotifier {
     _emit();
   }
 
-  void toggleSaved(int id) {
+  void toggleSaved(String id) {
     library.toggleSaved(id);
   }
 

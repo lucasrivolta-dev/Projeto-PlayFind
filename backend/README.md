@@ -13,17 +13,20 @@ pnpm.cmd run prisma:status
 pnpm.cmd run dev
 ```
 
-O servidor escuta somente `127.0.0.1:3333`. `GET /health` verifica se está ativo. A migration inicial já foi aplicada ao banco local; não edite migrations aplicadas nem use reset para resolver divergências. O seed de desenvolvimento contém 10 jogos e usa upsert por identidade externa.
+O servidor escuta somente `127.0.0.1:3333`. `GET /health` verifica se está ativo. As migrations versionadas devem ser aplicadas com `pnpm.cmd run prisma:deploy`; não edite migrations aplicadas nem use reset para resolver divergências. O seed de desenvolvimento contém 10 jogos e usa upsert por identidade externa.
 
 ## API atual
 
-- `GET /api/v1/games`, `GET /api/v1/games/:idOrSlug`, `GET /api/v1/feed`: catálogo e feed públicos. As respostas incluem os identificadores IGDB/Steam, `isFree` e, nos detalhes/feed, mídia normalizada.
-- `GET /api/v1/library`: biblioteca do usuário local com status, favorito, avaliação e `igdbId`; o campo `likes` traz curtidas mesmo de jogos fora da biblioteca.
+- `GET /api/v1/games`, `GET /api/v1/games/:idOrSlug`, `GET /api/v1/feed`: catálogo e feed públicos. Cada jogo inclui `id` (UUID interno), além de `igdbId` e `steamAppId` opcionais, `isFree` e mídia normalizada conforme a rota.
+- `GET /api/v1/library`: um item por usuário e jogo com `gameId` e `game.id` internos, status, `liked`, favorito, avaliação e IDs externos opcionais. Jogos apenas curtidos ou favoritados aparecem com `status: null`; linhas vazias não aparecem. Aceita filtros `status`, `favorite=true`, `liked=true` e `rated=true`. O campo `likes` continua disponível e inclui `gameId`.
+- `GET /api/v1/library/:gameId/interaction` e `PATCH /api/v1/library/:gameId/interaction`: `gameId` exige o UUID interno. Leem ou definem campos independentes (`liked`, `isFavorite`, `status`, `rating`, `reviewText`) de forma idempotente. `status` aceita `WANT_TO_PLAY`, `PLAYED` ou `null`; nota inteira de 1 a 5 implica `PLAYED`.
 - `PUT /api/v1/library/:gameId`: define `WANT_TO_PLAY` ou `PLAYED`.
-- `DELETE /api/v1/library/:gameId`: remove da biblioteca.
+- `DELETE /api/v1/library/:gameId`: limpa status e avaliação, preservando curtida e favorito independentes.
 - `POST /api/v1/library/:gameId/favorite`: define/alternar favorito.
 - `POST /api/v1/library/:gameId/like`: alterna curtida persistida.
 - `POST` e `DELETE /api/v1/library/:gameId/rate`: atribui ou remove nota. Atribuir nota implica `PLAYED`.
+
+`UserGameLibrary` é a fonte única do estado usuário-jogo, protegida pela chave composta `(userId, gameId)`. A migration de consolidação copiou as curtidas antigas antes de remover `GameLike`; não altera jogos nem comentários. Quando a última interação é removida, o registro vazio é eliminado. Os endpoints anteriores continuam aceitando identificadores legados por compatibilidade; o Flutter usa o UUID interno.
 
 Em desenvolvimento automatizado, `allowTestUsers: true` aceita explicitamente `x-user-id: dev-user`. No servidor normal, as rotas pessoais exigem `Authorization: Bearer <Firebase ID token>`; o token é validado pelo Firebase Admin e somente o `uid` verificado identifica o usuário. Configure `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL` e `FIREBASE_PRIVATE_KEY` no `.env` local. Nunca versione a chave privada nem use `x-user-id` no fluxo normal.
 

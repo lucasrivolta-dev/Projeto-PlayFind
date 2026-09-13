@@ -15,19 +15,24 @@ test('Default IGDB sync query preserves catalog fields without invalid popularit
     new URL('../src/modules/integrations/igdb/igdb-query.ts', import.meta.url),
     'utf8',
   );
-  const match = querySource.match(/DEFAULT_IGDB_SYNC_QUERY\s*=\s*\n\s*'([^']+)'/);
+  const match = querySource.match(/DEFAULT_IGDB_SYNC_QUERY\s*=\n\s*'([^']+)'/);
   assert.ok(match, 'The sync script must provide its default query');
   const query = match[1];
   assert.doesNotMatch(query, /\bpopularity\b/);
+  // Ensure the new quality-filtered default query is correct.
   assert.equal(
     query,
-    'fields name,slug,summary,cover.url,artworks.url,screenshots.url,videos.video_id,external_games.uid,external_games.external_game_source.name,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,rating_count,total_rating,total_rating_count; where version_parent = null; limit 50;',
+    'fields name,slug,summary,cover.url,artworks.url,screenshots.url,videos.video_id,videos.name,external_games.uid,external_games.external_game_source.name,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,rating_count,total_rating,total_rating_count; where game_type = 0 & version_parent = null & cover != null & total_rating_count >= 10 & total_rating >= 60; sort total_rating desc; limit 50;',
   );
-  assert.match(querySource, /videos\\.video_id/);
+  assert.match(querySource, /videos\.video_id/);
   assert.match(source, /ensureVideoField\(process\.env\.IGDB_SYNC_QUERY/);
   assert.match(query, /rating_count/);
   assert.match(query, /total_rating_count/);
   assert.match(query, /videos\.video_id/);
+  // Certifica que a nova query usa filtros de qualidade
+  assert.match(query, /game_type = 0/);
+  assert.match(query, /cover != null/);
+  assert.match(query, /total_rating >= 60/);
 });
 
 test('Controlled CLI modes validate limits and generate safe IGDB queries', () => {

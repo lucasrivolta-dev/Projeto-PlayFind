@@ -6,13 +6,19 @@ import '../../design_system/components.dart';
 import '../../design_system/theme.dart';
 import 'feed_controller.dart';
 import 'feed_comments_sheet.dart';
+import 'feed_trailer.dart';
+import 'feed_pager.dart';
+import 'trailer_player.dart';
 import '../auth/auth_controller.dart';
 import '../auth/auth_screen.dart';
 
 class FeedScreen extends StatefulWidget {
-  const FeedScreen({super.key, required this.controller, this.auth});
+  const FeedScreen({super.key, required this.controller, this.auth,
+    this.active = true, this.playerFactory = YoutubeTrailerPlayer.new});
   final FeedController controller;
   final AuthController? auth;
+  final bool active;
+  final TrailerPlayerFactory playerFactory;
 
   @override
   State<FeedScreen> createState() => _FeedScreenState();
@@ -111,12 +117,20 @@ class _FeedScreenState extends State<FeedScreen> {
               return Center(
                   child: SizedBox(
                       width: width,
-                      child: PageView.builder(
-                          scrollDirection: Axis.vertical,
+                      child: widget.controller.items.isEmpty
+                          ? const Center(child: Text('Nenhum jogo disponível.'))
+                          : FeedPager(
+                        active: widget.active,
+                        frameBuilder: (pages) => FeedTrailer(
+                        game: widget.controller.items[widget.controller.current].game,
+                        active: widget.active && (ModalRoute.of(context)?.isCurrent ?? true),
+                        playerFactory: widget.playerFactory,
+                        child: pages),
                           itemCount: widget.controller.items.length,
                           onPageChanged: widget.controller.setCurrent,
                           itemBuilder: (context, index) => _FeedPage(
                               item: widget.controller.items[index],
+                              active: index == widget.controller.current,
                               controller: widget.controller,
                               onProtected: (action) =>
                                   _protected(context, action),
@@ -131,17 +145,19 @@ class _FeedScreenState extends State<FeedScreen> {
 class _FeedPage extends StatelessWidget {
   const _FeedPage(
       {required this.item,
+      required this.active,
       required this.controller,
       required this.onComments,
       required this.onDetails,
       required this.onProtected});
   final FeedItem item;
+  final bool active;
   final FeedController controller;
   final VoidCallback onComments, onDetails;
   final Future<void> Function(VoidCallback action) onProtected;
   @override
   Widget build(BuildContext context) => Stack(fit: StackFit.expand, children: [
-        GameArtwork(appId: item.game.id, title: item.game.title, cover: true),
+        if (!active) FeedArtwork(game: item.game),
         DecoratedBox(
             decoration: BoxDecoration(
                 gradient: LinearGradient(

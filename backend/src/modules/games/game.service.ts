@@ -226,9 +226,18 @@ export class GameService {
 
   async getFeedGames(limit = 20) {
     const safeLimit = Math.min(50, Math.max(1, limit));
-    const records = await this.prisma.game.findMany({
+    // Busca primeiro os jogos que possuem mídia do tipo TRAILER ou GAMEPLAY,
+    // ordenados por nota decrescente (com notas nulas por último).
+    const withTrailer = await this.prisma.game.findMany({
       take: safeLimit,
-      orderBy: [{ rating: 'desc' }, { createdAt: 'desc' }],
+      where: {
+        media: {
+          some: {
+            type: { in: ['TRAILER', 'GAMEPLAY'] },
+          },
+        },
+      },
+      orderBy: [{ rating: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
       include: {
         genres: { include: { genre: true } },
         platforms: { include: { platform: true } },
@@ -237,10 +246,34 @@ export class GameService {
       },
     });
 
-    return records.map((record) => {
+    const remaining = safeLimit - withTrailer.length;
+    const withoutTrailer =
+      remaining > 0
+        ? await this.prisma.game.findMany({
+            take: remaining,
+            where: {
+              id: { notIn: withTrailer.map((g) => g.id) },
+            },
+            orderBy: [{ rating: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+            include: {
+              genres: { include: { genre: true } },
+              platforms: { include: { platform: true } },
+              media: { orderBy: { sortOrder: 'asc' } },
+              steamOffers: { orderBy: { capturedAt: 'desc' }, take: 1 },
+            },
+          })
+        : [];
+
+    const records = [...withTrailer, ...withoutTrailer];
+
+    // Deduplicação defensiva por id (o Prisma já garante unicidade, mas é uma
+    // salvaguarda caso queries futuras alterem o comportamento).
+    const seen = new Set<string>();
+    const unique = records.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+
+    const toDto = (record: (typeof records)[number]) => {
       const latestSteam = record.steamOffers[0];
       const screenshots = record.media.filter((m) => m.type === 'SCREENSHOT').map((m) => m.url);
-
       const trailers = record.media
         .filter((m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY')
         .map((m) => m.url);
@@ -275,6 +308,8 @@ export class GameService {
             }
           : null,
       };
-    });
+    };
+
+    return unique.slice(0, safeLimit).map(toDto);
   }
 }

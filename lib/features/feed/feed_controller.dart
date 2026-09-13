@@ -39,19 +39,19 @@ class FeedController extends ChangeNotifier {
   bool error = false;
   List<FeedItem> items = [];
   int current = 0;
-  Set<int> get liked => library.liked;
-  Set<int> get saved => library.saved;
-  Set<int> get played => library.played;
-  final Map<int, List<FeedComment>> addedComments = {};
-  final Map<int, Set<FeedComment>> _likedComments = {};
+  Set<String> get liked => library.liked;
+  Set<String> get saved => library.saved;
+  Set<String> get played => library.played;
+  final Map<String, List<FeedComment>> addedComments = {};
+  final Map<String, Set<FeedComment>> _likedComments = {};
 
-  bool isCommentLiked(int gameId, FeedComment comment) =>
+  bool isCommentLiked(String gameId, FeedComment comment) =>
       _likedComments[gameId]?.contains(comment) ?? false;
 
-  int commentLikeCount(int gameId, FeedComment comment) =>
+  int commentLikeCount(String gameId, FeedComment comment) =>
       comment.likes + (isCommentLiked(gameId, comment) ? 1 : 0);
 
-  void toggleCommentLike(int gameId, FeedComment comment) {
+  void toggleCommentLike(String gameId, FeedComment comment) {
     final likes = _likedComments.putIfAbsent(gameId, () => {});
     if (!likes.add(comment)) likes.remove(comment);
     _emit();
@@ -68,7 +68,12 @@ class FeedController extends ChangeNotifier {
     error = false;
     _emit();
     try {
-      final games = await repository();
+      final rawGames = await repository();
+      // Deduplicação defensiva: o backend garante unicidade por UUID, mas
+      // proteção extra evita cards duplicados em caso de bug de paginação ou
+      // recarregamento acidental.
+      final seen = <String>{};
+      final games = rawGames.where((g) => seen.add(g.id)).toList();
       items = games.asMap().entries.map((entry) {
         final index = entry.key;
         final game = entry.value;
@@ -108,6 +113,8 @@ class FeedController extends ChangeNotifier {
             caption: captions[index % captions.length],
             comments: comments);
       }).toList();
+      // Loading replaces the PageView; its first page and trailer must agree.
+      current = 0;
     } catch (_) {
       error = true;
     }
@@ -120,19 +127,19 @@ class FeedController extends ChangeNotifier {
     _emit();
   }
 
-  void toggleLike(int id) {
+  void toggleLike(String id) {
     library.toggleLike(id);
   }
 
-  void toggleSave(int id) {
+  void toggleSave(String id) {
     library.toggleSaved(id);
   }
 
-  void markPlayed(int id) {
+  void markPlayed(String id) {
     library.markPlayed(id);
   }
 
-  void addComment(int id, String text) {
+  void addComment(String id, String text) {
     final value = text.trim();
     if (value.isEmpty) return;
     (addedComments[id] ??= [])

@@ -23,14 +23,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
     'Quero jogar',
     'Já joguei',
     'Favoritos',
+    'Curtidos',
     'Avaliações'
   ];
-  Set<int> ids(String value) {
+  Set<String> ids(String value) {
     final store = widget.controller.library;
     return switch (value) {
       'Quero jogar' => store.saved,
       'Já joguei' => store.played,
       'Favoritos' => store.favorites,
+      'Curtidos' => store.liked,
       'Avaliações' => store.ratings.keys.toSet(),
       _ => store.all,
     };
@@ -52,7 +54,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
         listenable: widget.controller,
         builder: (context, _) {
           final controller = widget.controller;
-          final games = controller.games
+          final catalog = {
+            ...controller.library.gamesById,
+            for (final game in controller.games) game.id: game,
+          };
+          final games = catalog.values
               .where((game) =>
                   ids(category).contains(game.id) &&
                   ExploreController.normalize(game.title).contains(
@@ -283,7 +289,7 @@ class _LibraryGameCard extends StatelessWidget {
         child: AspectRatio(
             aspectRatio: 2 / 3,
             child: Stack(fit: StackFit.expand, children: [
-              GameArtwork(appId: game.id, title: game.title, cover: true),
+              GameArtwork(appId: game.steamAppId, heroUrl: game.heroUrl, coverUrl: game.coverUrl, title: game.title, cover: true),
               Positioned(
                   top: AppSpacing.xs,
                   left: AppSpacing.xs,

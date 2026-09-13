@@ -8,6 +8,36 @@ import 'package:nextplay/features/library/library_store.dart';
 import 'package:nextplay/features/library/library_screen.dart';
 
 void main() {
+  testWidgets('Library mostra jogo persistido fora da primeira página do catálogo',
+      (tester) async {
+    final store = LibraryStore();
+    final controller = ExploreController(DemoExploreRepository(), library: store);
+    addTearDown(controller.dispose);
+    addTearDown(store.dispose);
+    await controller.load();
+    store.loadFromApi([
+      {
+        'game': {
+          'id': 'game-194821', 'igdbId': 194821,
+          'title': 'Nine Sols',
+          'genres': ['Ação'],
+          'platforms': ['PC'],
+        },
+        'status': 'WANT_TO_PLAY',
+        'liked': false,
+        'isFavorite': false,
+        'rating': null,
+      }
+    ]);
+    expect(controller.games.any((game) => game.id == 'game-194821'), false);
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.dark,
+      home: Scaffold(body: LibraryScreen(controller: controller, onExplore: () {})),
+    ));
+    await tester.pump();
+    expect(find.text('Nine Sols'), findsWidgets);
+  });
+
   test('Feed and Explore share saves, played games and ratings', () async {
     final store = LibraryStore();
     final explore = ExploreController(DemoExploreRepository(), library: store);

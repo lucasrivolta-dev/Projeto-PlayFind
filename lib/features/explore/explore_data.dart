@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../../config/api_config.dart';
+import '../feed/trailer_info.dart';
 
 class DiscoveryGame {
   const DiscoveryGame(
@@ -21,9 +22,15 @@ class DiscoveryGame {
       this.matchScore,
       this.slug,
       this.coverUrl,
-      this.heroUrl});
+      this.heroUrl,
+      this.steamAppId,
+      this.igdbId,
+      this.primaryTrailer});
+  final int? steamAppId, igdbId;
+  final TrailerInfo? primaryTrailer;
   final String? releaseDate, mode, publisher, slug, coverUrl, heroUrl;
-  final int id;
+  /// Identificador interno e estável de Game na API NextPlay.
+  final String id;
   final String title, studio, genre, description, rating, collection;
   final List<String> tags, platforms;
   final bool offer, free;
@@ -35,17 +42,8 @@ class DiscoveryGame {
     final steamAppId = json['steamAppId'] as int?;
     final igdbId = json['igdbId'] as int?;
     final rawId = json['id'];
-    final int id;
-    if (steamAppId != null && steamAppId > 0) {
-      id = steamAppId;
-    } else if (igdbId != null && igdbId > 0) {
-      id = igdbId;
-    } else if (rawId is int) {
-      id = rawId;
-    } else if (rawId is String) {
-      id = rawId.hashCode.abs();
-    } else {
-      id = 0;
+    if (rawId is! String || rawId.trim().isEmpty) {
+      throw const FormatException('Jogo sem ID interno da API.');
     }
 
     final genres = (json['genres'] as List<dynamic>?)
@@ -62,7 +60,9 @@ class DiscoveryGame {
     final free = json['isFree'] as bool? ?? false;
 
     return DiscoveryGame(
-      id: id,
+      id: rawId,
+      steamAppId: steamAppId,
+      igdbId: igdbId,
       title: json['title'] as String? ?? 'Sem título',
       studio: json['studio'] as String? ??
           json['developer'] as String? ??
@@ -82,6 +82,7 @@ class DiscoveryGame {
       slug: json['slug'] as String?,
       coverUrl: json['coverUrl'] as String?,
       heroUrl: json['heroUrl'] as String?,
+      primaryTrailer: TrailerInfo.fromJson(json['primaryTrailer']),
     );
   }
 }
@@ -96,7 +97,8 @@ class DemoExploreRepository implements ExploreRepository {
   @override
   Future<List<DiscoveryGame>> load() async => const [
         DiscoveryGame(
-            id: 1145360,
+            id: 'demo:1145360',
+            steamAppId: 1145360,
             title: 'Hades',
             studio: 'Supergiant Games',
             genre: 'Roguelike',
@@ -106,7 +108,8 @@ class DemoExploreRepository implements ExploreRepository {
             tags: ['Indies', 'Ação', 'RPG'],
             platforms: ['PC', 'PlayStation', 'Xbox', 'Switch']),
         DiscoveryGame(
-            id: 2679460,
+            id: 'demo:2679460',
+            steamAppId: 2679460,
             title: 'Metaphor: ReFantazio',
             studio: 'ATLUS',
             genre: 'RPG',
@@ -116,7 +119,8 @@ class DemoExploreRepository implements ExploreRepository {
             platforms: ['PC', 'PlayStation', 'Xbox'],
             collection: 'destaques'),
         DiscoveryGame(
-            id: 1938090,
+            id: 'demo:1938090',
+            steamAppId: 1938090,
             title: 'Call of Duty: Warzone',
             studio: 'Activision',
             genre: 'FPS',
@@ -127,7 +131,8 @@ class DemoExploreRepository implements ExploreRepository {
             platforms: ['PC', 'PlayStation', 'Xbox'],
             free: true),
         DiscoveryGame(
-            id: 813230,
+            id: 'demo:813230',
+            steamAppId: 813230,
             title: 'Animal Well',
             studio: 'Shared Memory',
             genre: 'Metroidvania',
@@ -138,7 +143,8 @@ class DemoExploreRepository implements ExploreRepository {
             platforms: ['PC', 'PlayStation', 'Switch'],
             collection: 'hidden'),
         DiscoveryGame(
-            id: 2379780,
+            id: 'demo:2379780',
+            steamAppId: 2379780,
             title: 'Balatro',
             studio: 'LocalThunk',
             genre: 'Roguelike',
@@ -149,7 +155,8 @@ class DemoExploreRepository implements ExploreRepository {
             platforms: ['PC', 'PlayStation', 'Xbox', 'Switch'],
             collection: 'hidden'),
         DiscoveryGame(
-            id: 1091500,
+            id: 'demo:1091500',
+            steamAppId: 1091500,
             title: 'Cyberpunk 2077',
             studio: 'CD PROJEKT RED',
             genre: 'RPG',
@@ -160,7 +167,8 @@ class DemoExploreRepository implements ExploreRepository {
             platforms: ['PC', 'PlayStation', 'Xbox'],
             offer: true),
         DiscoveryGame(
-            id: 1245620,
+            id: 'demo:1245620',
+            steamAppId: 1245620,
             title: 'Elden Ring',
             studio: 'FromSoftware',
             genre: 'RPG',
@@ -171,7 +179,8 @@ class DemoExploreRepository implements ExploreRepository {
             platforms: ['PC', 'PlayStation', 'Xbox'],
             offer: true),
         DiscoveryGame(
-            id: 553850,
+            id: 'demo:553850',
+            steamAppId: 553850,
             title: 'Helldivers 2',
             studio: 'Arrowhead',
             genre: 'Ação',
@@ -182,7 +191,8 @@ class DemoExploreRepository implements ExploreRepository {
             platforms: ['PC', 'PlayStation'],
             collection: 'amigos'),
         DiscoveryGame(
-            id: 1426210,
+            id: 'demo:1426210',
+            steamAppId: 1426210,
             title: 'It Takes Two',
             studio: 'Hazelight',
             genre: 'Aventura',
@@ -193,7 +203,8 @@ class DemoExploreRepository implements ExploreRepository {
             platforms: ['PC', 'PlayStation', 'Xbox', 'Switch'],
             collection: 'amigos'),
         DiscoveryGame(
-            id: 739630,
+            id: 'demo:739630',
+            steamAppId: 739630,
             title: 'Phasmophobia',
             studio: 'Kinetic Games',
             genre: 'Terror',
@@ -204,7 +215,8 @@ class DemoExploreRepository implements ExploreRepository {
             platforms: ['PC', 'PlayStation', 'Xbox'],
             collection: 'amigos'),
         DiscoveryGame(
-            id: 1966720,
+            id: 'demo:1966720',
+            steamAppId: 1966720,
             title: 'Lethal Company',
             studio: 'Zeekerss',
             genre: 'Terror',
@@ -214,7 +226,8 @@ class DemoExploreRepository implements ExploreRepository {
             tags: ['Co-op', 'Indies'],
             collection: 'hidden'),
         DiscoveryGame(
-            id: 1458140,
+            id: 'demo:1458140',
+            steamAppId: 1458140,
             title: 'Pacific Drive',
             studio: 'Ironwood Studios',
             publisher: 'Kepler Interactive',
@@ -246,7 +259,12 @@ class ApiExploreRepository implements ExploreRepository {
   final Duration timeout;
 
   @override
-  Future<List<DiscoveryGame>> load() async {
+  Future<List<DiscoveryGame>> load() => _load(allowFallback: true);
+
+  /// The real feed must never silently replace the API catalog with demo games.
+  Future<List<DiscoveryGame>> loadFeed() => _load(allowFallback: false);
+
+  Future<List<DiscoveryGame>> _load({required bool allowFallback}) async {
     try {
       final uri = Uri.parse('$baseUrl/feed');
       final response = await _client.get(uri).timeout(timeout);
@@ -262,14 +280,16 @@ class ApiExploreRepository implements ExploreRepository {
           rawList = null;
         }
 
-        if (rawList != null && rawList.isNotEmpty) {
+        if (rawList != null) {
           return rawList
               .whereType<Map<String, dynamic>>()
               .map(DiscoveryGame.fromJson)
               .toList();
         }
       }
+      throw StateError('Resposta inválida ao carregar o catálogo.');
     } catch (_) {
+      if (!allowFallback) rethrow;
       // Fallback gracioso quando a API estiver offline ou em caso de timeout.
     }
 
