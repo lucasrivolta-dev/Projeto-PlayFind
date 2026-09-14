@@ -22,8 +22,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
 
   await app.register(cors, {
-    // Permite o Flutter Web servido localmente; impede que sites externos
-    // façam requisições com x-user-id ao backend de desenvolvimento.
+    // Permite o Flutter Web servido localmente. A identidade das rotas
+    // protegidas continua exigindo Firebase ID Token validado.
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
       try {

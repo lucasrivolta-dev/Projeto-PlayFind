@@ -1,14 +1,11 @@
 import 'package:flutter/foundation.dart';
 
-/// Configuração central da URL base e identidade de desenvolvimento da API NextPlay.
+/// Configuração central da URL base da API NextPlay.
 ///
-/// Regras de resolução da URL (em ordem):
-/// 1. [overrideBaseUrl] — permite injetar uma URL arbitrária em testes.
-/// 2. Android emulator em modo debug → 10.0.2.2 (loopback do host físico).
-/// 3. Demais plataformas (Web, Windows, iOS Simulator, macOS) → 127.0.0.1.
-///
-/// Em produção, substitua pela URL pública do backend e troque [devUserId]
-/// pelo ID derivado do Firebase ID Token validado.
+/// Em release, [API_BASE_URL] explícita e HTTPS é obrigatória.
+/// Em testes/desenvolvimento, [overrideBaseUrl] tem prioridade; sem ela,
+/// [API_BASE_URL] pode apontar para a LAN. O fallback de debug é 10.0.2.2
+/// no emulador Android e 127.0.0.1 nas demais plataformas.
 /// Nunca espalhe localhost/127.0.0.1 ou identidades hardcoded em outros arquivos.
 abstract final class ApiConfig {
   /// Permite sobrescrever a URL em testes ou builds de CI.
@@ -25,36 +22,45 @@ abstract final class ApiConfig {
   /// Caminho base de todas as rotas v1.
   static const String _path = '/api/v1';
 
-  /// URL base completa — ex.: `http://127.0.0.1:3333/api/v1`.
+  /// URL base completa da API.
   ///
   /// Use este getter em todos os repositórios HTTP do app.
-  static String get baseUrl {
-    if (overrideBaseUrl != null) return overrideBaseUrl!;
+  static String get baseUrl => resolveBaseUrl(
+        isRelease: kReleaseMode,
+        isAndroidDebug: defaultTargetPlatform == TargetPlatform.android && kDebugMode,
+        configuredBaseUrl: _envBaseUrl,
+        testOverride: overrideBaseUrl,
+      );
 
-    if (_envBaseUrl.isNotEmpty) {
-      final sanitized = _envBaseUrl.endsWith('/')
-          ? _envBaseUrl.substring(0, _envBaseUrl.length - 1)
-          : _envBaseUrl;
+  /// Separado do build mode para testar também a política de release.
+  static String resolveBaseUrl({
+    required bool isRelease,
+    required bool isAndroidDebug,
+    required String configuredBaseUrl,
+    String? testOverride,
+  }) {
+    if (isRelease) {
+      final configured = configuredBaseUrl.trim();
+      final uri = Uri.tryParse(configured);
+      if (configured.isEmpty || uri == null || uri.scheme != 'https' || uri.host.isEmpty) {
+        throw StateError('Release exige API_BASE_URL explícita com HTTPS.');
+      }
+    } else if (testOverride != null) {
+      return testOverride;
+    }
+
+    final configured = configuredBaseUrl.trim();
+    if (configured.isNotEmpty) {
+      final sanitized = configured.endsWith('/')
+          ? configured.substring(0, configured.length - 1)
+          : configured;
       return sanitized.endsWith(_path) ? sanitized : '$sanitized$_path';
     }
 
-    // Android Emulator: o loopback do emulador aponta para 10.0.2.2
-    // quando o destino é o host da máquina.
-    if (defaultTargetPlatform == TargetPlatform.android && kDebugMode) {
-      return 'http://10.0.2.2:$_devPort$_path';
-    }
-
-    // Web, Windows, macOS, Linux, iOS Simulator — todos acessam 127.0.0.1.
+    if (isAndroidDebug) return 'http://10.0.2.2:$_devPort$_path';
     return 'http://127.0.0.1:$_devPort$_path';
   }
 
-  /// Identificador temporário de desenvolvimento enviado no header `x-user-id`.
-  ///
-  /// O backend local aceita apenas este valor, mas o header não comprova
-  /// quem enviou a requisição. Este valor é usado somente em
-  /// desenvolvimento; em produção será substituído pelo Firebase UID
-  /// derivado do token validado.
-  ///
-  /// Centralizado aqui para evitar hardcoding em múltiplos repositórios.
+  /// Identificador aceito somente quando os testes injetam allowTestUsers no backend.
   static const String devUserId = 'dev-user';
 }

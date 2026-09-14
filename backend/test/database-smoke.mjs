@@ -1,9 +1,8 @@
-import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { createTestPrismaClient, safeTestFailure } from './test-database.mjs';
 
 // Explicit opt-in command: all fixture writes are rolled back, including successful cases.
-const db = new PrismaClient({ log: [] });
+let db;
 const rollback = new Error('ROLLBACK_TEST_FIXTURES');
 
 async function verify(label, action, expectedCode) {
@@ -36,13 +35,7 @@ async function fixtures(tx) {
 }
 
 try {
-  const target = new URL(process.env.DATABASE_URL);
-  if (
-    !['localhost', '127.0.0.1', '[::1]'].includes(target.hostname) ||
-    target.pathname !== '/nextplay'
-  ) {
-    throw new Error('Este teste exige o banco nextplay local');
-  }
+  db = createTestPrismaClient();
   await verify('Usuário, jogo, biblioteca e comentário relacionados', async (tx) => {
     const { user, game } = await fixtures(tx);
     await tx.userGameLibrary.create({
@@ -93,10 +86,10 @@ try {
     /user_cannot_follow_self/,
   );
   console.log('Verificação concluída. Registros temporários revertidos.');
-} catch {
+} catch (error) {
   // Never print Prisma errors: they may contain connection details.
-  console.error('Verificação do banco falhou. Detalhes privados omitidos.');
+  console.error(safeTestFailure(error, 'Verificação do banco falhou. Detalhes privados omitidos.'));
   process.exitCode = 1;
 } finally {
-  await db.$disconnect();
+  if (db) await db.$disconnect();
 }

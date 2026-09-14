@@ -1,4 +1,5 @@
-import type { Prisma, LibraryStatus } from '@prisma/client';
+import { Prisma, type LibraryStatus } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import type { PrismaDbClient } from '../games/prisma-game.repository.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -93,46 +94,43 @@ export class LibraryService {
     return game?.id ?? null;
   }
 
-  async ensureUser(userIdentifier: string): Promise<string> {
-    const trimmed = userIdentifier.trim();
-    if (UUID_REGEX.test(trimmed)) {
-      const user = await this.prisma.user.findUnique({
-        where: { id: trimmed },
-        select: { id: true },
-      });
-      if (user) return user.id;
-    }
+  async ensureUser(firebaseUid: string): Promise<string> {
+    if (!firebaseUid) throw new Error('INVALID_FIREBASE_UID');
 
-    const byFirebase = await this.prisma.user.findUnique({
-      where: { firebaseUid: trimmed },
-      select: { id: true },
-    });
-    if (byFirebase) return byFirebase.id;
-
-    const byUsername = await this.prisma.user.findUnique({
-      where: { username: trimmed },
-      select: { id: true },
-    });
-    if (byUsername) return byUsername.id;
-
-    // Criar usuário para o token/identificador caso não exista
+    // O UID chega de um ID Token já validado pela rota; nunca o resolver por
+    // User.id ou username, mesmo quando seu formato coincidir com eles.
     const cleanUsername =
-      trimmed
+      firebaseUid
         .toLowerCase()
         .replace(/[^a-z0-9_]/g, '_')
         .slice(0, 30) || 'user';
-    const uniqueUsername = `${cleanUsername}_${Date.now().toString().slice(-4)}`;
+    const uniqueUsername = `${cleanUsername}_${randomUUID().slice(0, 12)}`;
 
-    const created = await this.prisma.user.create({
-      data: {
-        firebaseUid: trimmed,
-        username: uniqueUsername,
-        name: trimmed,
-      },
-      select: { id: true },
-    });
-
-    return created.id;
+    try {
+      const user = await this.prisma.user.upsert({
+        where: { firebaseUid },
+        update: {},
+        create: {
+          firebaseUid,
+          username: uniqueUsername,
+          name: firebaseUid,
+        },
+        select: { id: true },
+      });
+      return user.id;
+    } catch (error) {
+      // Algumas versões/estratégias de upsert podem disputar o primeiro insert.
+      // A constraint única em firebaseUid define o vencedor; só reutilizamos
+      // uma linha com o mesmo UID validado.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const user = await this.prisma.user.findUnique({
+          where: { firebaseUid },
+          select: { id: true },
+        });
+        if (user) return user.id;
+      }
+      throw error;
+    }
   }
 
   async getUserLibrary(userId: string, filters: LibraryFilters = {}) {
