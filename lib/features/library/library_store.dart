@@ -251,7 +251,7 @@ class LibraryStore extends ChangeNotifier {
     }
   }
 
-  Set<String> get all => {...saved, ...played, ...favorites, ...liked, ...ratings.keys};
+  Set<String> get all => {...saved, ...played, ...liked, ...ratings.keys};
 
   /// Removes only the in-memory private state when the authenticated user changes.
   /// Persisted data remains untouched in the backend.

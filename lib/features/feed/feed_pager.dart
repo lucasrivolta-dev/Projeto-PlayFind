@@ -13,6 +13,7 @@ class FeedPager extends StatefulWidget {
     required this.onPageChanged,
     required this.itemBuilder,
     this.frameBuilder,
+    this.pageController,
   });
 
   static const transitionDuration = Duration(milliseconds: 320);
@@ -22,13 +23,17 @@ class FeedPager extends StatefulWidget {
   final ValueChanged<int> onPageChanged;
   final IndexedWidgetBuilder itemBuilder;
   final Widget Function(Widget pages)? frameBuilder;
+  final PageController? pageController;
 
   @override
   State<FeedPager> createState() => _FeedPagerState();
 }
 
 class _FeedPagerState extends State<FeedPager> {
-  final _pages = PageController(keepPage: false);
+  PageController? _internalPages;
+  PageController get _pages =>
+      widget.pageController ??
+      (_internalPages ??= PageController(keepPage: false));
   final _focus = FocusNode(debugLabel: 'Feed navigation');
   Timer? _wheelIdle;
   bool _animating = false;
@@ -127,7 +132,7 @@ class _FeedPagerState extends State<FeedPager> {
   void dispose() {
     _wheelIdle?.cancel();
     _focus.dispose();
-    _pages.dispose();
+    _internalPages?.dispose();
     super.dispose();
   }
 
@@ -160,6 +165,7 @@ class _FeedPagerState extends State<FeedPager> {
       onPointerSignal: _onPointerSignal,
       child: PageView.builder(
         controller: _pages,
+        dragStartBehavior: DragStartBehavior.down,
         physics: _FeedScrollPhysics(blocked: () => _animating),
         scrollDirection: Axis.vertical,
         itemCount: widget.itemCount,

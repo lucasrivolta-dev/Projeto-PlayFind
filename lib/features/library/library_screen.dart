@@ -20,19 +20,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool list = false, alphabetical = false;
   static const categories = [
     'Todos',
+    'Curtidos',
     'Quero jogar',
     'Já joguei',
-    'Favoritos',
-    'Curtidos',
     'Avaliações'
   ];
   Set<String> ids(String value) {
     final store = widget.controller.library;
     return switch (value) {
+      'Curtidos' => store.liked,
       'Quero jogar' => store.saved,
       'Já joguei' => store.played,
-      'Favoritos' => store.favorites,
-      'Curtidos' => store.liked,
       'Avaliações' => store.ratings.keys.toSet(),
       _ => store.all,
     };
@@ -221,8 +219,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                                     rating: controller
                                                             .library.ratings[
                                                         row[column].id],
-                                                    favorite: controller
-                                                        .library.favorites
+                                                    liked: controller
+                                                        .library.liked
                                                         .contains(
                                                             row[column].id),
                                                     onTap: () =>
@@ -242,7 +240,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 style: AppTypography.title(14)),
                             const SizedBox(height: AppSpacing.xs),
                             Text(
-                                'Salve suas descobertas, marque o que já jogou e avalie suas aventuras favoritas.',
+                                'Salve suas descobertas, curta o que gostou, marque o que já jogou e avalie suas aventuras.',
                                 style: AppTypography.body(12)),
                             TextButton(
                                 onPressed: widget.onExplore,
@@ -276,10 +274,10 @@ class _LibraryGameCard extends StatelessWidget {
       {required this.game,
       required this.list,
       required this.rating,
-      required this.favorite,
+      required this.liked,
       required this.onTap});
   final DiscoveryGame game;
-  final bool list, favorite;
+  final bool list, liked;
   final int? rating;
   final VoidCallback onTap;
   @override
@@ -301,11 +299,11 @@ class _LibraryGameCard extends StatelessWidget {
                       child: Text('★ ${game.rating}',
                           style: AppTypography.label(10)
                               .copyWith(color: AppColors.positive)))),
-              if (favorite)
+              if (liked)
                 const Positioned(
                     bottom: AppSpacing.xs,
                     right: AppSpacing.xs,
-                    child: Icon(Icons.favorite, color: AppColors.primary)),
+                    child: Icon(Icons.favorite, color: Color(0xFFFF2A55))),
             ])));
     final info =
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

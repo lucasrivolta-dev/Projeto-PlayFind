@@ -9,9 +9,11 @@ import 'package:nextplay/features/explore/explore_data.dart';
 import 'package:nextplay/features/feed/feed_controller.dart';
 import 'package:nextplay/features/feed/feed_screen.dart';
 import 'package:nextplay/features/feed/feed_trailer.dart';
+import 'package:nextplay/features/feed/feed_pager.dart';
 import 'package:nextplay/features/feed/trailer_info.dart';
 import 'package:nextplay/features/feed/trailer_player.dart';
 import 'package:nextplay/design_system/components.dart';
+import 'package:nextplay/design_system/theme.dart';
 
 class FakeTrailerPlayer extends TrailerPlayer {
   final calls = <String>[];
@@ -22,10 +24,36 @@ class FakeTrailerPlayer extends TrailerPlayer {
   bool muted = true;
   bool startsPlaying = true;
   bool mounted = false;
+  Duration _pos = Duration.zero;
+  Duration _dur = const Duration(seconds: 90);
+  final seekCalls = <Duration>[];
   Completer<void>? pauseGate;
   Completer<void>? muteGate;
   final loadGates = <String, Completer<void>>{};
   final failedLoads = <String>{};
+
+  @override
+  Duration get position => _pos;
+  set position(Duration value) {
+    _pos = value;
+    notifyListeners();
+  }
+
+  @override
+  Duration get duration => _dur;
+  set duration(Duration value) {
+    _dur = value;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> seekTo(Duration target) async {
+    calls.add('seek:${target.inSeconds}');
+    seekCalls.add(target);
+    _pos = target;
+    notifyListeners();
+  }
+
   @override
   bool get failed => error;
   @override
@@ -48,6 +76,7 @@ class FakeTrailerPlayer extends TrailerPlayer {
   Future<void> load(String videoId) async {
     calls.add('load:$videoId');
     loaded = videoId;
+    _pos = Duration.zero;
     await loadGates[videoId]?.future;
     if (failedLoads.contains(videoId)) throw StateError('load failed');
     if (loaded != videoId) return;
@@ -153,7 +182,7 @@ void main() {
       hasLength(1),
     );
 
-    await tester.tap(find.byTooltip('Reproduzir trailer'));
+    await tester.tap(find.byKey(const Key('feed_trailer_tap_target')));
     await tester.pump();
     expect(player.playingVideoId, 'abcdefghijk');
 
@@ -217,8 +246,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Reproduzir trailer'), findsOneWidget);
-    await tester.tap(find.byTooltip('Reproduzir trailer'));
+    expect(find.byKey(const Key('feed_trailer_tap_target')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('feed_trailer_tap_target')));
     await tester.pumpAndSettle();
     expect(attempts, 2);
     expect(recovered.loaded, 'abcdefghijk');
@@ -245,8 +274,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Reproduzir trailer'), findsOneWidget);
-    await tester.tap(find.byTooltip('Reproduzir trailer'));
+    expect(find.byKey(const Key('feed_trailer_tap_target')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('feed_trailer_tap_target')));
     await tester.pumpAndSettle();
     expect(player.loaded, 'abcdefghijk');
     expect(player.playingVideoId, 'abcdefghijk');
@@ -309,14 +338,15 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(player.calls, ['pause', 'load:abcdefghijk']);
-      await tester.tap(find.byTooltip('Reproduzir trailer'));
+      await tester.tap(find.byKey(const Key('feed_trailer_tap_target')));
       await tester.pumpAndSettle();
       expect(player.calls.last, 'play:abcdefghijk');
-      expect(find.byTooltip('Pausar trailer'), findsOneWidget);
-      await tester.tap(find.byTooltip('Pausar trailer'));
+      expect(player.isPlaying, isTrue);
+      await tester.tap(find.byKey(const Key('feed_trailer_tap_target')));
       await tester.pumpAndSettle();
       expect(player.playingVideoId, isNull);
-      expect(find.byTooltip('Reproduzir trailer'), findsOneWidget);
+      expect(player.isPlaying, isFalse);
+      expect(find.byKey(const Key('feed_trailer_tap_target')), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     },
   );
@@ -349,26 +379,11 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byType(FeedArtwork), findsNWidgets(2));
-    expect(
-      tester
-          .widget<AnimatedOpacity>(
-            find.byKey(const ValueKey('trailer-fallback-overlay')),
-          )
-          .opacity,
-      1,
-    );
-    await tester.tap(find.byTooltip('Reproduzir trailer'));
+    expect(find.byType(FeedArtwork), findsOneWidget);
+    expect(find.byKey(const ValueKey('fake-trailer-view')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('feed_trailer_tap_target')));
     await tester.pumpAndSettle();
     expect(player.playingVideoId, 'abcdefghijk');
-    expect(
-      tester
-          .widget<AnimatedOpacity>(
-            find.byKey(const ValueKey('trailer-fallback-overlay')),
-          )
-          .opacity,
-      0,
-    );
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -587,16 +602,9 @@ void main() {
       await tester.pumpAndSettle();
       player.fail();
       await tester.pumpAndSettle();
-      expect(find.byType(FeedArtwork), findsNWidgets(2));
+      expect(find.byType(FeedArtwork), findsOneWidget);
+      expect(find.byKey(const ValueKey('fake-trailer-view')), findsNothing);
       expect(player.playingVideoId, isNull);
-      expect(
-        tester
-            .widget<AnimatedOpacity>(
-              find.byKey(const ValueKey('trailer-fallback-overlay')),
-            )
-            .opacity,
-        1,
-      );
       await tester.pumpWidget(const SizedBox());
       expect(player.closed, isTrue);
     },
@@ -642,6 +650,7 @@ void main() {
       final navigator = GlobalKey<NavigatorState>();
       await tester.pumpWidget(
         MaterialApp(
+          theme: AppTheme.dark,
           navigatorKey: navigator,
           home: Scaffold(
             body: FeedScreen(
@@ -679,6 +688,313 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       expect(player.closed, isTrue);
       expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'direct tap on trailer toggles play and pause with animated feedback overlay',
+    (tester) async {
+      final player = FakeTrailerPlayer()..startsPlaying = true;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FeedTrailer(
+            game: game(),
+            active: true,
+            child: const SizedBox(),
+            playerFactory: (_) => player,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(player.playingVideoId, 'abcdefghijk');
+
+      // Tap to pause
+      await tester.tap(find.byKey(const Key('feed_trailer_tap_target')));
+      await tester.pump();
+      expect(player.playingVideoId, isNull);
+      expect(find.byIcon(Icons.pause), findsOneWidget);
+
+      // Overlay fades out after delay
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(
+        tester
+            .widget<AnimatedOpacity>(
+              find.byKey(const Key('feed_trailer_feedback_overlay')),
+            )
+            .opacity,
+        0.0,
+      );
+
+      // Tap to resume
+      await tester.tap(find.byKey(const Key('feed_trailer_tap_target')));
+      await tester.pump();
+      expect(player.playingVideoId, 'abcdefghijk');
+      expect(find.byIcon(Icons.play_arrow), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'seekbar tap and horizontal drag perform seek on player',
+    (tester) async {
+      final player = FakeTrailerPlayer()
+        ..startsPlaying = true
+        ..duration = const Duration(seconds: 100);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FeedTrailer(
+            game: game(),
+            active: true,
+            child: const SizedBox(),
+            playerFactory: (_) => player,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('TRAILER'), findsOneWidget);
+
+      // Tap seek on progress bar
+      final progressBar = find.byType(GestureDetector).last;
+      await tester.tap(progressBar);
+      await tester.pump();
+      expect(player.seekCalls, isNotEmpty);
+
+      // Drag scrub on progress bar
+      await tester.drag(progressBar, const Offset(50, 0));
+      await tester.pump();
+      expect(player.seekCalls.length, greaterThanOrEqualTo(2));
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'audio badge toggles mute between AUDIO ON and AUDIO OFF',
+    (tester) async {
+      final player = FakeTrailerPlayer()..startsPlaying = true;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FeedTrailer(
+            game: game(),
+            active: true,
+            child: const SizedBox(),
+            playerFactory: (_) => player,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Initially muted
+      expect(find.text('AUDIO OFF'), findsOneWidget);
+      await tester.tap(find.byTooltip('Ativar som'));
+      await tester.pump();
+      expect(find.text('AUDIO ON'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Silenciar trailer'));
+      await tester.pump();
+      expect(find.text('AUDIO OFF'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'same source does not recreate player and does not issue repeated load',
+    (tester) async {
+      int createCount = 0;
+      final player = FakeTrailerPlayer()..startsPlaying = true;
+      final g = game(id: 1);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FeedTrailer(
+            game: g,
+            active: true,
+            child: const SizedBox(),
+            playerFactory: (_) {
+              createCount++;
+              return player;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(createCount, 1);
+      final initialLoadCalls = player.calls.where((c) => c.startsWith('load:')).length;
+
+      // Rebuild with same game and same active
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FeedTrailer(
+            game: g,
+            active: true,
+            child: const SizedBox(),
+            playerFactory: (_) {
+              createCount++;
+              return player;
+            },
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(createCount, 1);
+      final newLoadCalls = player.calls.where((c) => c.startsWith('load:')).length;
+      expect(newLoadCalls, initialLoadCalls);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'playerChanged does not re-emit autoplay',
+    (tester) async {
+      final player = FakeTrailerPlayer()..startsPlaying = true;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FeedTrailer(
+            game: game(),
+            active: true,
+            child: const SizedBox(),
+            playerFactory: (_) => player,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final playCallsInitial = player.calls.where((c) => c.startsWith('play')).length;
+      expect(playCallsInitial, 1);
+
+      // Simulate player state / position updates (which trigger notifyListeners)
+      player.position = const Duration(seconds: 10);
+      await tester.pump();
+      player.position = const Duration(seconds: 20);
+      await tester.pump();
+
+      // Autoplay should NOT have been re-issued
+      final playCallsAfter = player.calls.where((c) => c.startsWith('play')).length;
+      expect(playCallsAfter, 1);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'userPause is protected against automatic play on rebuilds',
+    (tester) async {
+      final player = FakeTrailerPlayer()..startsPlaying = true;
+      final g = game();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FeedTrailer(
+            game: g,
+            active: true,
+            child: const SizedBox(),
+            playerFactory: (_) => player,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // User pauses with tap
+      await tester.tap(find.byKey(const Key('feed_trailer_tap_target')));
+      await tester.pump();
+      expect(player.calls.last.startsWith('pause'), isTrue);
+
+      final pauseCountBefore = player.calls.where((c) => c.startsWith('pause')).length;
+      expect(pauseCountBefore, greaterThan(0));
+      final playCountBefore = player.calls.where((c) => c.startsWith('play')).length;
+
+      // Rebuild widget tree
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FeedTrailer(
+            game: g,
+            active: true,
+            child: const SizedBox(),
+            playerFactory: (_) => player,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Player must remain paused; play() must NOT be called
+      final playCountAfter = player.calls.where((c) => c.startsWith('play')).length;
+      expect(playCountAfter, playCountBefore);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'seek does not call play or pause',
+    (tester) async {
+      final player = FakeTrailerPlayer()
+        ..startsPlaying = true
+        ..duration = const Duration(seconds: 120);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FeedTrailer(
+            game: game(),
+            active: true,
+            child: const SizedBox(),
+            playerFactory: (_) => player,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final playCallsBefore = player.calls.where((c) => c.startsWith('play')).length;
+      final pauseCallsBefore = player.calls.where((c) => c.startsWith('pause')).length;
+
+      // Tap seekbar
+      final progressBar = find.byType(GestureDetector).last;
+      await tester.tap(progressBar);
+      await tester.pump();
+
+      expect(player.seekCalls, isNotEmpty);
+      final playCallsAfter = player.calls.where((c) => c.startsWith('play')).length;
+      final pauseCallsAfter = player.calls.where((c) => c.startsWith('pause')).length;
+
+      expect(playCallsAfter, playCallsBefore, reason: 'Seek must not call play');
+      expect(pauseCallsAfter, pauseCallsBefore, reason: 'Seek must not call pause');
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'FeedScreen and _FeedPage do not occlude trailerBox with opaque ColoredBox',
+    (tester) async {
+      final g = game();
+      final controller = FeedController(() async => [g]);
+      await controller.load();
+
+      final player = FakeTrailerPlayer()..startsPlaying = true;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FeedScreen(
+            controller: controller,
+            playerFactory: (_) => player,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // Ensure the trailer player view is present in the tree
+      expect(find.byType(_FakePlayerView), findsOneWidget);
+
+      // Verify that FeedPager/_FeedPage does NOT contain an AppColors.canvas ColoredBox occluding the trailer
+      final occludingCanvasBoxes = find.descendant(
+        of: find.byType(FeedPager),
+        matching: find.byWidgetPredicate(
+          (w) => w is ColoredBox && w.color == AppColors.canvas,
+        ),
+      );
+      expect(
+        occludingCanvasBoxes,
+        findsNothing,
+        reason: 'FeedPager/_FeedPage must not contain an opaque canvas ColoredBox that occludes trailerBox',
+      );
+
+      await tester.pumpWidget(const SizedBox());
     },
   );
 }

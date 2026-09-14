@@ -13,6 +13,7 @@ dependencies:
   firebase_core: ^3.15.2
   firebase_auth: ^5.6.2
   google_sign_in: ^6.2.1
+  video_player: ^2.14.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

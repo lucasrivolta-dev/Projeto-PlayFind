@@ -115,7 +115,7 @@ class GameDetailScreen extends StatelessWidget {
                                                 : Icons.bookmark_add_outlined),
                                         label: Text(
                                             library.saved.contains(game.id)
-                                                ? 'Salvo em Quero jogar'
+                                                ? 'Em Quero jogar'
                                                 : 'Quero jogar')),
                                     OutlinedButton.icon(
                                         onPressed: () => requireAuthentication(context, auth,
@@ -129,17 +129,20 @@ class GameDetailScreen extends StatelessWidget {
                                                     ? AppColors.positive
                                                     : AppColors.secondary),
                                         label: const Text('Já joguei')),
-                                    IconButton.filledTonal(
-                                        tooltip:
-                                            library.favorites.contains(game.id)
-                                                ? 'Remover dos favoritos'
-                                                : 'Favoritar',
-                                        onPressed: () => requireAuthentication(context, auth,
-                                            () => library.toggleFavorite(game.id)),
-                                        icon: Icon(
-                                            library.favorites.contains(game.id)
-                                                ? Icons.star
-                                                : Icons.star_border)),
+                                     IconButton.filledTonal(
+                                         tooltip:
+                                             library.liked.contains(game.id)
+                                                 ? 'Descurtir'
+                                                 : 'Curtir',
+                                         onPressed: () => requireAuthentication(context, auth,
+                                             () => library.toggleLike(game.id)),
+                                         icon: Icon(
+                                             library.liked.contains(game.id)
+                                                 ? Icons.favorite
+                                                 : Icons.favorite_border,
+                                             color: library.liked.contains(game.id)
+                                                 ? const Color(0xFFFF2A55)
+                                                 : AppColors.text)),
                                     OutlinedButton.icon(
                                         onPressed: () => requireAuthentication(context, auth,
                                             () => evaluate(context)),

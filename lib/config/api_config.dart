@@ -15,6 +15,10 @@ abstract final class ApiConfig {
   /// Defina antes de criar qualquer repositório.
   static String? overrideBaseUrl;
 
+  /// Permite injetar a URL via linha de comando no build/run:
+  /// `--dart-define=API_BASE_URL=http://192.168.0.x:3333/api/v1`
+  static const String _envBaseUrl = String.fromEnvironment('API_BASE_URL');
+
   /// Porta padrão do servidor de desenvolvimento.
   static const int _devPort = 3333;
 
@@ -26,6 +30,13 @@ abstract final class ApiConfig {
   /// Use este getter em todos os repositórios HTTP do app.
   static String get baseUrl {
     if (overrideBaseUrl != null) return overrideBaseUrl!;
+
+    if (_envBaseUrl.isNotEmpty) {
+      final sanitized = _envBaseUrl.endsWith('/')
+          ? _envBaseUrl.substring(0, _envBaseUrl.length - 1)
+          : _envBaseUrl;
+      return sanitized.endsWith(_path) ? sanitized : '$sanitized$_path';
+    }
 
     // Android Emulator: o loopback do emulador aponta para 10.0.2.2
     // quando o destino é o host da máquina.

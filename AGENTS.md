@@ -1,16 +1,18 @@
 # AGENTS.md — Instruções do projeto NextPlay / PlaySweep
 
-Escopo: estas instruções se aplicam a todo o repositório. Use este documento como referência de produto, arquitetura, regras operacionais e Design System.
+> Escopo: estas instruções se aplicam a todo o repositório. Use este documento como referência de produto, arquitetura e Design System em trabalhos futuros.
 
-O projeto já está em implementação ativa. Não crie funcionalidades, telas, migrations, refactors amplos ou mudanças de arquitetura sem solicitação específica. Preserve o estado atual do repositório e qualquer trabalho não commitado.
+>
 
-Antes de implementar, leia este documento, inspecione git status --short e git diff, e consulte as screenshots/referências fornecidas para a tarefa. Não invente referências visuais ausentes. Se uma decisão entrar em conflito com screenshots, requisitos atuais ou o Style Guide, avise antes de alterar o design.
+> O projeto está em implementação ativa. Não crie novas telas, migrations, refactors amplos ou mudanças de arquitetura sem solicitação explícita. Alterações devem preservar o working tree e respeitar o estado real do repositório.
 
-O NextPlay já possui frontend Flutter, backend Fastify/TypeScript, PostgreSQL/Prisma, Firebase Authentication e integração de catálogo IGDB + Steam em diferentes níveis de implementação.
+>
 
-As telas descritas na seção 32 já foram solicitadas e implementadas. Novas telas e funcionalidades continuam dependendo de solicitação do usuário.
+> Antes de implementar, consulte este documento, o código atual, git status --short, git diff e as screenshots fornecidas para a tarefa. Não aplique uma solução baseada em arquitetura antiga lembrada de outra sessão. Se uma decisão entrar em conflito com screenshots, Design System ou código já estabilizado, avise antes de alterar o design ou a arquitetura por conta própria.
 
-Use este arquivo como especificação permanente, mas dê prioridade a requisitos mais recentes e explícitos fornecidos pelo usuário para a tarefa atual.
+Este documento é a especificação operacional do NextPlay. Ele deve ser mantido atualizado conforme decisões de produto e arquitetura forem aprovadas.
+
+Não implemente telas, migrations ou funcionalidades fora do escopo solicitado. As áreas descritas na seção 32 já existem e devem ser tratadas como base ativa do projeto.
 
 ---
 
@@ -50,7 +52,7 @@ Os vídeos exibidos no feed serão trailers, teasers e gameplays relacionados ao
 
 O principal fluxo do produto é:
 
-DESCOBRIR → SE INTERESSAR → SALVAR → JOGAR
+DESCOBRIR → SE INTERESSAR → QUERO JOGAR → JOGAR
 
 Um momento de sucesso do produto seria:
 
@@ -96,7 +98,7 @@ Informações rápidas:
 
 * compatibilidade com o usuário.
 
-Ações:
+Ações principais do Feed:
 
 * Curtir;
 
@@ -104,13 +106,11 @@ Ações:
 
 * Já joguei;
 
-* Não tenho interesse;
+* Comentar;
 
-* Comentários;
+* Compartilhar.
 
-* Compartilhar;
-
-* Ver jogo.
+Não existe ação separada de Favoritar/Favorito, nem rótulo "Salvo" no Feed. "Quero jogar" é o nome de produto da intenção WANT_TO_PLAY. Usuários não seguem criadores de trailer porque usuários não publicam vídeos. Seguir usuários ou tópicos do Fórum é uma funcionalidade separada e não deve ser confundida com o Feed.
 
 ---
 
@@ -124,7 +124,7 @@ O aplicativo deve futuramente aprender o gosto do jogador utilizando sinais como
 
 * jogos curtidos;
 
-* jogos salvos;
+* jogos marcados como Quero jogar;
 
 * jogos já jogados;
 
@@ -260,7 +260,7 @@ Ações:
 
 * Já joguei;
 
-* Favoritar;
+* Curtir;
 
 * Avaliar.
 
@@ -336,13 +336,15 @@ Isso é diferente dos comentários do For You.
 
 Biblioteca pessoal com categorias:
 
+* Curtidos;
+
 * Quero jogar;
 
 * Já joguei;
 
-* Favoritos;
-
 * Avaliações.
+
+"Curtidos" usa a relação/estado de like (liked == true). Favorito/Favoritar não é uma feature ativa do produto. Se isFavorite ainda existir fisicamente no banco, ele é legado temporário e não deve voltar para a UX sem nova decisão explícita.
 
 Jogos devem aparecer principalmente através das capas.
 
@@ -386,7 +388,7 @@ Estatísticas:
 
 Também possui:
 
-* jogos favoritos;
+* jogos curtidos;
 
 * gosto gamer;
 
@@ -464,15 +466,15 @@ Não armazenaremos senha de usuário no PostgreSQL.
 
 # 13. AUTENTICAÇÃO
 
-A autenticação é feita através do Firebase Authentication.
+A autenticação usa Firebase Authentication no cliente e Firebase Admin SDK no backend.
 
-Estado atual:
+Métodos suportados/planejados conforme plataforma e configuração atual:
 
-* Email + senha — implementado;
+* Email + senha;
 
-* Google — implementado;
+* Google;
 
-* Apple — permanece planejado até que seja configurado e solicitado explicitamente.
+* Apple.
 
 Fluxo esperado:
 
@@ -1326,31 +1328,23 @@ Quando começarmos a programar posteriormente:
 
 # 29. ARQUITETURA FRONTEND
 
-A arquitetura Flutter já está em uso e deve ser preservada, salvo refactor solicitado explicitamente.
+Ainda definiremos a arquitetura Flutter em detalhes antes da implementação.
 
-Fluxo principal:
+Como princípio:
 
-UI/widget
+UI
 
-→ controller/state/application layer
+→ state/application layer
 
-→ repository
+→ repositories
 
-→ API client/data source.
+→ data sources/API.
 
-Regras:
+Widgets não devem conhecer diretamente Prisma, PostgreSQL ou Firebase Admin.
 
-* widgets não devem conhecer diretamente Prisma, PostgreSQL ou Firebase Admin;
+Firebase Authentication ficará no cliente somente para autenticação do usuário.
 
-* Firebase Authentication fica no cliente somente para autenticação do usuário;
-
-* o cliente obtém Firebase ID Token e o envia para a API via Authorization: Bearer <token>;
-
-* dados persistentes de produto vêm da API Node/Fastify;
-
-* fakes/mocks são permitidos apenas em testes ou áreas explicitamente ainda demonstrativas;
-
-* não mover lógica de API/regras de domínio para widgets por conveniência.
+Dados de produto virão da API Node.
 
 ---
 
@@ -1398,25 +1392,23 @@ A identidade deve vir do token Firebase validado no backend.
 
 # 31. OBJETIVO ATUAL
 
-Não crie novas telas ou funcionalidades sem solicitação específica. As implementações já autorizadas e documentadas na seção 32 fazem parte do estado atual do projeto.
+O NextPlay está em implementação ativa. Trabalhe somente no escopo solicitado e preserve comportamento já validado.
 
-Use estas informações apenas como contexto permanente para nossa conversa.
+Toda implementação deve respeitar:
 
-Quando começarmos a desenvolver, vou enviar uma tela ou funcionalidade de cada vez.
+1. este documento atualizado;
 
-Quero que toda implementação futura respeite:
+2. o código real e o git diff atual;
 
-1. este contexto;
+3. as screenshots/referências fornecidas para a tarefa;
 
-2. as screenshots do projeto;
+4. o Style Guide Obsidian Kinetic;
 
-3. o Style Guide Obsidian Kinetic;
+5. a arquitetura definida;
 
-4. a arquitetura definida;
+6. dados reais do produto — não inventar contadores, estados, features ou metadata para copiar um mock.
 
-5. consistência entre todas as telas.
-
-Caso uma decisão futura contradiga as screenshots ou o Style Guide, me avise antes de alterar o design por conta própria.
+Caso uma decisão futura contradiga o código estabilizado, as screenshots ou o Style Guide, avise antes de alterar design/arquitetura por conta própria.
 
 ---
 
@@ -1432,11 +1424,11 @@ As telas abaixo já foram implementadas em Flutter e representam a base visual e
 
 * `lib/features/feed/feed_screen.dart` — For You/feed vertical, ações laterais, comentários e abertura de detalhes.
 
-* `lib/features/feed/feed_controller.dart` — estado do feed e coordenação das ações; preserve a integração atual com repositórios/API e os estados locais que ainda forem específicos da sessão.
+* `lib/features/feed/feed_controller.dart` — itens do feed, curtidas, estado Quero jogar, jogados e comentários da sessão; nomes internos legados como saved podem existir, mas a UX usa "Quero jogar".
 
 * `lib/features/explore/explore_screen.dart` — Explorar, busca, filtros, categorias e descoberta por escolhas.
 
-* `lib/features/explore/explore_controller.dart` — estado de busca, categoria, plataforma, escolhas e salvos.
+* `lib/features/explore/explore_controller.dart` — estado de busca, categoria, plataforma, escolhas e intenção Quero jogar; nomes internos legados podem existir sem mudar o rótulo de produto.
 
 * `lib/features/explore/explore_data.dart` — modelo `DiscoveryGame`, catálogo demonstrativo e dados editoriais.
 
@@ -1444,9 +1436,9 @@ As telas abaixo já foram implementadas em Flutter e representam a base visual e
 
 * `lib/features/game_detail/game_detail_screen.dart` — tela completa de detalhes, ações, informações, gameplay, lojas, jogos parecidos e comunidade.
 
-* `lib/features/library/library_screen.dart` — Minha Biblioteca, filtros Quero jogar/Já joguei/Favoritos/Avaliações, busca, grade/lista e avaliação.
+* `lib/features/library/library_screen.dart` — Minha Biblioteca, filtros Curtidos/Quero jogar/Já joguei/Avaliações, busca, grade/lista e avaliação.
 
-* `lib/features/library/library_store.dart` — estado compartilhado de salvos, jogados, favoritos e notas.
+* `lib/features/library/library_store.dart` — estado compartilhado de curtidos, Quero jogar, jogados e notas; Favorito não é feature ativa.
 
 * `lib/features/forum/forum_screen.dart` — Fórum, busca, categorias, tópicos em alta/recentes e criação de tópico.
 
@@ -1454,7 +1446,7 @@ As telas abaixo já foram implementadas em Flutter e representam a base visual e
 
 * `lib/features/forum/forum_controller.dart` — tópicos, respostas, curtidas, seguimento e validação de publicação.
 
-* `lib/features/profile/profile_screen.dart` — Perfil, estatísticas, favoritos, gosto, atividade, avaliações e tópicos.
+* `lib/features/profile/profile_screen.dart` — Perfil, estatísticas, jogos curtidos, gosto, atividade, avaliações e tópicos.
 
 * `lib/features/profile/profile_widgets.dart` — componentes visuais do Perfil.
 
@@ -1464,11 +1456,11 @@ As telas abaixo já foram implementadas em Flutter e representam a base visual e
 
 * `lib/features/profile/profile_repository.dart` — repositório mock que será substituído pela API.
 
-* `lib/features/auth/auth_controller.dart` — abstração de estado visitante/autenticado usada pela UI; produção usa repositório Firebase, e fakes ficam restritos a testes/injeção explícita.
+* `lib/features/auth/auth_controller.dart` — estado visitante/autenticado e adaptador temporário dos provedores.
 
 * `lib/features/auth/auth_screen.dart` — login/criação de conta com e-mail, Google, Apple, visitante e animação da marca.
 
-As telas de comentários do For You são um Bottom Sheet sobre o feed. A tela de detalhes é compartilhada por Feed, Explorar e Biblioteca. Autenticação, catálogo/feed e Biblioteca já possuem integração real com backend em partes relevantes; Fórum, comentários e Perfil ainda podem conter dados demonstrativos/em memória. Não substituir integração real por mocks ou fallbacks silenciosos.
+As telas de comentários do For You são um Bottom Sheet sobre o feed. A tela de detalhes é compartilhada por Feed, Explorar e Biblioteca. O estado atual é em memória e será substituído por repositórios ligados à API.
 
 ---
 
@@ -1490,7 +1482,7 @@ Uma ação que cria ou altera dados exige autenticação. Isso inclui:
 
 * curtir jogo, comentário, tópico ou resposta;
 
-* Quero jogar, Já joguei, Favoritar e Avaliar;
+* Curtir, Quero jogar, Já joguei e Avaliar;
 
 * comentar no For You;
 
@@ -1500,11 +1492,11 @@ Uma ação que cria ou altera dados exige autenticação. Isso inclui:
 
 Ao bloquear uma ação, abrir a tela ou modal de autenticação preservando a intenção original. Depois de concluir o login, executar a ação pendente automaticamente. O usuário pode fechar e continuar como visitante.
 
-O fluxo visual de autenticação usa a marca NextPlay sem atrasar o acesso ao Feed. Email/senha e Google já estão integrados. Apple permanece como opção planejada e não deve ser tratada como implementada sem validação/configuração específica.
+O fluxo visual de autenticação terá logo NextPlay com uma animação curta e discreta, campos de e-mail/senha, criar conta, entrar, continuar com Google e continuar com Apple. A animação deve reforçar a marca sem atrasar o acesso ao Feed.
 
 Autenticação:
 
-Flutter usa Firebase Authentication. O cliente envia `Authorization: Bearer <firebaseIdToken>` para a API. O backend usa Firebase Admin SDK exclusivamente para validar o token e obter o `firebaseUid`. Nunca aceitar um UID enviado livremente pelo cliente. O header legado `x-user-id` não faz parte do fluxo normal de produção.
+Flutter usa Firebase Authentication para e-mail/senha, Google e Apple. O cliente envia `Authorization: Bearer <firebaseIdToken>` para a API. O backend usa Firebase Admin SDK exclusivamente para validar o token e obter o `firebaseUid`. Nunca aceitar um UID enviado livremente pelo cliente.
 
 Para preservar a intenção do visitante, é permitido usar uma sessão anônima ou um `guestSessionId` local. Quando ele cria ou vincula uma conta, ações compatíveis podem ser transferidas para o usuário autenticado. A API deve aplicar uma política explícita de migração e evitar duplicatas.
 
@@ -1530,9 +1522,7 @@ Serve para leituras e eventos antes do login. Não armazenar dados pessoais desn
 
 ### `games`
 
-O Game interno possui UUID próprio. IGDB é a fonte principal do catálogo e Steam é enriquecimento opcional. O modelo persistido deve manter igdbId quando disponível e steamAppId nullable somente quando houver matching confiável, além de campos como title, slug, description, studio, publisher, coverUrl, heroUrl, rating, releaseDate, modo/jogadores e timestamps conforme o schema atual.
-
-Nunca usar igdbId como fallback para steamAppId, nunca montar URL Steam a partir de IGDB ID e nunca unir registros apenas porque possuem nomes parecidos.
+`id` UUID primary key, `source` (ex.: STEAM), `sourceId` unique, `title`, `slug` unique, `description`, `studio`, `publisher`, `coverUrl`, `heroUrl`, `rating`, `releaseDate` nullable, `mode` nullable, `playerCountMin` nullable, `playerCountMax` nullable, `isFree`, `createdAt`, `updatedAt`.
 
 ### `genres`, `gameGenres`, `platforms`, `gamePlatforms`
 
@@ -1540,13 +1530,17 @@ Catálogos normalizados para filtros e recomendações. `genres(id, name, slug)`
 
 ### `gameMedia`
 
-`id`, `gameId`, `type` (TRAILER, GAMEPLAY, SCREENSHOT), `url`, `thumbnailUrl`, `durationSeconds`, `sortOrder`, `createdAt`.
+Estado implementado/documentado do schema atual: `id`, `gameId`, `type` (TRAILER, GAMEPLAY, SCREENSHOT), `url`, `thumbnailUrl`, `durationSeconds`, `sortOrder`, `createdAt`.
+
+Direção arquitetural aprovada para trailers: o domínio precisa distinguir fonte `direct` autorizada de `youtube` fallback e, quando o schema for evoluído, poderá precisar de metadata como `sourceType`, `provider`, `sourcePage/origin`, `directUrl` ou `youtubeVideoId`, `mimeType`, `poster`, `trailerKind` e `language`. Não afirmar que esses campos já existem no Prisma e não aplicar migration sem aprovação explícita.
 
 ### `userGameLibrary`
 
-Uma linha por usuário e jogo: `userId`, `gameId`, `status` nullable (WANT_TO_PLAY ou PLAYED), `liked`, `isFavorite`, `rating` de 1 a 5 nullable, `reviewText` nullable, `reviewUpdatedAt`, `createdAt`, `updatedAt`. Chave composta (`userId`, `gameId`). Avaliar registra o jogo como PLAYED. Jogos apenas curtidos/favoritados têm status nulo; registros sem interação ativa são removidos.
+Uma linha por usuário e jogo: `userId`, `gameId`, `status` (WANT_TO_PLAY ou PLAYED), `isFavorite` legado, `rating` de 1 a 5 nullable, `reviewText` nullable, `reviewUpdatedAt`, `createdAt`, `updatedAt`. Chave única (`userId`, `gameId`). Avaliar deve registrar o jogo como PLAYED conforme a regra atual. `isFavorite` não deve ser usado por novas UIs/fluxos; sua remoção física depende de migration futura aprovada explicitamente.
 
-Curtidas de jogos agora pertencem a `userGameLibrary`; a antiga tabela `GameLike` foi copiada e removida pela migration de consolidação. Se no futuro curtidas de visitante forem permitidas, usar `guestSessionId` em uma estrutura separada, nunca uma identidade inventada.
+### `gameLikes`
+
+`userId`, `gameId`, `createdAt`, chave única (`userId`, `gameId`). Se no futuro curtidas de visitante forem permitidas, usar `guestSessionId` em uma tabela separada ou uma coluna mutuamente exclusiva, nunca uma identidade inventada.
 
 ### `comments`
 
@@ -1582,7 +1576,7 @@ Tabelas de relação com chaves únicas por usuário e alvo. Seguir uma discuss�
 
 ### `recommendationEvents`
 
-`id`, `userId` nullable, `guestSessionId` nullable, `gameId` nullable, `eventType`, `position` nullable, `watchDurationMs` nullable, `metadata` JSONB nullable, `createdAt`. Eventos: IMPRESSION, VIEW, LIKE, SAVE, PLAYED, DISLIKE, SEARCH, SWIPE_YES, SWIPE_NO, DETAIL_OPEN, COMMENT.
+`id`, `userId` nullable, `guestSessionId` nullable, `gameId` nullable, `eventType`, `position` nullable, `watchDurationMs` nullable, `metadata` JSONB nullable, `createdAt`. Eventos podem representar IMPRESSION, VIEW, LIKE, WANT_TO_PLAY, PLAYED, DISLIKE, SEARCH, SWIPE_YES, SWIPE_NO, DETAIL_OPEN e COMMENT. Se dados/nomes legados como SAVE existirem, tratá-los como compatibilidade histórica; novos fluxos usam a semântica Quero jogar/WANT_TO_PLAY.
 
 ### `searchQueries`
 
@@ -1596,11 +1590,11 @@ Tabelas de relação com chaves únicas por usuário e alvo. Seguir uma discuss�
 
 # 36. REGRAS DE DOMÍNIO
 
-* Salvar no Feed ou Explorar cria/atualiza `userGameLibrary` com status WANT_TO_PLAY.
+* "Quero jogar" no Feed ou Explorar cria/atualiza `userGameLibrary` com status WANT_TO_PLAY. O rótulo "Salvo" não deve ser usado como ação de produto.
 
 * Já joguei atualiza o mesmo registro para PLAYED.
 
-* Favorito e avaliação são propriedades do registro do usuário com o jogo.
+* Curtir é uma relação/estado separado e idempotente. Favorito não é feature ativa; isFavorite, se ainda existir no schema, é legado até migration futura aprovada. Avaliação continua vinculada ao usuário+jogo.
 
 * Remover uma ação não deve apagar o jogo do catálogo.
 
@@ -1610,7 +1604,7 @@ Tabelas de relação com chaves únicas por usuário e alvo. Seguir uma discuss�
 
 * Tópicos do Fórum são persistentes e podem ter jogo relacionado, tags e respostas.
 
-* O catálogo é público; mutações exigem usuário autenticado. AuthController continua como abstração da UI, mas a integração de produção usa Firebase Authentication e Firebase ID Token real. Fakes só podem ser usados por injeção explícita em testes.
+* O catálogo é público; mutações exigem usuário autenticado. Flutter usa Firebase Authentication e envia `Authorization: Bearer <firebaseIdToken>`; o backend valida via Firebase Admin SDK e deriva o usuário do token. Nunca aceitar `x-user-id`, `dev-user` ou UID livremente enviado como identidade normal da API.
 
 * Todas as rotas protegidas devem derivar o usuário do Firebase ID Token validado no backend.
 
@@ -1632,47 +1626,35 @@ Widgets não conhecem Prisma, PostgreSQL, Firebase Admin ou regras de consulta. 
 
 # 38. VALIDAÇÃO ATUAL
 
-Os testes em test/ cobrem Feed, navegação, trailer/player, comentários e ações, Explorar e descoberta, Perfil, Biblioteca, Fórum, discussões, detalhes do jogo, estado compartilhado e responsividade. A contagem de testes muda ao longo do desenvolvimento; não hardcode um número como requisito.
-
-Para validar Flutter, sempre usar o wrapper da raiz:
-
-powershell.exe -ExecutionPolicy Bypass -File "./flutter.ps1" analyze
-
-powershell.exe -ExecutionPolicy Bypass -File "./flutter.ps1" test
-
-Nunca usar flutter cru neste repositório, porque o wrapper existe para lidar corretamente com o caminho local do projeto.
+Os testes em `test/` cobrem Feed, comentários e ações, Explorar e descoberta, Perfil, Biblioteca, Fórum, discussões, detalhes do jogo, estado compartilhado e responsividade em larguras pequenas com escala de texto ampliada. Antes de alterar telas, executar `flutter analyze` e `flutter test` usando o Flutter local do projeto por meio de `flutter.ps1`.
 
 ---
 
 # 39. CATÁLOGO IGDB + STEAM
 
-IGDB é a fonte principal do catálogo. Steam é enriquecimento complementar para disponibilidade, loja, preço, screenshots e outros metadados de PC quando existir matching confiável. As duas APIs são acessadas somente pelo backend; Flutter consome apenas a API do NextPlay.
+O diretório `backend/` contém a base da integração automática de catálogo. IGDB é a fonte principal de metadados; Steam complementa disponibilidade, loja e preço para PC. As duas APIs são acessadas somente pelo backend. O Flutter consome a API do NextPlay e nunca recebe credenciais externas.
 
-Pipeline:
+Os clientes, tipos e mappers ficam separados em `backend/src/modules/integrations/`. As respostas externas são transformadas em `NormalizedGame` antes de chegar ao domínio. `backend/src/modules/sync/game-matcher.service.ts` associa fontes apenas quando nome normalizado, lançamento, desenvolvedora, publisher e plataformas atingem um limite conservador; IDs externos diferentes não justificam duplicar um `Game` nem unir remakes ou edições sem confiança.
 
-IGDB → normalização → matching/upsert → Steam enrichment → PostgreSQL → API → Flutter.
+`backend/src/modules/sync/game-sync.service.ts` coordena importação, atualização, enriquecimento Steam, matching e registro de sincronização por meio de um repositório. O script `backend/src/scripts/sync-games.ts` é uma entrada de desenvolvimento e exige variáveis de ambiente. O schema e a primeira migration já estão aplicados; `PrismaGameRepository` persiste o catálogo. A sincronização externa automática de produção continua pendente.
 
-Os clientes, tipos e mappers ficam em backend/src/modules/integrations/. O matching deve ser conservador. Não duplicar o mesmo jogo por fonte, mas também não unir remakes, bundles, demos, playtests, DLCs ou edições distintas sem confiança.
+Credenciais devem existir apenas em `.env` local, com nomes documentados em `backend/.env.example`. Não versionar tokens, não chamar IGDB/Steam a partir do Flutter e não expor publicamente um endpoint de sincronização sem autenticação administrativa, limite e logs seguros.
 
-Trailers da IGDB usam game_videos.video_id e são normalizados como YouTube. YouTube vindo da IGDB é a preferência para primaryTrailer; Steam é fallback/complementar. Não requer YouTube API key.
+Princípios de catálogo:
 
-Quando IGDB fornece múltiplos Steam IDs, preserve candidatos válidos e resolva no enriquecimento Steam. Rejeite candidatos cujo nome indique playtest, beta, demo, dlc, soundtrack ou tool. Se continuar ambíguo, mantenha o jogo IGDB sem steamAppId em vez de escolher arbitrariamente.
+* IGDB é a fonte de verdade principal; Steam é enriquecimento complementar.
 
-O script backend/src/scripts/sync-games.ts suporta execução controlada por ID e modos de seleção. Exemplos seguros:
+* `Game.id` UUID interno é a identidade canônica. IDs Steam/IGDB são metadata e nunca substituem o UUID interno.
 
-pnpm.cmd run sync:games -- --id 113112
+* Um jogo antigo não é ruim por ser antigo. Clássicos, AA/AAA famosos, jogos cult, hidden gems e indies podem aparecer se houver evidência suficiente de relevância/qualidade.
 
-pnpm.cmd run sync:games -- --mode popular --limit 20
+* Fama não é penalidade. O objetivo é ajudar o usuário a encontrar o próximo jogo para jogar, inclusive redescobrir algo que ele já conhece.
 
-pnpm.cmd run sync:games -- --mode recent --limit 20
+* Evitar desconhecidos sem evidência quase nenhuma no For You principal; não inventar contagem de jogadores. Usar sinais reais disponíveis como `rating_count`, `total_rating_count`, avaliações, comunidade e metadata confiável.
 
-pnpm.cmd run sync:games -- --mode discover --limit 20 --dry-run
+* Não usar corte universal por ano como regra de produto. Filtros e ranking podem considerar recência, mas jogos antigos relevantes devem continuar no catálogo.
 
-Para lotes, preferir --dry-run antes da persistência. Não executar sync massivo/default por conveniência. O campo IGDB popularity já causou query inválida e não deve ser reintroduzido sem validação da API.
-
-Credenciais devem existir apenas em .env local, com nomes documentados em backend/.env.example. Não versionar tokens, não chamar IGDB/Steam a partir do Flutter e não expor endpoint de sincronização sem autenticação administrativa, limite e logs seguros.
-
-A sincronização externa automática de produção continua pendente; isso não significa que a integração manual/CLI esteja pendente.
+* Primary trailer deve favorecer conteúdo official/launch/gameplay/story/announcement/reveal/teaser e penalizar walkthrough, tutorial, guide, review, how-to, let's play, reaction, interview e BTS/dev diary quando existir trailer melhor.
 
 ---
 
@@ -1682,21 +1664,19 @@ O frontend Flutter fica nas pastas `lib/`, `android/`, `web/`, `assets/` e `test
 
 O backend fica exclusivamente em `backend/`, com código TypeScript em `backend/src/`, schema e migrations em `backend/prisma/`, dependências em `backend/package.json` e configuração segura em `backend/.env.example`. Não misturar imports, credenciais, regras ou dependências entre as duas áreas.
 
-## Manutenção do protótipo / estado atual
+## Manutenção do protótipo
 
-- lib/features/feed/feed_comments_sheet.dart concentra o painel de comentários e descarta seus recursos ao fechar. Comentários ainda podem usar estado demonstrativo/local enquanto essa área não for migrada explicitamente.
+- `lib/features/feed/feed_comments_sheet.dart` concentra o painel de comentários e descarta seus recursos ao fechar. Curtidas e contagens permanecem no `FeedController` durante a sessão.
 
-- Abrir conteúdo público pode ser permitido a visitante; ações persistentes/mutações exigem autenticação.
+- Abrir os comentários é público. Curtir, responder e enviar exigem autenticação; cancelar o login preserva o rascunho.
 
-- O contrato backend/src/modules/games/game.repository.ts exige o ID persistido nos candidatos; nunca usar título ou slug como ID do banco.
+- O contrato `backend/src/modules/games/game.repository.ts` exige o ID persistido nos candidatos; nunca usar título ou slug como ID do banco.
 
-- O backend possui lockfile pnpm e comandos typecheck, test, format e format:check. Dependências e dist/ não são versionados.
+- O backend possui lockfile pnpm e comandos `typecheck`, `test`, `format` e `format:check`. Dependências e arquivos de `dist/` não são versionados.
 
-- API/Prisma de catálogo e Biblioteca estão implementados. Firebase Authentication também está integrado no frontend/backend para o fluxo normal protegido. Não usar x-user-id como autenticação normal; se código legado de teste/desenvolvimento ainda existir, ele não deve escapar para produção.
+- A API e a persistência Prisma do catálogo/biblioteca estão implementadas. A autenticação real usa Firebase Authentication no Flutter e Firebase Admin SDK no backend; rotas protegidas derivam o usuário do ID Token validado. Não reintroduzir `x-user-id`, `dev-user` ou identidade livre enviada pelo cliente. A sincronização externa automática de produção continua sendo uma preocupação separada.
 
-- Feed consome a API real e não deve substituir silenciosamente falhas da API por catálogo demo. Biblioteca usa LibraryStore/ApiLibraryRepository e restaura estado persistido. Avaliar implica PLAYED conforme a regra atual. Explorar pode conter conteúdo editorial/demonstrativo onde isso estiver explícito; Fórum, comentários e Perfil ainda podem manter partes demonstrativas/em memória até tarefas específicas de migração.
-
-- Logout pode limpar estado privado em memória, mas não deve apagar dados persistidos do usuário no banco.
+- Feed e Explorar usam a API de jogos. Feed e Biblioteca compartilham `LibraryStore`/`ApiLibraryRepository`; o estado ativo do produto usa Curtidos, Quero jogar, Já joguei e avaliações. `isFavorite` pode existir no banco apenas como legado. Avaliar implica PLAYED. Fórum, comentários e perfil podem conter partes demonstrativas/em memória conforme o código atual; confirme no repositório antes de assumir.
 
 ## Primeira migration aplicada
 
@@ -1710,162 +1690,134 @@ usam UUID compatível. Notas são de 1 a 5 e exigem PLAYED; seguir a si mesmo
 
 é proibido por CHECK, assim como valores inválidos de ofertas e jogadores.
 
-Esses CHECKs são mantidos no SQL. A migration `20260913000100_unify_user_game_interaction` também foi aplicada ao banco local: preservou status/notas/favoritos, copiou as curtidas para `UserGameLibrary.liked` e tornou `status` opcional. Não editar migrations já aplicadas.
+Esses CHECKs são mantidos no SQL. Não editar migrations já aplicadas.
 
-pnpm.cmd run test:db e os testes de API, executados em backend/, verificam o PostgreSQL local com transações revertidas. A API e o GameRepository Prisma estão implementados. Nunca editar migration já aplicada e nunca reintroduzir identidade manual como substituto do Firebase ID Token.
-
----
-
-# 41. REGRAS OPERACIONAIS E SEGURANÇA DO REPOSITÓRIO
-
-Antes de alterar código:
-
-* ler este AGENTS.md;
-
-* executar git status --short;
-
-* inspecionar git diff das alterações existentes;
-
-* preservar trabalho não commitado de outro agente ou do usuário.
-
-Sem autorização explícita, NÃO executar:
-
-* git reset --hard;
-
-* git clean;
-
-* git restore .;
-
-* git checkout .;
-
-* git stash;
-
-* commit;
-
-* push.
-
-Banco de dados:
-
-* nunca executar prisma migrate reset;
-
-* nunca executar prisma db push sem justificativa e aprovação explícita;
-
-* não editar migration já aplicada;
-
-* não criar migration sem aprovação quando a tarefa não exige schema;
-
-* não apagar catálogo ou dados pessoais de usuário para “facilitar” um teste;
-
-* seeds e syncs devem ser idempotentes e conservadores.
-
-Segredos:
-
-* backend/.env não deve ser versionado;
-
-* nunca imprimir, pedir ou colar em chat FIREBASE_PRIVATE_KEY, IGDB_CLIENT_SECRET, STEAM_API_KEY, tokens ou credenciais;
-
-* se uma chave aparecer acidentalmente em screenshot/log, tratar como potencialmente comprometida e recomendar rotação antes de produção.
-
-Flutter:
-
-* executar a partir da raiz com powershell.exe -ExecutionPolicy Bypass -File "./flutter.ps1" ...;
-
-* não usar flutter cru;
-
-* testar com analyze + test e, quando aplicável, git diff --check.
-
-Backend:
-
-* executar comandos pnpm dentro de backend/;
-
-* não reinstalar dependências ou apagar node_modules sem necessidade;
-
-* se o pnpm tentar verificação/reinstalação indevida, pode-se usar --config.verify-deps-before-run=false;
-
-* neste repositório dentro do OneDrive, reinstalações já exigiram --package-import-method=copy; só repetir se realmente necessário.
+`pnpm.cmd run test:db` e os testes de API, executados em backend, verificam o PostgreSQL local com transações revertidas quando o banco de teste está disponível. A API e o GameRepository Prisma estão implementados. Nunca editar migration aplicada, resetar o banco ou reintroduzir identidade temporária `dev-user` como autenticação.
 
 ---
 
-# 42. FEED, TRAILERS E MÍDIA
+# 41. TRAILERS E PLAYBACK — ARQUITETURA CANÔNICA
 
-O For You é um feed vertical 9:16.
+O NextPlay deve tratar trailer como mídia de catálogo, não como postagem de usuário.
 
-Quando o trailer original é 16:9:
+Estratégia de source:
 
-* manter a proporção 16:9;
+1. Direct autorizado — MP4/HLS ou formato direto permitido, vindo de press kit oficial, site oficial, publisher, desenvolvedor, parceiro autorizado ou submissão autorizada. É a opção preferencial porque permite player próprio e controle integral de UX.
 
-* centralizar dentro do feed vertical;
+2. YouTube — fallback quando não existir fonte Direct autorizada. Usar somente APIs públicas suportadas. Não prometer remoção completa de branding, recomendações ou elementos inevitáveis do iframe.
 
-* usar comportamento de contain/letterbox, com áreas pretas quando necessário;
+É proibido implementar como parte normal do produto:
 
-* nunca esticar o vídeo;
+* scraping/download não autorizado de YouTube;
 
-* não cortar o vídeo apenas para preencher o 9:16.
+* yt-dlp/youtube-dl para extrair trailers;
 
-Deve existir ação de tela cheia. No mobile, fullscreen deve permitir experiência horizontal/landscape para o trailer 16:9 e, ao sair, retornar ao For You vertical preservando o contexto do jogo.
+* extração de URLs internas de stream do YouTube;
 
-Integração atual de trailer:
+* uso do CDN da Steam como CDN do NextPlay sem permissão;
 
-* TrailerInfo é tipado com provider, url e videoId;
+* re-hospedagem de trailer comercial sem autorização;
 
-* YouTube/IGDB é a fonte primária de trailer quando válido;
+* assumir que URL pública implica licença de redistribuição.
 
-* youtube_player_iframe é usado para o player;
+A arquitetura é multi-source e vale para AAA, AA, clássicos, jogos médios, cult, hidden gems, indies conhecidos e indies pequenos. Direct não é uma solução exclusiva para indie.
 
-* manter um único player/controller reutilizável no Feed, não um player por card;
+## Abstração de source
 
-* ao trocar de card, pausar o anterior e carregar o videoId ativo;
+Direção arquitetural aprovada: TrailerPlaybackSource distingue pelo menos direct e youtube, com metadata de origem suficiente para rastrear provider/source quando disponível. A UI do Feed não deve conhecer detalhes internos do provider.
 
-* pausar ao sair da aba/rota/background quando aplicável;
+## Abstração de player
 
-* estado visual Play/Pause deve acompanhar eventos reais do player, não apenas bool local otimista;
+A interface comum de player deve expor, conforme aplicável:
 
-* fallback visual: heroUrl → coverUrl → placeholder;
+* load/source;
 
-* URL Steam só pode ser construída com steamAppId explícito e válido;
+* play;
 
-* nunca usar igdbId como steamAppId.
+* pause;
 
-No Flutter Web, alguns assets steamstatic.com podem falhar por CORS. Não mascarar esse problema inventando IDs ou trocando a arquitetura do backend sem solicitação; tratar apenas URLs Steam realmente válidas e de forma isolada.
+* seekTo;
+
+* position;
+
+* duration;
+
+* state;
+
+* buffering;
+
+* mute/unmute;
+
+* volume;
+
+* dispose.
+
+Implementações esperadas: DirectTrailerPlayer e YoutubeTrailerPlayer. Não adicionar múltiplos players concorrentes sem necessidade comprovada.
+
+## Autoridade de playback
+
+* Um card ativo pode iniciar autoplay uma vez.
+
+* A intenção explícita do usuário tem prioridade sobre autoplay/reconcile/page update.
+
+* Se o usuário pausar, o mesmo card não pode voltar a tocar automaticamente por lógica de reconciliação.
+
+* Se o usuário pedir play, lógica automática não deve pausá-lo imediatamente enquanto o card continua ativo.
+
+* buffering é estado real do player, não intenção do usuário.
+
+* Ao diagnosticar, instrumentar origem dos comandos (userTap, pageActivation, pageDeactivation, lifecycle, reconcile etc.) em vez de logs genéricos PLAY/PAUSE.
+
+## Seekbar NextPlay
+
+A seekbar pertence ao NextPlay e deve consumir a abstração comum do player (position, duration, seekTo). Deve funcionar em playing e paused, suportar tap e drag/scrub, reconciliar com a posição real e não disparar Play/Pause nem swipe vertical acidentalmente.
+
+## Direct player
+
+Para source Direct:
+
+* tap no trailer alterna Play/Pause;
+
+* pausar preserva frame/timestamp;
+
+* resume continua do mesmo ponto;
+
+* mute/unmute e seek são controlados pelo NextPlay;
+
+* loading usa artwork/capa real do jogo e nunca deve virar retângulo preto por falha de thumbnail externa;
+
+* ended permite replay sem UI externa.
+
+Validar separadamente Android/iOS e Web/Edge. URLs Direct usadas na Web precisam de CORS compatível; não contornar CORS pelo frontend.
+
+## YouTube fallback
+
+Preservar o player YouTube como fallback. Não criar hacks visuais que obscureçam o iframe para fingir remoção de UI inevitável. Usar apenas parâmetros/APIs públicas realmente suportadas pela versão instalada. O iframe não deve roubar foco/input do Feed quando a configuração pública permitir pointerEvents: none/equivalente e teclado desabilitado.
+
+## Lifecycle sensível
+
+O player já passou por correções delicadas. Preserve controller único/reutilizado e proteções contra callbacks atrasados/revisões de vídeo. Não reintroduzir ready gate customizado, fila serial de comandos ou controller por card sem causa técnica comprovada e teste de regressão.
+
+## Validação de player
+
+Testes automatizados são obrigatórios, mas não bastam para declarar concluídos problemas de PlatformView/iframe/gestos. Validar manualmente no Edge e em Android físico, incluindo Samsung Galaxy S20 FE como aparelho real de referência, sem criar layout específico para ele.
 
 ---
 
-# 43. AUTENTICAÇÃO E BIBLIOTECA — ESTADO ATUAL
+# 42. ESCALA DO FEED E CATÁLOGO — DIREÇÃO FUTURA APROVADA
 
-Fluxo de produção:
+O produto deve ser preparado para centenas e depois milhares de jogos sem carregar todo o catálogo no cliente.
 
-Flutter/Firebase Authentication → Firebase ID Token → Authorization: Bearer <token> → Fastify → Firebase Admin → usuário interno/PostgreSQL.
+Direção:
 
-Email/senha e Google já foram testados no fluxo real. Sessão restaura após reload quando esperado. Logout limpa estado privado em memória sem apagar a persistência do banco.
+* Feed paginado/infinito, recebendo lotes pequenos do backend.
 
-Biblioteca:
+* Prefetch antes do lote atual acabar para permitir dezenas/centenas de swipes numa única sessão sem reiniciar o app.
 
-* ações protegidas usam o token Firebase real;
+* Histórico persistente de impressões/visualizações por usuário/guest session para reduzir repetição entre sessões e dispositivos.
 
-* ApiLibraryRepository é a integração persistente;
+* Não excluir um jogo para sempre apenas porque foi visto. Usar cooldown/rebaixamento e permitir reentrada futura quando fizer sentido.
 
-* Curtir, Quero jogar, Já joguei, Favoritar e Avaliar não devem depender de x-user-id;
+* Evitar duplicatas na fila atual e manter ordenação determinística/paginação segura.
 
-* avaliar implica PLAYED conforme regra atual;
-
-* não apagar dados de biblioteca para corrigir problema de catálogo/feed.
-
----
-
-# 44. PRIORIDADE ENTRE ESPECIFICAÇÃO E ESTADO ATUAL
-
-Este arquivo mistura visão de produto de longo prazo com partes já implementadas.
-
-Ao trabalhar:
-
-requisito explícito mais recente do usuário para a tarefa atual;
-
-estado real do código e testes;
-
-regras de segurança/arquitetura deste AGENTS.md;
-
-especificações futuras deste documento.
-
-Se uma seção antiga disser que algo “será implementado”, mas o código atual já contém implementação real validada, não reverta para mock nem refaça do zero. Atualize a documentação quando necessário.
-
-Quando houver dúvida sobre estado atual, inspecione o código antes de assumir.
+* Essa direção ainda não autoriza implementar catálogo de 500 jogos, feed infinito ou novo algoritmo sem solicitação específica. Ela existe para impedir escolhas arquiteturais que bloqueiem essa evolução.

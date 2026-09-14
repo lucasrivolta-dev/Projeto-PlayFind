@@ -4,6 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
+import 'direct_trailer_player.dart';
+import 'trailer_info.dart';
+
 /// Small adapter boundary: widget tests inject an in-memory player.
 abstract class TrailerPlayer extends ChangeNotifier {
   String? get playingVideoId;
@@ -12,15 +15,29 @@ abstract class TrailerPlayer extends ChangeNotifier {
   bool get viewMounted;
   bool get failed;
   String get stateLabel;
+  PlayerState get state =>
+      playingVideoId != null ? PlayerState.playing : PlayerState.paused;
+  bool get isPlaying => state == PlayerState.playing;
+  bool get isBuffering => state == PlayerState.buffering;
+  bool get isPaused => !isPlaying;
+  Duration get position => Duration.zero;
+  Duration get duration => Duration.zero;
   Widget buildView({required VoidCallback onMounted});
   Future<void> load(String videoId);
   Future<void> play();
   Future<void> pause();
+  Future<void> seekTo(Duration position) async {}
   Future<void> setMuted(bool muted);
   Future<void> close();
 }
 
 typedef TrailerPlayerFactory = TrailerPlayer Function(String initialVideoId);
+
+/// Default unified factory resolving a [TrailerPlaybackSource] to its appropriate player.
+TrailerPlayer createTrailerPlayer(TrailerPlaybackSource source) => switch (source) {
+  YoutubeSource(:final videoId) => YoutubeTrailerPlayer(videoId),
+  DirectSource(:final url) => DirectTrailerPlayer(url),
+};
 
 class YoutubeTrailerPlayer extends TrailerPlayer {
   YoutubeTrailerPlayer(String initialVideoId) {
@@ -33,6 +50,12 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
         showControls: false,
         showFullscreenButton: false,
         pointerEvents: PointerEvents.none,
+        showVideoAnnotations: false,
+        strictRelatedVideos: true,
+        enableKeyboard: false,
+        enableCaption: false,
+        playsInline: true,
+        privacyEnhancedMode: true,
       ),
       onWebResourceError: (error) {
         if (kDebugMode) {
@@ -46,6 +69,7 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
       debugPrint('[FeedTrailer] CONTROLLER CREATED hash=$_controllerId');
     }
     _subscription = _controller.listen(_onValue);
+    _videoStateSubscription = _controller.videoStateStream.listen(_onVideoState);
     unawaited(
       _controller.cueVideoById(videoId: initialVideoId).catchError((
         Object error,
@@ -58,12 +82,15 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
   late final YoutubePlayerController _controller;
   late final int _controllerId;
   late final StreamSubscription<YoutubePlayerValue> _subscription;
+  late final StreamSubscription<YoutubeVideoState> _videoStateSubscription;
   bool _closed = false;
   bool _failed = false;
   bool _viewMounted = false;
   String? _playingVideoId;
   String? _requestedId;
   String? _displayedId;
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
   PlayerState _state = PlayerState.unknown;
   int _requestRevision = 0;
 
@@ -79,6 +106,26 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
   bool get failed => _failed;
   @override
   String get stateLabel => _state.name;
+  @override
+  PlayerState get state => _state;
+  @override
+  bool get isPlaying => _state == PlayerState.playing;
+  @override
+  bool get isBuffering => _state == PlayerState.buffering;
+  @override
+  bool get isPaused => !isPlaying;
+  @override
+  Duration get position => _position;
+  @override
+  Duration get duration => _duration;
+
+  void _onVideoState(YoutubeVideoState state) {
+    if (_closed) return;
+    if (_position.inMilliseconds != state.position.inMilliseconds) {
+      _position = state.position;
+      notifyListeners();
+    }
+  }
 
   void _onViewMounted() {
     if (_closed || _viewMounted) return;
@@ -129,6 +176,11 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
         if (_displayedId != currentTarget) changed = true;
         _displayedId = currentTarget;
       }
+      if (value.metaData.duration > Duration.zero &&
+          _duration != value.metaData.duration) {
+        _duration = value.metaData.duration;
+        changed = true;
+      }
     }
     if (changed) notifyListeners();
   }
@@ -158,6 +210,8 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
     _failed = false;
     _playingVideoId = null;
     _displayedId = null;
+    _position = Duration.zero;
+    _duration = Duration.zero;
     _requestedId = videoId;
     notifyListeners();
     if (kDebugMode) {
@@ -204,6 +258,17 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
   }
 
   @override
+  Future<void> seekTo(Duration position) async {
+    if (_closed || _requestedId == null) return;
+    _position = position;
+    notifyListeners();
+    await _controller.seekTo(
+      seconds: position.inMilliseconds / 1000.0,
+      allowSeekAhead: true,
+    );
+  }
+
+  @override
   Future<void> setMuted(bool muted) async {
     if (_closed) return;
     await (muted ? _controller.mute() : _controller.unMute());
@@ -215,6 +280,7 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
     _closed = true;
     ++_requestRevision;
     await _subscription.cancel();
+    await _videoStateSubscription.cancel();
     await _controller.close();
     dispose();
   }

@@ -5,8 +5,8 @@ import { FirebaseTokenVerifier } from './auth/firebase-auth.js';
 
 const port = Number(process.env.PORT) || 3333;
 // A identidade x-user-id é temporária e não verifica a pessoa que envia a requisição.
-// Até a autenticação real existir, nunca exponha este servidor na rede.
-const host = '127.0.0.1';
+// O fallback padrão é 127.0.0.1; process.env.HOST permite bind em 0.0.0.0 apenas sob demanda para testes em rede local.
+const host = process.env.HOST || '127.0.0.1';
 
 const prisma = new PrismaClient();
 const hasFirebaseAdmin = Boolean(
