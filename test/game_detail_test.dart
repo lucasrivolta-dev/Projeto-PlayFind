@@ -32,11 +32,11 @@ void main() {
       await tester.tap(find.text('Quero jogar'));
       await tester.pumpAndSettle();
       expect(library.saved, contains(game.id));
-      await tester.scrollUntilVisible(find.byTooltip('Favoritar'), 200,
+      await tester.scrollUntilVisible(find.byTooltip('Curtir'), 200,
           scrollable: find.byType(Scrollable).first);
-      await tester.tap(find.byTooltip('Favoritar'));
+      await tester.tap(find.byTooltip('Curtir'));
       await tester.pumpAndSettle();
-      expect(library.favorites, contains(game.id));
+      expect(library.liked, contains(game.id));
       await tester.scrollUntilVisible(find.text('Comunidade & Fórum'), 350,
           scrollable: find.byType(Scrollable).first);
       await tester.pumpAndSettle();

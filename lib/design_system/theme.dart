@@ -66,6 +66,7 @@ abstract final class AppTypography {
 abstract final class AppTheme {
   static ThemeData get dark => ThemeData(
         useMaterial3: true,
+        splashFactory: InkRipple.splashFactory,
         brightness: Brightness.dark,
         scaffoldBackgroundColor: AppColors.canvas,
         colorScheme: const ColorScheme.dark(

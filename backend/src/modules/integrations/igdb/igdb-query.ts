@@ -1,5 +1,5 @@
 export const DEFAULT_IGDB_SYNC_QUERY =
-  'fields name,slug,summary,cover.url,artworks.url,screenshots.url,videos.video_id,external_games.uid,external_games.external_game_source.name,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,rating_count,total_rating,total_rating_count; where version_parent = null; limit 50;';
+  'fields name,slug,summary,cover.url,artworks.url,screenshots.url,videos.video_id,videos.name,external_games.uid,external_games.external_game_source.name,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,rating_count,total_rating,total_rating_count; where game_type = 0 & version_parent = null & cover != null & total_rating_count >= 10 & total_rating >= 60; sort total_rating desc; limit 50;';
 
 export const MAX_SYNC_LIMIT = 100;
 export const DISCOVER_POOL_MULTIPLIER = 5;
@@ -9,7 +9,7 @@ export const DISCOVER_BASELINE_C = 75;
 const DEFAULT_LIMIT = 20;
 const RECENT_WINDOW_DAYS = 5 * 365;
 const GAME_FIELDS =
-  'name,slug,summary,cover.url,artworks.url,screenshots.url,videos.video_id,external_games.uid,external_games.external_game_source.name,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,rating_count,total_rating,total_rating_count';
+  'name,slug,summary,cover.url,artworks.url,screenshots.url,videos.video_id,videos.name,external_games.uid,external_games.external_game_source.name,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,rating_count,total_rating,total_rating_count';
 
 export type SyncMode = 'default' | 'id' | 'popular' | 'recent' | 'discover' | 'custom';
 export interface SyncCliOptions {
@@ -97,7 +97,11 @@ export function buildSyncQuery(options: SyncCliOptions, now = new Date()): strin
     const current = Math.floor(now.getTime() / 1000);
     return `${fields} where game_type = 0 & version_parent = null & cover != null & first_release_date >= ${cutoff} & first_release_date <= ${current} & total_rating != null & total_rating >= 70 & total_rating_count >= 20 & total_rating_count <= 500; limit ${poolLimit};`;
   }
-  return `${fields} where version_parent = null; limit ${options.limit};`;
+  // Modo default: catálogo de qualidade — jogos principais com capa, ao menos
+  // 10 avaliações e nota >= 60/100. Elimina DLCs, expansões, títulos obsoletos
+  // e entradas com dados insuficientes, acolhendo clássicos de qualquer ano.
+  const current = Math.floor(now.getTime() / 1000);
+  return `${fields} where game_type = 0 & version_parent = null & cover != null & first_release_date <= ${current} & total_rating_count >= 10 & total_rating >= 60; sort total_rating desc; limit ${options.limit};`;
 }
 
 export interface DiscoverCandidate {

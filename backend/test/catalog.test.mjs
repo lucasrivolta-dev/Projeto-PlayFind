@@ -170,6 +170,27 @@ test('YouTube remains primary, Steam is fallback, and repeated videos are dedupl
   assert.equal(repeated.trailerDetails.length, 1);
 });
 
+test('Official trailers take priority over walkthroughs, guides, reviews, and gameplay', () => {
+  const game = mapIgdbGame({
+    id: 42,
+    name: 'Epic Adventure',
+    videos: [
+      { video_id: 'vid-guide', name: 'Complete 100% Walkthrough and Guide' },
+      { video_id: 'vid-gameplay', name: 'Extended Gameplay Demo' },
+      { video_id: 'vid-review', name: 'IGN Game Review' },
+      { video_id: 'vid-trailer', name: 'Official Launch Trailer' },
+      { video_id: 'vid-teaser', name: 'Teaser Trailer' },
+    ],
+  });
+
+  assert.equal(game.trailerDetails[0].videoId, 'vid-trailer');
+  assert.equal(game.trailerDetails[1].videoId, 'vid-teaser');
+  assert.equal(game.trailerDetails[2].videoId, 'vid-gameplay');
+  const tailIds = game.trailerDetails.slice(3).map((t) => t.videoId);
+  assert.ok(tailIds.includes('vid-guide'));
+  assert.ok(tailIds.includes('vid-review'));
+});
+
 test('Multiple Steam IDs are preserved for later validation instead of aborting mapping', () => {
   const game = mapIgdbGame({
     id: 194821,

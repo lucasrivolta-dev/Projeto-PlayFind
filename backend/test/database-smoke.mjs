@@ -58,7 +58,9 @@ try {
   await verify(
     'Curtidas sem usuário ou jogo são recusadas',
     async (tx) => {
-      await tx.gameLike.create({ data: { userId: randomUUID(), gameId: randomUUID() } });
+      await tx.userGameLibrary.create({
+        data: { userId: randomUUID(), gameId: randomUUID(), liked: true },
+      });
     },
     'P2003',
   );
@@ -67,8 +69,8 @@ try {
     async (tx) => {
       const { user, game } = await fixtures(tx);
       const data = { userId: user.id, gameId: game.id };
-      await tx.gameLike.create({ data });
-      await tx.gameLike.create({ data });
+      await tx.userGameLibrary.create({ data: { ...data, liked: true } });
+      await tx.userGameLibrary.create({ data: { ...data, liked: true } });
     },
     'P2002',
   );

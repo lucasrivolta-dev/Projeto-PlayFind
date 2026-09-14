@@ -63,7 +63,7 @@ void main() {
     Future<List<DiscoveryGame>> repoWith10() async => List.generate(
           10,
           (i) => DiscoveryGame(
-            id: 1000 + i,
+            id: 'game-${1000 + i}',
             title: 'Game ${i + 1}',
             studio: 'Studio',
             genre: 'Ação',
@@ -85,7 +85,7 @@ void main() {
   test('matchScore da API é usado como match no FeedItem', () async {
     Future<List<DiscoveryGame>> repoWithMatch() async => [
           const DiscoveryGame(
-            id: 42,
+            id: 'game-42',
             title: 'Jogo com Match',
             studio: 'Studio',
             genre: 'RPG',

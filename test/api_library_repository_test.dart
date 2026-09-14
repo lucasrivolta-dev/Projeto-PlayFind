@@ -36,13 +36,13 @@ void main() {
               'status': 'WANT_TO_PLAY',
               'isFavorite': false,
               'rating': null,
-              'game': {'steamAppId': 1145360, 'igdbId': null},
+              'game': {'id': 'game-1145360', 'steamAppId': 1145360, 'igdbId': null},
             },
             {
               'status': 'PLAYED',
               'isFavorite': true,
               'rating': 5,
-              'game': {'steamAppId': null, 'igdbId': 123},
+              'game': {'id': 'game-123', 'steamAppId': null, 'igdbId': 123},
             },
           ],
           'total': 2,
@@ -57,10 +57,10 @@ void main() {
       final store = LibraryStore();
       await repo.loadInto(store);
 
-      expect(store.saved, contains(1145360));
-      expect(store.played, contains(123));
-      expect(store.favorites, contains(123));
-      expect(store.ratings[123], equals(5));
+      expect(store.saved, contains('game-1145360'));
+      expect(store.played, contains('game-123'));
+      expect(store.favorites, contains('game-123'));
+      expect(store.ratings['game-123'], equals(5));
     });
 
     test('like salvo reidrata e os dois primeiros toques seguem o banco', () async {
@@ -72,7 +72,7 @@ void main() {
         if (request.method == 'GET') {
           return http.Response(jsonEncode({
             'data': [],
-            'likes': persistedLike ? [{'steamAppId': 1145360, 'igdbId': null}] : [],
+            'likes': persistedLike ? [{'gameId': 'game-1145360', 'steamAppId': 1145360, 'igdbId': null}] : [],
             'total': 0,
           }), 200);
         }
@@ -86,18 +86,18 @@ void main() {
       addTearDown(store.dispose);
 
       await repo.loadInto(store); // Mesmo estado de uma nova sessão após F5.
-      expect(feed.liked, contains(1145360));
+      expect(feed.liked, contains('game-1145360'));
 
-      feed.toggleLike(1145360);
-      expect(feed.liked, isNot(contains(1145360))); // Otimista.
+      feed.toggleLike('game-1145360');
+      expect(feed.liked, isNot(contains('game-1145360'))); // Otimista.
       await Future<void>.delayed(Duration.zero);
       expect(persistedLike, isFalse);
-      expect(feed.liked, isNot(contains(1145360)));
+      expect(feed.liked, isNot(contains('game-1145360')));
 
-      feed.toggleLike(1145360);
+      feed.toggleLike('game-1145360');
       await Future<void>.delayed(Duration.zero);
       expect(persistedLike, isTrue);
-      expect(feed.liked, contains(1145360));
+      expect(feed.liked, contains('game-1145360'));
       expect(requests.map((request) => request.method), ['GET', 'POST', 'POST']);
     });
 
@@ -105,7 +105,7 @@ void main() {
       final client = MockClient((request) async {
         if (request.method == 'GET') {
           return http.Response(jsonEncode({
-            'data': [], 'likes': [{'igdbId': 123}], 'total': 0,
+            'data': [], 'likes': [{'gameId': 'game-123', 'igdbId': 123}], 'total': 0,
           }), 200);
         }
         return http.Response('{}', 500);
@@ -114,30 +114,30 @@ void main() {
       final store = LibraryStore(repo: repo);
       addTearDown(store.dispose);
       await repo.loadInto(store);
-      expect(store.liked, contains(123));
+      expect(store.liked, contains('game-123'));
 
-      store.toggleLike(123);
-      expect(store.liked, isNot(contains(123)));
+      store.toggleLike('game-123');
+      expect(store.liked, isNot(contains('game-123')));
       await Future<void>.delayed(Duration.zero);
-      expect(store.liked, contains(123));
+      expect(store.liked, contains('game-123'));
     });
 
     test('GET reidrata jogo só com igdbId, favorito e rating', () async {
       final client = MockClient((_) async => http.Response(jsonEncode({
         'data': [{
           'status': 'PLAYED', 'isFavorite': true, 'rating': 4,
-          'game': {'steamAppId': null, 'igdbId': 123},
+          'game': {'id': 'game-123', 'steamAppId': null, 'igdbId': 123},
         }],
-        'likes': [{'steamAppId': null, 'igdbId': 123}],
+        'likes': [{'gameId': 'game-123', 'steamAppId': null, 'igdbId': 123}],
         'total': 1,
       }), 200));
       final store = LibraryStore();
       addTearDown(store.dispose);
       await ApiLibraryRepository(client: client).loadInto(store);
-      expect(store.played, {123});
-      expect(store.favorites, {123});
-      expect(store.ratings[123], 4);
-      expect(store.liked, {123});
+      expect(store.played, {'game-123'});
+      expect(store.favorites, {'game-123'});
+      expect(store.ratings['game-123'], 4);
+      expect(store.liked, {'game-123'});
     });
 
     test('loadInto: não duplica jogos repetidos na mesma categoria', () async {
@@ -146,19 +146,19 @@ void main() {
           'data': [
             {
               'status': 'WANT_TO_PLAY',
-              'game': {'steamAppId': 1145360},
+              'game': {'id': 'game-1145360', 'steamAppId': 1145360},
             },
             {
               'status': 'WANT_TO_PLAY',
-              'game': {'steamAppId': 1145360},
+              'game': {'id': 'game-1145360', 'steamAppId': 1145360},
             },
             {
               'status': 'PLAYED',
-              'game': {'igdbId': 123},
+              'game': {'id': 'game-123', 'igdbId': 123},
             },
             {
               'status': 'PLAYED',
-              'game': {'igdbId': 123},
+              'game': {'id': 'game-123', 'igdbId': 123},
             },
           ],
           'total': 4,
@@ -169,8 +169,8 @@ void main() {
       final store = LibraryStore();
       await repo.loadInto(store);
 
-      expect(store.saved, {1145360});
-      expect(store.played, {123});
+      expect(store.saved, {'game-1145360'});
+      expect(store.played, {'game-123'});
     });
 
     test('loadInto: resposta antiga não apaga ação feita durante o GET', () async {
@@ -181,11 +181,11 @@ void main() {
       addTearDown(store.dispose);
 
       final loading = repo.loadInto(store);
-      store.toggleSaved(1145360);
+      store.toggleSaved('game-1145360');
       response.complete(http.Response(jsonEncode({'data': [], 'total': 0}), 200));
       await loading;
 
-      expect(store.saved, {1145360});
+      expect(store.saved, {'game-1145360'});
     });
 
     test('curtir durante GET preserva curtida e carrega status do mesmo jogo', () async {
@@ -199,18 +199,18 @@ void main() {
       addTearDown(store.dispose);
 
       final loading = repo.loadInto(store);
-      store.toggleLike(1145360);
+      store.toggleLike('game-1145360');
       response.complete(http.Response(jsonEncode({
         'data': [{
           'status': 'WANT_TO_PLAY',
-          'game': {'steamAppId': 1145360, 'igdbId': null},
+          'game': {'id': 'game-1145360', 'steamAppId': 1145360, 'igdbId': null},
         }],
         'likes': [],
         'total': 1,
       }), 200));
       await loading;
-      expect(store.saved, {1145360});
-      expect(store.liked, {1145360});
+      expect(store.saved, {'game-1145360'});
+      expect(store.liked, {'game-1145360'});
     });
 
     test('loadInto: preserva estado e propaga erro HTTP', () async {
@@ -220,11 +220,11 @@ void main() {
         client: mockClient,
       );
       final store = LibraryStore();
-      store.saved.add(999); // estado pre-existente
+      store.saved.add('game-999'); // estado pre-existente
       await expectLater(repo.loadInto(store), throwsStateError);
 
       // Estado deve permanecer intacto quando a API retorna erro.
-      expect(store.saved, contains(999));
+      expect(store.saved, contains('game-999'));
     });
 
     test('loadInto: propaga falha de rede', () async {
@@ -250,9 +250,9 @@ void main() {
         userId: 'test-user',
         client: mockClient,
       );
-      await repo.setStatus(1145360, 'WANT_TO_PLAY');
+      await repo.setStatus('game-1145360', 'WANT_TO_PLAY');
 
-      expect(capturedPath, contains('1145360'));
+      expect(capturedPath, contains('game-1145360'));
       expect(jsonDecode(capturedBody!)['status'], equals('WANT_TO_PLAY'));
     });
 
@@ -266,30 +266,30 @@ void main() {
       });
       final repo = ApiLibraryRepository(client: mockClient);
 
-      await repo.toggleFavorite(1145360, isFavorite: true);
-      await repo.toggleLike(1145360);
-      await repo.rate(1145360, 4);
-      await repo.removeRating(1145360);
+      await repo.toggleFavorite('game-1145360', isFavorite: true);
+      await repo.toggleLike('game-1145360');
+      await repo.rate('game-1145360', 4);
+      await repo.removeRating('game-1145360');
 
       expect(requests[0].method, 'POST');
-      expect(requests[0].url.path, '/api/v1/library/1145360/favorite');
+      expect(requests[0].url.path, '/api/v1/library/game-1145360/favorite');
       expect(jsonDecode(requests[0].body), {'isFavorite': true});
       expect(requests[0].headers['x-user-id'], 'dev-user');
-      expect(requests[1].url.path, '/api/v1/library/1145360/like');
-      expect(requests[2].url.path, '/api/v1/library/1145360/rate');
+      expect(requests[1].url.path, '/api/v1/library/game-1145360/like');
+      expect(requests[2].url.path, '/api/v1/library/game-1145360/rate');
       expect(jsonDecode(requests[2].body), {'rating': 4});
       expect(requests[3].method, 'DELETE');
-      expect(requests[3].url.path, '/api/v1/library/1145360/rate');
+      expect(requests[3].url.path, '/api/v1/library/game-1145360/rate');
     });
 
     test('ações da API lançam erro em resposta HTTP', () async {
       final mockClient = MockClient((_) async => http.Response('{}', 500));
       final repo = ApiLibraryRepository(client: mockClient);
 
-      await expectLater(repo.toggleFavorite(1), throwsStateError);
-      await expectLater(repo.toggleLike(1), throwsStateError);
-      await expectLater(repo.rate(1, 4), throwsStateError);
-      await expectLater(repo.removeRating(1), throwsStateError);
+      await expectLater(repo.toggleFavorite('game-1'), throwsStateError);
+      await expectLater(repo.toggleLike('game-1'), throwsStateError);
+      await expectLater(repo.rate('game-1', 4), throwsStateError);
+      await expectLater(repo.removeRating('game-1'), throwsStateError);
     });
 
     test('toggleFavorite: envia POST para /favorite', () async {
@@ -305,7 +305,7 @@ void main() {
         userId: 'test-user',
         client: mockClient,
       );
-      await repo.toggleFavorite(1145360);
+      await repo.toggleFavorite('game-1145360');
 
       expect(capturedPath, contains('favorite'));
       expect(capturedMethod, equals('POST'));
@@ -322,7 +322,7 @@ void main() {
         userId: 'test-user',
         client: mockClient,
       );
-      await repo.rate(1145360, 4);
+      await repo.rate('game-1145360', 4);
 
       expect(jsonDecode(capturedBody!)['rating'], equals(4));
     });
@@ -331,11 +331,11 @@ void main() {
       const repo = NoopLibraryRepository();
       final store = LibraryStore();
       await expectLater(repo.loadInto(store), completes);
-      await expectLater(repo.setStatus(1, 'PLAYED'), completes);
-      await expectLater(repo.remove(1), completes);
-      await expectLater(repo.toggleFavorite(1), completes);
-      await expectLater(repo.rate(1, 5), completes);
-      await expectLater(repo.removeRating(1), completes);
+      await expectLater(repo.setStatus('game-1', 'PLAYED'), completes);
+      await expectLater(repo.remove('game-1'), completes);
+      await expectLater(repo.toggleFavorite('game-1'), completes);
+      await expectLater(repo.rate('game-1', 5), completes);
+      await expectLater(repo.removeRating('game-1'), completes);
     });
 
     test('requisições autenticadas usam Bearer e só enviam Content-Type com body', () async {
@@ -348,10 +348,10 @@ void main() {
         tokenProvider: () async => 'fake-token',
       );
       await repo.loadInto(LibraryStore());
-      await repo.toggleLike(1);
-      await repo.remove(1);
-      await repo.removeRating(1);
-      await repo.setStatus(1, 'PLAYED');
+      await repo.toggleLike('game-1');
+      await repo.remove('game-1');
+      await repo.removeRating('game-1');
+      await repo.setStatus('game-1', 'PLAYED');
       for (final request in requests.take(4)) {
         expect(request.headers['authorization'], 'Bearer fake-token');
         expect(request.headers.containsKey('x-user-id'), isFalse);
@@ -362,17 +362,54 @@ void main() {
       expect(requests.last.headers['content-type'], 'application/json');
     });
 
-    test('LibraryStore.loadFromApi: ignora jogos sem steamAppId nem igdbId', () {
+    test('LibraryStore.loadFromApi: aceita jogo sem IDs externos com ID interno', () {
       final store = LibraryStore();
       store.loadFromApi([
         {
           'status': 'PLAYED',
           'isFavorite': false,
           'rating': null,
-          'game': {'steamAppId': null, 'igdbId': null},
+          'game': {'id': 'game-no-external', 'steamAppId': null, 'igdbId': null},
         }
       ]);
-      expect(store.all, isEmpty);
+      expect(store.all, {'game-no-external'});
+    });
+
+    test('IDs externos iguais não misturam jogos distintos após reload', () async {
+      const firstId = '11111111-1111-4111-8111-111111111111';
+      const secondId = '22222222-2222-4222-8222-222222222222';
+      final response = jsonEncode({
+        'data': [
+          {
+            'gameId': firstId,
+            'game': {'id': firstId, 'title': 'Steam game', 'steamAppId': 123},
+            'status': 'WANT_TO_PLAY',
+          },
+          {
+            'gameId': secondId,
+            'game': {'id': secondId, 'title': 'IGDB game', 'igdbId': 123},
+            'status': 'PLAYED',
+            'liked': true,
+          },
+        ],
+        'likes': [{'gameId': secondId, 'steamAppId': null, 'igdbId': 123}],
+        'total': 2,
+      });
+      final repo = ApiLibraryRepository(
+        client: MockClient((_) async => http.Response(response, 200)),
+      );
+      final store = LibraryStore();
+      addTearDown(store.dispose);
+      await repo.loadInto(store);
+      expect(store.saved, {firstId});
+      expect(store.played, {secondId});
+      expect(store.liked, {secondId});
+      expect(store.gamesById.keys.toSet(), {firstId, secondId});
+      store.clearPrivateState();
+      await repo.loadInto(store);
+      expect(store.saved, {firstId});
+      expect(store.played, {secondId});
+      expect(store.liked, {secondId});
     });
   });
 }

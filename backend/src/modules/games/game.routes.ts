@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { GameService } from './game.service.js';
+import { createDevDirectGame } from '../../dev/dev-fixtures.js';
 
 export interface GameRoutesOptions {
   service: GameService;
@@ -43,6 +44,14 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (fastify,
 
   fastify.get('/games/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
+    if (
+      process.env.NEXTPLAY_DEV_FIXTURES === 'true' &&
+      (id === 'dev:direct-poc' || id === 'nextplay-direct-poc')
+    ) {
+      const host = request.headers.host || '127.0.0.1:3333';
+      const protocol = request.protocol || 'http';
+      return reply.status(200).send(createDevDirectGame({ baseUrl: `${protocol}://${host}` }));
+    }
     const game = await service.getGameById(id);
 
     if (!game) {
@@ -67,6 +76,13 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (fastify,
       });
     }
     const items = await service.getFeedGames(limit);
+
+    if (process.env.NEXTPLAY_DEV_FIXTURES === 'true') {
+      const host = request.headers.host || '127.0.0.1:3333';
+      const protocol = request.protocol || 'http';
+      const devGame = createDevDirectGame({ baseUrl: `${protocol}://${host}` });
+      items.unshift(devGame as any);
+    }
 
     return reply.status(200).send({
       data: items,

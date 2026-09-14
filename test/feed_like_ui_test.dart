@@ -35,7 +35,7 @@ void main() {
       if (request.method == 'GET') {
         return http.Response(jsonEncode({
           'data': [],
-          'likes': liked ? [{'steamAppId': 1145360, 'igdbId': 123}] : [],
+          'likes': liked ? [{'gameId': '9bd2cb0e-1145-4000-8000-000000000001', 'steamAppId': 1145360, 'igdbId': 123}] : [],
           'total': 0,
         }), 200);
       }
@@ -80,6 +80,7 @@ void main() {
       if (request.url.path.endsWith('/feed')) {
         return http.Response(jsonEncode({
           'data': [{
+            'id': '9bd2cb0e-1145-4000-8000-000000000001',
             'steamAppId': 1145360,
             'title': 'Hades',
             'studio': 'Supergiant Games',
@@ -93,7 +94,7 @@ void main() {
       if (request.method == 'GET') {
         return http.Response(jsonEncode({
           'data': [],
-          'likes': liked ? [{'steamAppId': 1145360}] : [],
+          'likes': liked ? [{'gameId': '9bd2cb0e-1145-4000-8000-000000000001', 'steamAppId': 1145360}] : [],
           'total': 0,
         }), 200);
       }

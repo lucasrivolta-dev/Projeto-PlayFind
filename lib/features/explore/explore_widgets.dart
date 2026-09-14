@@ -26,7 +26,7 @@ class ExploreGameCard extends StatelessWidget {
                           child: AspectRatio(
                               aspectRatio: 4 / 3,
                               child: GameArtwork(
-                                  appId: game.id, title: game.title))),
+                                  appId: game.steamAppId, heroUrl: game.heroUrl, coverUrl: game.coverUrl, title: game.title))),
                       const SizedBox(height: AppSpacing.xs),
                       Text(game.title,
                           style: AppTypography.label(12),
@@ -69,7 +69,7 @@ class DiscoverySwipeCard extends StatelessWidget {
             child: Stack(children: [
               Positioned.fill(
                   child: GameArtwork(
-                      appId: game.id, title: game.title, cover: true)),
+                      appId: game.steamAppId, heroUrl: game.heroUrl, coverUrl: game.coverUrl, title: game.title, cover: true)),
               Positioned.fill(
                   child: DecoratedBox(
                       decoration: BoxDecoration(

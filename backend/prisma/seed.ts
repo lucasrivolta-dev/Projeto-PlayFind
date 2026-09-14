@@ -28,6 +28,7 @@ const GAMES: NormalizedGame[] = [
       'https://cdn.cloudflare.steamstatic.com/steam/apps/367520/ss_af0e5fdcc38c34c99daa6dad2cd68e67b3ce5e5d.jpg',
       'https://cdn.cloudflare.steamstatic.com/steam/apps/367520/ss_8eb017d8e5ba8df25ab1a72b60d79c02e5a16fc0.jpg',
     ],
+    trailers: ['https://www.youtube.com/watch?v=UAO2urG23S4'],
     genres: ['Metroidvania', 'Ação', 'Aventura', 'Indie'],
     platforms: ['PC', 'Switch'],
     releaseDate: new Date('2017-02-24'),
@@ -53,6 +54,7 @@ const GAMES: NormalizedGame[] = [
       'https://cdn.cloudflare.steamstatic.com/steam/apps/1145360/ss_0e30d9af5ce9ef8e90a068a9df05e0e73d1d0a39.jpg',
       'https://cdn.cloudflare.steamstatic.com/steam/apps/1145360/ss_89e50c3d40ee75df1a82cef6432da51b65b8e7a4.jpg',
     ],
+    trailers: ['https://www.youtube.com/watch?v=91t0GybU1Cc'],
     genres: ['Roguelite', 'Ação', 'RPG', 'Indie'],
     platforms: ['PC', 'Switch', 'PlayStation', 'Xbox'],
     releaseDate: new Date('2020-09-17'),
@@ -77,6 +79,7 @@ const GAMES: NormalizedGame[] = [
     screenshots: [
       'https://cdn.cloudflare.steamstatic.com/steam/apps/504230/ss_0f4adbb6d4b0f62bf09ad31578279f9e11e2e25d.jpg',
     ],
+    trailers: ['https://www.youtube.com/watch?v=70d9irlxiB4'],
     genres: ['Plataforma', 'Indie', 'Aventura'],
     platforms: ['PC', 'Switch', 'PlayStation', 'Xbox'],
     releaseDate: new Date('2018-01-25'),
@@ -101,6 +104,7 @@ const GAMES: NormalizedGame[] = [
     screenshots: [
       'https://cdn.cloudflare.steamstatic.com/steam/apps/413150/ss_6bf47e34c98b14a68e77cacc17f36b01ed14a297.jpg',
     ],
+    trailers: ['https://www.youtube.com/watch?v=ot7uXNQskdU'],
     genres: ['Simulação', 'RPG', 'Indie'],
     platforms: ['PC', 'Switch', 'PlayStation', 'Xbox', 'Mobile'],
     releaseDate: new Date('2016-02-26'),
@@ -125,6 +129,7 @@ const GAMES: NormalizedGame[] = [
     screenshots: [
       'https://cdn.cloudflare.steamstatic.com/steam/apps/548430/ss_8a0ba2ece4e7eea9a37fc5d2a0a9d7a8c3ef94a3.jpg',
     ],
+    trailers: ['https://www.youtube.com/watch?v=kYv_8wZtEwE'],
     genres: ['Cooperativo', 'Ação', 'Shooter', 'Indie'],
     platforms: ['PC', 'Xbox'],
     releaseDate: new Date('2020-05-13'),
@@ -149,6 +154,7 @@ const GAMES: NormalizedGame[] = [
     screenshots: [
       'https://cdn.cloudflare.steamstatic.com/steam/apps/632470/ss_ea5e39c79e5cf8a4e49c6c2d0cbf494c2aca62c1.jpg',
     ],
+    trailers: ['https://www.youtube.com/watch?v=T_s3tJ7Zl-E'],
     genres: ['RPG', 'Aventura', 'Indie'],
     platforms: ['PC', 'PlayStation'],
     releaseDate: new Date('2019-10-15'),
@@ -173,6 +179,7 @@ const GAMES: NormalizedGame[] = [
     screenshots: [
       'https://cdn.cloudflare.steamstatic.com/steam/apps/1458140/ss_4fdc8a4c9b1e1ef3ddb74d3e7c0f2f9d5c5b6a7b.jpg',
     ],
+    trailers: ['https://www.youtube.com/watch?v=k_l2jXz94eM'],
     genres: ['Sobrevivência', 'Ação', 'Aventura'],
     platforms: ['PC', 'PlayStation'],
     releaseDate: new Date('2024-02-22'),
@@ -197,6 +204,7 @@ const GAMES: NormalizedGame[] = [
     screenshots: [
       'https://cdn.cloudflare.steamstatic.com/steam/apps/264710/ss_e10e13e5e40a524c6c26e57da5e395f5d0bec0fb.jpg',
     ],
+    trailers: ['https://www.youtube.com/watch?v=Rz2SNm8VguE'],
     genres: ['Sobrevivência', 'Aventura', 'Mundo Aberto'],
     platforms: ['PC', 'PlayStation', 'Xbox'],
     releaseDate: new Date('2018-01-23'),
@@ -221,6 +229,7 @@ const GAMES: NormalizedGame[] = [
     screenshots: [
       'https://cdn.cloudflare.steamstatic.com/steam/apps/2379780/ss_d8a1e9a24cd0eee9e4c09e2e9b6a66d1b8a6c9a1.jpg',
     ],
+    trailers: ['https://www.youtube.com/watch?v=f7BqGkXzQc8'],
     genres: ['Roguelite', 'Card Game', 'Estratégia', 'Indie'],
     platforms: ['PC', 'Switch', 'PlayStation', 'Xbox', 'Mobile'],
     releaseDate: new Date('2024-02-20'),
@@ -245,6 +254,7 @@ const GAMES: NormalizedGame[] = [
     screenshots: [
       'https://cdn.cloudflare.steamstatic.com/steam/apps/1794680/ss_e0c2ccf48fba2fdb78e2d7af7c7fe1a27e0edf82.jpg',
     ],
+    trailers: ['https://www.youtube.com/watch?v=mY9Z8mY_QcE'],
     genres: ['Roguelite', 'Ação', 'Indie'],
     platforms: ['PC', 'Switch', 'Xbox', 'Mobile'],
     releaseDate: new Date('2022-10-20'),

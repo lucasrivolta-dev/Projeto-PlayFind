@@ -57,6 +57,47 @@ export function mapIgdbGame(dto: IgdbGameDto): NormalizedGame {
     if (!trailerDetails.some((item) => trailerKey(item) === trailerKey(trailer)))
       trailerDetails.push(trailer);
   }
+  // Ordenar por relevância do nome:
+  // 1. Trailers oficiais / teasers / reveals no topo (0)
+  // 2. Trailers gerais (1)
+  // 3. Gameplay / preview / demo (2)
+  // 4. Vídeos genéricos / sem nome (3)
+  // 5. Penalizar fortemente guias, detonados, tutoriais, reviews, let's play e trilha sonora (99)
+  const videoNames = new Map<string, string>(
+    (dto.videos ?? [])
+      .filter((v) => v.video_id?.trim() && v.name?.trim())
+      .map((v) => [v.video_id!.trim(), v.name!.trim().toLowerCase()]),
+  );
+  function trailerNamePriority(videoId: string): number {
+    const name = videoNames.get(videoId) ?? '';
+    if (!name) return 3;
+
+    // Termos desqualificantes: detonados, tutoriais, reviews, let's play, guias
+    const isDisqualified =
+      /\b(guide|walkthrough|tutorial|tips|how to|review|let's play|playthrough|gameplay walkthrough|dev diary|developer diary|making of|interview|unboxing|soundtrack|ost)\b/.test(
+        name,
+      );
+    if (isDisqualified) return 99;
+
+    // Trailers oficiais explícitos
+    if (
+      /\b(launch trailer|official trailer|reveal trailer|cinematic trailer|announcement trailer|teaser trailer)\b/.test(
+        name,
+      )
+    )
+      return 0;
+
+    // Trailers e teasers gerais
+    if (/\b(trailer|teaser|reveal|announce|announcement|cinematic)\b/.test(name)) return 1;
+
+    // Gameplay e previews
+    if (/\b(gameplay|demo|preview|first look)\b/.test(name)) return 2;
+
+    return 3;
+  }
+  trailerDetails.sort((a, b) =>
+    trailerNamePriority(a.videoId ?? '') - trailerNamePriority(b.videoId ?? ''),
+  );
   const trailers = trailerDetails.map((trailer) => trailer.url);
   return {
     title: dto.name,

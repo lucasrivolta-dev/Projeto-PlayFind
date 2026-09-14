@@ -20,17 +20,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool list = false, alphabetical = false;
   static const categories = [
     'Todos',
+    'Curtidos',
     'Quero jogar',
     'Já joguei',
-    'Favoritos',
     'Avaliações'
   ];
-  Set<int> ids(String value) {
+  Set<String> ids(String value) {
     final store = widget.controller.library;
     return switch (value) {
+      'Curtidos' => store.liked,
       'Quero jogar' => store.saved,
       'Já joguei' => store.played,
-      'Favoritos' => store.favorites,
       'Avaliações' => store.ratings.keys.toSet(),
       _ => store.all,
     };
@@ -52,7 +52,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
         listenable: widget.controller,
         builder: (context, _) {
           final controller = widget.controller;
-          final games = controller.games
+          final catalog = {
+            ...controller.library.gamesById,
+            for (final game in controller.games) game.id: game,
+          };
+          final games = catalog.values
               .where((game) =>
                   ids(category).contains(game.id) &&
                   ExploreController.normalize(game.title).contains(
@@ -215,8 +219,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                                     rating: controller
                                                             .library.ratings[
                                                         row[column].id],
-                                                    favorite: controller
-                                                        .library.favorites
+                                                    liked: controller
+                                                        .library.liked
                                                         .contains(
                                                             row[column].id),
                                                     onTap: () =>
@@ -236,7 +240,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 style: AppTypography.title(14)),
                             const SizedBox(height: AppSpacing.xs),
                             Text(
-                                'Salve suas descobertas, marque o que já jogou e avalie suas aventuras favoritas.',
+                                'Salve suas descobertas, curta o que gostou, marque o que já jogou e avalie suas aventuras.',
                                 style: AppTypography.body(12)),
                             TextButton(
                                 onPressed: widget.onExplore,
@@ -270,10 +274,10 @@ class _LibraryGameCard extends StatelessWidget {
       {required this.game,
       required this.list,
       required this.rating,
-      required this.favorite,
+      required this.liked,
       required this.onTap});
   final DiscoveryGame game;
-  final bool list, favorite;
+  final bool list, liked;
   final int? rating;
   final VoidCallback onTap;
   @override
@@ -283,7 +287,7 @@ class _LibraryGameCard extends StatelessWidget {
         child: AspectRatio(
             aspectRatio: 2 / 3,
             child: Stack(fit: StackFit.expand, children: [
-              GameArtwork(appId: game.id, title: game.title, cover: true),
+              GameArtwork(appId: game.steamAppId, heroUrl: game.heroUrl, coverUrl: game.coverUrl, title: game.title, cover: true),
               Positioned(
                   top: AppSpacing.xs,
                   left: AppSpacing.xs,
@@ -295,11 +299,11 @@ class _LibraryGameCard extends StatelessWidget {
                       child: Text('★ ${game.rating}',
                           style: AppTypography.label(10)
                               .copyWith(color: AppColors.positive)))),
-              if (favorite)
+              if (liked)
                 const Positioned(
                     bottom: AppSpacing.xs,
                     right: AppSpacing.xs,
-                    child: Icon(Icons.favorite, color: AppColors.primary)),
+                    child: Icon(Icons.favorite, color: Color(0xFFFF2A55))),
             ])));
     final info =
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

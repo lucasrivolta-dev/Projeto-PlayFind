@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../../config/api_config.dart';
 import 'library_store.dart';
@@ -8,23 +8,24 @@ abstract interface class LibraryRepository {
   /// Carrega o estado da biblioteca do backend e popula [store].
   Future<void> loadInto(LibraryStore store);
 
-  /// Define o status do jogo ([gameId]) como WANT_TO_PLAY ou PLAYED.
-  Future<void> setStatus(int gameId, String status);
+  /// [gameId] é sempre o UUID interno de Game, não Steam/IGDB.
+  /// Define o status como WANT_TO_PLAY ou PLAYED.
+  Future<void> setStatus(String gameId, String status);
 
   /// Remove o jogo da biblioteca.
-  Future<void> remove(int gameId);
+  Future<void> remove(String gameId);
 
   /// Alterna favorito do jogo.
-  Future<void> toggleFavorite(int gameId, {bool? isFavorite});
+  Future<void> toggleFavorite(String gameId, {bool? isFavorite});
 
   /// Alterna a curtida do jogo.
-  Future<bool?> toggleLike(int gameId);
+  Future<bool?> toggleLike(String gameId);
 
   /// Atribui uma nota (1-5) ao jogo (implica PLAYED).
-  Future<void> rate(int gameId, int rating);
+  Future<void> rate(String gameId, int rating);
 
   /// Remove a avaliacao do jogo.
-  Future<void> removeRating(int gameId);
+  Future<void> removeRating(String gameId);
 }
 
 /// Implementacao sem persistencia, usada apenas em testes e prototipos isolados.
@@ -35,22 +36,22 @@ class NoopLibraryRepository implements LibraryRepository {
   Future<void> loadInto(LibraryStore store) async {}
 
   @override
-  Future<void> setStatus(int gameId, String status) async {}
+  Future<void> setStatus(String gameId, String status) async {}
 
   @override
-  Future<void> remove(int gameId) async {}
+  Future<void> remove(String gameId) async {}
 
   @override
-  Future<void> toggleFavorite(int gameId, {bool? isFavorite}) async {}
+  Future<void> toggleFavorite(String gameId, {bool? isFavorite}) async {}
 
   @override
-  Future<bool?> toggleLike(int gameId) async => null;
+  Future<bool?> toggleLike(String gameId) async => null;
 
   @override
-  Future<void> rate(int gameId, int rating) async {}
+  Future<void> rate(String gameId, int rating) async {}
 
   @override
-  Future<void> removeRating(int gameId) async {}
+  Future<void> removeRating(String gameId) async {}
 }
 
 /// Repositorio HTTP que persiste a biblioteca no backend REST.
@@ -92,7 +93,7 @@ class ApiLibraryRepository implements LibraryRepository {
     };
   }
 
-  String _id(int gameId) => gameId.toString();
+  String _id(String gameId) => Uri.encodeComponent(gameId);
 
   // READ
   @override
@@ -122,7 +123,7 @@ class ApiLibraryRepository implements LibraryRepository {
 
   // WRITE
   @override
-  Future<void> setStatus(int gameId, String status) async {
+  Future<void> setStatus(String gameId, String status) async {
     final uri = Uri.parse('$baseUrl/library/${_id(gameId)}');
     final response = await _client
         .put(uri, headers: await _headers(hasBody: true), body: jsonEncode({'status': status}))
@@ -133,7 +134,7 @@ class ApiLibraryRepository implements LibraryRepository {
   }
 
   @override
-  Future<void> remove(int gameId) async {
+  Future<void> remove(String gameId) async {
     final uri = Uri.parse('$baseUrl/library/${_id(gameId)}');
     final response = await _client.delete(uri, headers: await _headers(hasBody: false)).timeout(timeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -142,7 +143,7 @@ class ApiLibraryRepository implements LibraryRepository {
   }
 
   @override
-  Future<void> toggleFavorite(int gameId, {bool? isFavorite}) async {
+  Future<void> toggleFavorite(String gameId, {bool? isFavorite}) async {
     final uri = Uri.parse('$baseUrl/library/${_id(gameId)}/favorite');
     final response = await _client
         .post(uri,
@@ -155,7 +156,7 @@ class ApiLibraryRepository implements LibraryRepository {
   }
 
   @override
-  Future<bool?> toggleLike(int gameId) async {
+  Future<bool?> toggleLike(String gameId) async {
     final uri = Uri.parse('$baseUrl/library/${_id(gameId)}/like');
     final response = await _client.post(uri, headers: await _headers(hasBody: false)).timeout(timeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -169,7 +170,7 @@ class ApiLibraryRepository implements LibraryRepository {
   }
 
   @override
-  Future<void> rate(int gameId, int rating) async {
+  Future<void> rate(String gameId, int rating) async {
     final uri = Uri.parse('$baseUrl/library/${_id(gameId)}/rate');
     final response = await _client
         .post(uri, headers: await _headers(hasBody: true), body: jsonEncode({'rating': rating}))
@@ -180,7 +181,7 @@ class ApiLibraryRepository implements LibraryRepository {
   }
 
   @override
-  Future<void> removeRating(int gameId) async {
+  Future<void> removeRating(String gameId) async {
     final uri = Uri.parse('$baseUrl/library/${_id(gameId)}/rate');
     final response =
         await _client.delete(uri, headers: await _headers(hasBody: false)).timeout(timeout);

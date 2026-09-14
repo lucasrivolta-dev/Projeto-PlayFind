@@ -7,6 +7,7 @@ coverage/
 *.iml
 .idea/
 .tools/
+**/dev-assets/.tools/
 .env
 backend/.env
 node_modules/
@@ -14,3 +15,5 @@ node_modules/
 backend/dist/
 flutter_*.log
 backend-dev.log
+android/.kotlin/
+.gradle/

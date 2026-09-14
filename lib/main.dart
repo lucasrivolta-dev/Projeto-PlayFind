@@ -56,7 +56,9 @@ class _NextPlayAppState extends State<NextPlayApp> {
     _repo = widget.exploreRepository ?? ApiExploreRepository();
     controller = ProfileController(DemoProfileRepository())..load();
     explore = ExploreController(_repo, library: library)..load();
-    feed = FeedController(_repo.load, library: library)..load();
+    feed = FeedController(
+        _repo is ApiExploreRepository ? _repo.loadFeed : _repo.load,
+        library: library)..load();
     // O primeiro carregamento acontece somente quando authStateChanges
     // confirma uma identidade autenticada.
     // Quando a sessão já foi restaurada antes da criação do shell, não há
@@ -141,7 +143,8 @@ class _AppShellState extends State<_AppShell> {
             builder: (context, _) => IndexedStack(
                   index: pageIndex,
                   children: [
-                    FeedScreen(controller: widget.feed, auth: widget.auth),
+                    FeedScreen(controller: widget.feed, auth: widget.auth,
+                        active: selected == AppDestination.home),
                     ExploreScreen(controller: widget.explore, auth: widget.auth),
                     ProfileScreen(
                         controller: widget.profile,

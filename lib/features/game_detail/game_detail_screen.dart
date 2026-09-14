@@ -115,7 +115,7 @@ class GameDetailScreen extends StatelessWidget {
                                                 : Icons.bookmark_add_outlined),
                                         label: Text(
                                             library.saved.contains(game.id)
-                                                ? 'Salvo em Quero jogar'
+                                                ? 'Em Quero jogar'
                                                 : 'Quero jogar')),
                                     OutlinedButton.icon(
                                         onPressed: () => requireAuthentication(context, auth,
@@ -129,17 +129,20 @@ class GameDetailScreen extends StatelessWidget {
                                                     ? AppColors.positive
                                                     : AppColors.secondary),
                                         label: const Text('Já joguei')),
-                                    IconButton.filledTonal(
-                                        tooltip:
-                                            library.favorites.contains(game.id)
-                                                ? 'Remover dos favoritos'
-                                                : 'Favoritar',
-                                        onPressed: () => requireAuthentication(context, auth,
-                                            () => library.toggleFavorite(game.id)),
-                                        icon: Icon(
-                                            library.favorites.contains(game.id)
-                                                ? Icons.star
-                                                : Icons.star_border)),
+                                     IconButton.filledTonal(
+                                         tooltip:
+                                             library.liked.contains(game.id)
+                                                 ? 'Descurtir'
+                                                 : 'Curtir',
+                                         onPressed: () => requireAuthentication(context, auth,
+                                             () => library.toggleLike(game.id)),
+                                         icon: Icon(
+                                             library.liked.contains(game.id)
+                                                 ? Icons.favorite
+                                                 : Icons.favorite_border,
+                                             color: library.liked.contains(game.id)
+                                                 ? const Color(0xFFFF2A55)
+                                                 : AppColors.text)),
                                     OutlinedButton.icon(
                                         onPressed: () => requireAuthentication(context, auth,
                                             () => evaluate(context)),
@@ -230,7 +233,7 @@ class GameDetailScreen extends StatelessWidget {
                                         child: AspectRatio(
                                             aspectRatio: 16 / 9,
                                             child: GameArtwork(
-                                                appId: game.id,
+                                                appId: game.steamAppId, heroUrl: game.heroUrl, coverUrl: game.coverUrl,
                                                 title: game.title))),
                                     const SizedBox(height: AppSpacing.sm),
                                     Text('Explore o universo de ${game.title}',
@@ -314,7 +317,7 @@ class _GameHero extends StatelessWidget {
         AspectRatio(
             aspectRatio: 16 / 9,
             child: Stack(fit: StackFit.expand, children: [
-              GameArtwork(appId: game.id, title: game.title),
+              GameArtwork(appId: game.steamAppId, heroUrl: game.heroUrl, coverUrl: game.coverUrl, title: game.title),
               const DecoratedBox(
                   decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -332,7 +335,7 @@ class _GameHero extends StatelessWidget {
                       child: AspectRatio(
                           aspectRatio: 2 / 3,
                           child: GameArtwork(
-                              appId: game.id,
+                              appId: game.steamAppId, heroUrl: game.heroUrl, coverUrl: game.coverUrl,
                               title: game.title,
                               cover: true)))),
               const SizedBox(width: AppSpacing.sm),
@@ -422,7 +425,7 @@ class _SimilarGames extends StatelessWidget {
                                       AspectRatio(
                                           aspectRatio: 2 / 3,
                                           child: GameArtwork(
-                                              appId: other.id,
+                                              appId: other.steamAppId, heroUrl: other.heroUrl, coverUrl: other.coverUrl,
                                               title: other.title,
                                               cover: true)),
                                       Padding(

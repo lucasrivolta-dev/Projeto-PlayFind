@@ -35,7 +35,6 @@ model User {
   events        RecommendationEvent[]
   guestSessions GuestSession[]
   deletedAt     DateTime?
-  gameLikes     GameLike[]
   commentLikes  CommentLike[]
   topicLikes    ForumTopicLike[]
   replyLikes    ForumReplyLike[]
@@ -90,7 +89,6 @@ model Game {
   genres         GameGenre[]
   platforms      GamePlatform[]
   steamOffers    SteamOffer[]
-  likes          GameLike[]
 
   @@unique([source, sourceId])
 }
@@ -158,7 +156,8 @@ model SteamOffer {
 model UserGameLibrary {
   userId          String        @db.Uuid
   gameId          String        @db.Uuid
-  status          LibraryStatus
+  status          LibraryStatus?
+  liked           Boolean       @default(false)
   isFavorite      Boolean       @default(false)
   rating          Int?
   reviewText      String?
@@ -170,17 +169,7 @@ model UserGameLibrary {
 
   @@id([userId, gameId])
   @@index([userId, status])
-}
-
-model GameLike {
-  userId    String   @db.Uuid
-  gameId    String   @db.Uuid
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id])
-  game      Game     @relation(fields: [gameId], references: [id])
-
-  @@id([userId, gameId])
-  @@index([gameId])
+  @@index([userId, liked])
 }
 
 model Comment {

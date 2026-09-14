@@ -1,10 +1,13 @@
 export type GamePlatform = 'PC' | 'PlayStation' | 'Xbox' | 'Switch' | 'Mobile' | 'Other';
-export type TrailerProvider = 'YOUTUBE' | 'STEAM' | 'OTHER';
+export type TrailerProvider = 'YOUTUBE' | 'STEAM' | 'DIRECT' | 'OTHER';
 export interface NormalizedTrailer {
   provider: TrailerProvider;
   url: string;
   videoId?: string;
   thumbnailUrl?: string;
+  mimeType?: string;
+  origin?: string;
+  providerLabel?: string;
 }
 
 export function describeTrailer(url: string): NormalizedTrailer {

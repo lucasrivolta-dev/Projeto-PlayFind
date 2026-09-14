@@ -1,15 +1,18 @@
 # AGENTS.md — Instruções do projeto NextPlay / PlaySweep
 
 > Escopo: estas instruções se aplicam a todo o repositório. Use este documento como referência de produto, arquitetura e Design System em trabalhos futuros.
->
-> Estado inicial: apenas documentação está autorizada. Não criar telas ou funcionalidades até que o usuário solicite a implementação correspondente. Essa restrição não impede implementações explicitamente solicitadas em mensagens futuras.
->
-> Antes de implementar, consulte este documento e as screenshots fornecidas para a tarefa. Não invente referências visuais ausentes. Se uma decisão entrar em conflito com as screenshots ou com o Style Guide, avise o usuário antes de alterar o design. A arquitetura Flutter detalhada ainda precisa ser definida antes da implementação.
-Antes de começarmos a programar, quero que você entenda completamente o projeto, sua arquitetura e seu Design System.
 
-No estado inicial deste documento, não implemente telas sem uma solicitação específica. As telas descritas na seção 32 foram solicitadas e já estão implementadas; novas telas continuam dependendo de solicitação do usuário.
+>
 
-Neste momento, apenas considere estas informações como a especificação base do projeto. Nas próximas mensagens vou pedir as telas e funcionalidades individualmente.
+> O projeto está em implementação ativa. Não crie novas telas, migrations, refactors amplos ou mudanças de arquitetura sem solicitação explícita. Alterações devem preservar o working tree e respeitar o estado real do repositório.
+
+>
+
+> Antes de implementar, consulte este documento, o código atual, git status --short, git diff e as screenshots fornecidas para a tarefa. Não aplique uma solução baseada em arquitetura antiga lembrada de outra sessão. Se uma decisão entrar em conflito com screenshots, Design System ou código já estabilizado, avise antes de alterar o design ou a arquitetura por conta própria.
+
+Este documento é a especificação operacional do NextPlay. Ele deve ser mantido atualizado conforme decisões de produto e arquitetura forem aprovadas.
+
+Não implemente telas, migrations ou funcionalidades fora do escopo solicitado. As áreas descritas na seção 32 já existem e devem ser tratadas como base ativa do projeto.
 
 ---
 
@@ -26,12 +29,19 @@ A principal pergunta que o aplicativo resolve é:
 A proposta é combinar:
 
 * descoberta rápida semelhante a TikTok/Reels;
+
 * recomendação personalizada;
+
 * catálogo de jogos;
+
 * biblioteca pessoal;
+
 * avaliações;
+
 * fórum/comunidade;
+
 * busca inteligente por características;
+
 * sistema de swipe para aprender o gosto do usuário.
 
 O aplicativo NÃO é uma loja de jogos e NÃO é uma rede social de vídeos.
@@ -42,7 +52,7 @@ Os vídeos exibidos no feed serão trailers, teasers e gameplays relacionados ao
 
 O principal fluxo do produto é:
 
-DESCOBRIR → SE INTERESSAR → SALVAR → JOGAR
+DESCOBRIR → SE INTERESSAR → QUERO JOGAR → JOGAR
 
 Um momento de sucesso do produto seria:
 
@@ -55,9 +65,13 @@ Usuário entra sem saber o que jogar → encontra um jogo desconhecido → abre 
 A navegação principal possui cinco áreas:
 
 1. Início / For You
+
 2. Explorar
+
 3. Fórum
+
 4. Biblioteca
+
 5. Perfil
 
 ## Início / For You
@@ -71,22 +85,32 @@ O conteúdo principal é trailer/gameplay.
 Informações rápidas:
 
 * nome;
+
 * gêneros;
+
 * plataformas;
+
 * nota;
+
 * preço;
+
 * pequena descrição;
+
 * compatibilidade com o usuário.
 
-Ações:
+Ações principais do Feed:
 
 * Curtir;
+
 * Quero jogar;
+
 * Já joguei;
-* Não tenho interesse;
-* Comentários;
-* Compartilhar;
-* Ver jogo.
+
+* Comentar;
+
+* Compartilhar.
+
+Não existe ação separada de Favoritar/Favorito, nem rótulo "Salvo" no Feed. "Quero jogar" é o nome de produto da intenção WANT_TO_PLAY. Usuários não seguem criadores de trailer porque usuários não publicam vídeos. Seguir usuários ou tópicos do Fórum é uma funcionalidade separada e não deve ser confundida com o Feed.
 
 ---
 
@@ -95,14 +119,23 @@ Ações:
 O aplicativo deve futuramente aprender o gosto do jogador utilizando sinais como:
 
 * gêneros favoritos;
+
 * plataformas;
+
 * jogos curtidos;
-* jogos salvos;
+
+* jogos marcados como Quero jogar;
+
 * jogos já jogados;
+
 * avaliações;
+
 * tempo assistindo a um jogo no feed;
+
 * pesquisas;
+
 * “Não tenho interesse”;
+
 * comportamento no sistema de swipe.
 
 Não queremos criar uma bolha.
@@ -110,7 +143,9 @@ Não queremos criar uma bolha.
 O feed deve misturar:
 
 * jogos com alta compatibilidade;
+
 * jogos relacionados ao gosto atual;
+
 * descobertas inesperadas.
 
 ---
@@ -126,14 +161,23 @@ Explorar = usuário sabe aproximadamente o que deseja.
 Exemplos de categorias:
 
 * Lançamentos;
+
 * Hidden Gems;
+
 * Promoções;
+
 * Gratuitos;
+
 * Co-op;
+
 * Indies;
+
 * Terror;
+
 * RPG;
+
 * Mundo aberto;
+
 * Para jogar com amigos.
 
 Também haverá uma busca inteligente.
@@ -145,7 +189,9 @@ Exemplo:
 O sistema deve futuramente interpretar coisas como:
 
 gênero = terror
+
 modo = cooperativo
+
 jogadores >= 3
 
 Outros exemplos:
@@ -185,32 +231,51 @@ Cada jogo possui página própria.
 Informações:
 
 * título;
+
 * capa;
+
 * hero/trailer;
+
 * desenvolvedora;
+
 * publisher;
+
 * nota;
+
 * gêneros;
+
 * plataformas;
+
 * lançamento;
+
 * single-player/multiplayer;
+
 * quantidade de jogadores;
+
 * descrição.
 
 Ações:
 
 * Quero jogar;
+
 * Já joguei;
-* Favoritar;
+
+* Curtir;
+
 * Avaliar.
 
 Seções:
 
 * Sobre;
+
 * Informações;
+
 * Gameplay/Trailers;
+
 * Onde jogar;
+
 * Jogos parecidos;
+
 * Comunidade/Fórum.
 
 ---
@@ -226,10 +291,15 @@ O usuário continua visualizando parcialmente o jogo atrás.
 Comentários possuem:
 
 * avatar;
+
 * username;
+
 * texto;
+
 * horário;
+
 * curtir;
+
 * responder.
 
 Respostas podem ficar ligeiramente recuadas.
@@ -245,9 +315,13 @@ O Fórum é a principal área de conteúdo criado pelos usuários.
 Usuários podem:
 
 * criar tópicos;
+
 * responder;
+
 * curtir;
+
 * seguir discussões;
+
 * relacionar uma discussão a um jogo.
 
 O Fórum é principalmente textual.
@@ -262,10 +336,15 @@ Isso é diferente dos comentários do For You.
 
 Biblioteca pessoal com categorias:
 
+* Curtidos;
+
 * Quero jogar;
+
 * Já joguei;
-* Favoritos;
+
 * Avaliações.
+
+"Curtidos" usa a relação/estado de like (liked == true). Favorito/Favoritar não é uma feature ativa do produto. Se isFavorite ainda existir fisicamente no banco, ele é legado temporário e não deve voltar para a UX sem nova decisão explícita.
 
 Jogos devem aparecer principalmente através das capas.
 
@@ -274,7 +353,9 @@ Uma ação feita em outra parte do app deve refletir na Biblioteca.
 Exemplo:
 
 For You
+
 → usuário marca “Quero jogar”
+
 → jogo aparece imediatamente em Biblioteca > Quero jogar.
 
 ---
@@ -284,25 +365,37 @@ For You
 Perfil inclui:
 
 * avatar;
+
 * nome;
+
 * username;
+
 * bio;
+
 * seguidores;
+
 * seguindo.
 
 Estatísticas:
 
 * jogos jogados;
+
 * quero jogar;
+
 * avaliações;
+
 * tópicos.
 
 Também possui:
 
-* jogos favoritos;
+* jogos curtidos;
+
 * gosto gamer;
+
 * atividade recente;
+
 * avaliações;
+
 * tópicos publicados.
 
 ---
@@ -346,15 +439,25 @@ Prisma.
 O backend será responsável por dados do aplicativo, por exemplo:
 
 * usuários;
+
 * perfis;
+
 * jogos;
+
 * biblioteca;
+
 * avaliações;
+
 * likes;
+
 * comentários;
+
 * fórum;
+
 * respostas;
+
 * preferências;
+
 * histórico relevante para recomendações.
 
 Não armazenaremos senha de usuário no PostgreSQL.
@@ -363,24 +466,34 @@ Não armazenaremos senha de usuário no PostgreSQL.
 
 # 13. AUTENTICAÇÃO
 
-A autenticação será feita através do Firebase Authentication.
+A autenticação usa Firebase Authentication no cliente e Firebase Admin SDK no backend.
 
-Métodos planejados:
+Métodos suportados/planejados conforme plataforma e configuração atual:
 
 * Email + senha;
+
 * Google;
+
 * Apple.
 
 Fluxo esperado:
 
 Flutter
+
 → Firebase Authentication
+
 → usuário autentica
+
 → Firebase retorna ID Token
+
 → Flutter envia token para nossa API usando Authorization: Bearer <token>
+
 → Node.js recebe token
+
 → Firebase Admin SDK valida o token
+
 → backend identifica o Firebase UID
+
 → backend encontra/cria o usuário correspondente no PostgreSQL.
 
 Firebase Admin SDK será utilizado SOMENTE no backend.
@@ -408,9 +521,13 @@ OBSIDIAN KINETIC
 Direção visual:
 
 Premium Dark Gaming
+
 +
+
 Architectural Minimalism
+
 +
+
 Dark Glassmorphism
 
 O app deve parecer uma plataforma premium/editorial de videogames.
@@ -418,11 +535,17 @@ O app deve parecer uma plataforma premium/editorial de videogames.
 NÃO queremos:
 
 * RGB gamer exagerado;
+
 * neon em todo lugar;
+
 * cyberpunk genérico;
+
 * bordas brilhantes em tudo;
+
 * interface cheia de efeitos;
+
 * sombras genéricas excessivas;
+
 * poluição visual.
 
 A arte dos jogos deve ser a protagonista.
@@ -440,54 +563,73 @@ Nunca espalhar cores hardcoded pelas telas.
 Principais cores:
 
 Canvas / Background:
+
 #0B0E14
 
 Surface Low:
+
 #12161F
 
 Surface Container:
+
 #161B22
 
 Surface High:
+
 #1F2633
 
 Primary / Electric Violet:
+
 #8B5CF6
 
 Primary Active / Deep Violet:
+
 #7C3AED
 
 Secondary / Cyber Emerald:
+
 #10B981
 
 Text Primary:
+
 #F9FAFB
 
 Text Secondary:
+
 #94A3B8
 
 Text Muted:
+
 #64748B
 
 Glass Surface:
+
 rgba(22, 27, 34, 0.72)
 
 Border Glass:
+
 rgba(255, 255, 255, 0.08)
 
 O roxo deve ser utilizado principalmente para:
 
 * ações primárias;
+
 * seleção;
+
 * estado ativo;
+
 * progresso;
+
 * elementos importantes.
 
 O verde deve ser usado com moderação para:
 
 * notas positivas;
+
 * status positivos;
+
 * indicadores especiais;
+
 * lançamentos/achievements quando apropriado.
 
 ---
@@ -507,8 +649,11 @@ Level 1 — Surface Low
 Usado em:
 
 * search bars;
+
 * elementos recuados;
+
 * trilhos;
+
 * containers secundários.
 
 Level 2 — Surface
@@ -518,8 +663,11 @@ Level 2 — Surface
 Usado para:
 
 * cards;
+
 * listas;
+
 * modais;
+
 * containers principais.
 
 Level 3 — Surface High
@@ -529,19 +677,25 @@ Level 3 — Surface High
 Usado para:
 
 * overlays;
+
 * menus;
+
 * elementos elevados;
+
 * estados interativos.
 
 Glass:
 
 background aproximado:
+
 rgba(22,27,34,0.72)
 
 blur aproximado:
+
 16–20px.
 
 Border:
+
 1px rgba(255,255,255,0.08).
 
 Glassmorphism deve ser utilizado apenas onde cria hierarquia.
@@ -565,12 +719,19 @@ Manrope.
 Usar em:
 
 * headlines;
+
 * títulos;
+
 * labels;
+
 * botões;
+
 * badges;
+
 * números;
+
 * ratings;
+
 * estatísticas.
 
 ## Manrope
@@ -578,92 +739,153 @@ Usar em:
 Usar em:
 
 * body text;
+
 * descrições;
+
 * comentários;
+
 * posts;
+
 * reviews;
+
 * textos longos.
 
 Escala:
 
 Display Large
+
 Sora
+
 40px
+
 700
+
 line-height 48px
+
 letter spacing -0.03em
 
 Headline XL
+
 Sora
+
 32px
+
 700
+
 40px
+
 -0.02em
 
 Headline Large
+
 Sora
+
 26px
+
 600
+
 34px
+
 -0.015em
 
 Headline Medium
+
 Sora
+
 20px
+
 600
+
 28px
+
 -0.01em
 
 Headline Small
+
 Sora
+
 17px
+
 600
+
 24px
 
 Body XL
+
 Manrope
+
 17px
+
 400
+
 26px
+
 -0.01em
 
 Body Large
+
 Manrope
+
 15px
+
 400
+
 22px
 
 Body Medium
+
 Manrope
+
 14px
+
 400
+
 20px
 
 Body Small
+
 Manrope
+
 12px
+
 400
+
 16px
 
 Label Large
+
 Sora
+
 14px
+
 600
+
 18px
+
 letter spacing 0.02em
 
 Label Medium
+
 Sora
+
 12px
+
 600
+
 16px
+
 letter spacing 0.04em
 
 Label Small
+
 Sora
+
 10px
+
 700
+
 14px
+
 letter spacing 0.06em
 
 Labels pequenos podem usar uppercase + tracking positivo.
@@ -679,28 +901,41 @@ O Design System utiliza ritmo de 4px/8px.
 Tokens:
 
 2px
+
 4px
+
 8px
+
 12px
+
 16px
+
 20px
+
 24px
+
 32px
+
 40px
+
 48px
 
 Principais regras mobile:
 
 Outer screen margin:
+
 20px.
 
 Gutter entre elementos/cards:
+
 16px.
 
 Componentes relacionados geralmente usam:
+
 8–12px.
 
 Separações maiores de seções:
+
 24–32px.
 
 Não criar paddings arbitrários se um token existente resolver.
@@ -724,18 +959,23 @@ Full / circular — 9999px.
 Uso recomendado:
 
 8px:
+
 chips, badges e inputs pequenos.
 
 12px:
+
 thumbnails menores.
 
 16px:
+
 cards, dialogs e inputs maiores.
 
 24px:
+
 hero cards, trailers e bottom sheets.
 
 Circular:
+
 avatars e icon buttons.
 
 ---
@@ -747,8 +987,11 @@ Evitar depender de sombras genéricas.
 A profundidade deve vir principalmente de:
 
 * diferença tonal entre surfaces;
+
 * bordas sutis;
+
 * glass;
+
 * iluminação localizada.
 
 Card normal:
@@ -756,6 +999,7 @@ Card normal:
 background #161B22
 
 top border:
+
 rgba(255,255,255,0.08)
 
 Elementos elevados:
@@ -777,35 +1021,45 @@ Nunca aplicar glow roxo em tudo.
 ## Primary
 
 Altura:
+
 48px.
 
 Radius:
+
 16px.
 
 Background:
+
 #8B5CF6 com possível transição sutil para #7C3AED.
 
 Texto:
+
 branco.
 
 Fonte:
+
 Sora semibold.
 
 Pressed:
+
 leve redução visual (~98%) + destaque roxo ligeiramente mais forte.
 
 ## Secondary Glass
 
 Background:
+
 rgba(255,255,255,0.06)
 
 Border:
+
 1px rgba(255,255,255,0.12)
 
 Text:
+
 #F9FAFB.
 
 Pressed:
+
 background ligeiramente mais claro.
 
 ## Icon Button
@@ -815,6 +1069,7 @@ background ligeiramente mais claro.
 44×44px.
 
 Ícone visual:
+
 aproximadamente 20px.
 
 ---
@@ -832,12 +1087,15 @@ Radius:
 Inactive:
 
 background #161B22
+
 text #94A3B8.
 
 Selected:
 
 background com ~15% de #8B5CF6
+
 border #8B5CF6
+
 text #F9FAFB.
 
 ---
@@ -847,9 +1105,13 @@ text #F9FAFB.
 Hero Game Card:
 
 * arte full bleed;
+
 * aspect ratio aproximado 16:9 ou 4:5 dependendo do contexto;
+
 * radius 24px;
+
 * gradient/scrim inferior;
+
 * título e informações sobrepostos.
 
 O gradient inferior deve permitir leitura do texto sem esconder a arte.
@@ -857,9 +1119,13 @@ O gradient inferior deve permitir leitura do texto sem esconder a arte.
 Compact Game Card:
 
 * thumbnail aproximadamente 80px;
+
 * radius 12px;
+
 * título;
+
 * developer ou metadata;
+
 * ação rápida opcional.
 
 Nunca sobrecarregar cards com informação.
@@ -907,34 +1173,45 @@ A navegação inferior é uma característica importante do produto.
 Possui cinco opções:
 
 Início
+
 Explorar
+
 Fórum
+
 Biblioteca
+
 Perfil
 
 Altura base aproximada:
+
 64px + safe area.
 
 Visual:
+
 glass/frosted obsidian.
 
 Ícones:
+
 aproximadamente 22px.
 
 IMPORTANTE:
 
 Atualização solicitada pelo usuário: os itens permanecem sempre em posições fixas,
+
 na ordem Início, Explorar, Fórum, Biblioteca e Perfil.
 
 A seleção NÃO reorganiza o rodapé. Manter a animação de seleção e o destaque roxo
+
 do item ativo.
 
 Todos continuam mostrando ícone + label.
 
 Ativo:
+
 Electric Violet.
 
 Inativos:
+
 Text Muted/Text Secondary.
 
 Esse comportamento deve ser tratado posteriormente como componente reutilizável, e não implementado separadamente em cada página.
@@ -948,9 +1225,11 @@ Utilizar SafeArea corretamente.
 Layout baseado em 4 colunas fluidas conceitualmente.
 
 Margem externa:
+
 20px.
 
 Gutter:
+
 16px.
 
 Carrosséis horizontais podem chegar até a borda da viewport mantendo aproximadamente 20px de padding no primeiro/último elemento.
@@ -972,26 +1251,43 @@ Devemos criar uma camada de Design System Flutter reutilizável.
 Conceitualmente teremos componentes como:
 
 AppColors
+
 AppSpacing
+
 AppRadius
+
 AppTypography
+
 AppTheme
 
 e widgets reutilizáveis como:
 
 PrimaryButton
+
 SecondaryButton
+
 AppIconButton
+
 GameCard
+
 GameCoverCard
+
 GenreChip
+
 PlatformChip
+
 RatingBadge
+
 AppSearchBar
+
 UserAvatar
+
 CommentTile
+
 ForumTopicCard
+
 AppBottomSheet
+
 AppBottomNavigation
 
 Os nomes finais poderão ser decididos quando começarmos a programar.
@@ -1003,17 +1299,29 @@ Os nomes finais poderão ser decididos quando começarmos a programar.
 Quando começarmos a programar posteriormente:
 
 * evitar valores mágicos;
+
 * usar tokens;
+
 * evitar cores hardcoded;
+
 * evitar widgets gigantes;
+
 * criar componentes reutilizáveis;
+
 * manter UI separada de regras de negócio;
+
 * evitar lógica de API diretamente em widgets;
+
 * manter modelos tipados;
+
 * projetar estados loading/error/empty;
+
 * respeitar SafeArea;
+
 * manter acessibilidade;
+
 * manter áreas de toque adequadas;
+
 * preservar responsividade.
 
 ---
@@ -1025,8 +1333,11 @@ Ainda definiremos a arquitetura Flutter em detalhes antes da implementação.
 Como princípio:
 
 UI
+
 → state/application layer
+
 → repositories
+
 → data sources/API.
 
 Widgets não devem conhecer diretamente Prisma, PostgreSQL ou Firebase Admin.
@@ -1042,19 +1353,33 @@ Dados de produto virão da API Node.
 Fluxo conceitual:
 
 Flutter
+
 ↓
+
 Firebase Authentication
+
 ↓
+
 Firebase ID Token
+
 ↓
+
 Node.js + TypeScript API
+
 ↓
+
 Firebase Admin verifica token
+
 ↓
+
 Service/Application Layer
+
 ↓
+
 Prisma
+
 ↓
+
 PostgreSQL
 
 Manter autenticação separada da lógica de domínio.
@@ -1067,21 +1392,23 @@ A identidade deve vir do token Firebase validado no backend.
 
 # 31. OBJETIVO ATUAL
 
-Não crie novas telas ou funcionalidades sem solicitação específica. As implementações já autorizadas e documentadas na seção 32 fazem parte do estado atual do projeto.
+O NextPlay está em implementação ativa. Trabalhe somente no escopo solicitado e preserve comportamento já validado.
 
-Use estas informações apenas como contexto permanente para nossa conversa.
+Toda implementação deve respeitar:
 
-Quando começarmos a desenvolver, vou enviar uma tela ou funcionalidade de cada vez.
+1. este documento atualizado;
 
-Quero que toda implementação futura respeite:
+2. o código real e o git diff atual;
 
-1. este contexto;
-2. as screenshots do projeto;
-3. o Style Guide Obsidian Kinetic;
-4. a arquitetura definida;
-5. consistência entre todas as telas.
+3. as screenshots/referências fornecidas para a tarefa;
 
-Caso uma decisão futura contradiga as screenshots ou o Style Guide, me avise antes de alterar o design por conta própria.
+4. o Style Guide Obsidian Kinetic;
+
+5. a arquitetura definida;
+
+6. dados reais do produto — não inventar contadores, estados, features ou metadata para copiar um mock.
+
+Caso uma decisão futura contradiga o código estabilizado, as screenshots ou o Style Guide, avise antes de alterar design/arquitetura por conta própria.
 
 ---
 
@@ -1090,26 +1417,47 @@ Caso uma decisão futura contradiga as screenshots ou o Style Guide, me avise an
 As telas abaixo já foram implementadas em Flutter e representam a base visual e funcional que o backend deverá suportar:
 
 * `lib/main.dart` — inicialização do app, `MaterialApp`, shell e navegação principal.
+
 * `lib/design_system/theme.dart` — tokens de cores, espaçamento, raios, tipografia e tema Obsidian Kinetic.
+
 * `lib/design_system/components.dart` — cards de superfície, chips, artwork, cabeçalhos, bottom navigation e bottom sheets.
+
 * `lib/features/feed/feed_screen.dart` — For You/feed vertical, ações laterais, comentários e abertura de detalhes.
-* `lib/features/feed/feed_controller.dart` — itens do feed, curtidas, salvos, jogados e comentários da sessão.
+
+* `lib/features/feed/feed_controller.dart` — itens do feed, curtidas, estado Quero jogar, jogados e comentários da sessão; nomes internos legados como saved podem existir, mas a UX usa "Quero jogar".
+
 * `lib/features/explore/explore_screen.dart` — Explorar, busca, filtros, categorias e descoberta por escolhas.
-* `lib/features/explore/explore_controller.dart` — estado de busca, categoria, plataforma, escolhas e salvos.
+
+* `lib/features/explore/explore_controller.dart` — estado de busca, categoria, plataforma, escolhas e intenção Quero jogar; nomes internos legados podem existir sem mudar o rótulo de produto.
+
 * `lib/features/explore/explore_data.dart` — modelo `DiscoveryGame`, catálogo demonstrativo e dados editoriais.
+
 * `lib/features/explore/explore_widgets.dart` — cards e widgets específicos de Explorar.
+
 * `lib/features/game_detail/game_detail_screen.dart` — tela completa de detalhes, ações, informações, gameplay, lojas, jogos parecidos e comunidade.
-* `lib/features/library/library_screen.dart` — Minha Biblioteca, filtros Quero jogar/Já joguei/Favoritos/Avaliações, busca, grade/lista e avaliação.
-* `lib/features/library/library_store.dart` — estado compartilhado de salvos, jogados, favoritos e notas.
+
+* `lib/features/library/library_screen.dart` — Minha Biblioteca, filtros Curtidos/Quero jogar/Já joguei/Avaliações, busca, grade/lista e avaliação.
+
+* `lib/features/library/library_store.dart` — estado compartilhado de curtidos, Quero jogar, jogados e notas; Favorito não é feature ativa.
+
 * `lib/features/forum/forum_screen.dart` — Fórum, busca, categorias, tópicos em alta/recentes e criação de tópico.
+
 * `lib/features/forum/forum_topic_screen.dart` — discussão completa, curtidas, seguir, respostas e respostas aninhadas.
+
 * `lib/features/forum/forum_controller.dart` — tópicos, respostas, curtidas, seguimento e validação de publicação.
-* `lib/features/profile/profile_screen.dart` — Perfil, estatísticas, favoritos, gosto, atividade, avaliações e tópicos.
+
+* `lib/features/profile/profile_screen.dart` — Perfil, estatísticas, jogos curtidos, gosto, atividade, avaliações e tópicos.
+
 * `lib/features/profile/profile_widgets.dart` — componentes visuais do Perfil.
+
 * `lib/features/profile/profile_controller.dart` — carregamento, estados, edição e curtidas de avaliações.
+
 * `lib/features/profile/profile_models.dart` — modelos demonstrativos de usuário, atividade, avaliação e tópico.
+
 * `lib/features/profile/profile_repository.dart` — repositório mock que será substituído pela API.
+
 * `lib/features/auth/auth_controller.dart` — estado visitante/autenticado e adaptador temporário dos provedores.
+
 * `lib/features/auth/auth_screen.dart` — login/criação de conta com e-mail, Google, Apple, visitante e animação da marca.
 
 As telas de comentários do For You são um Bottom Sheet sobre o feed. A tela de detalhes é compartilhada por Feed, Explorar e Biblioteca. O estado atual é em memória e será substituído por repositórios ligados à API.
@@ -1133,9 +1481,13 @@ O primeiro acesso não exige cadastro. Um visitante pode navegar no For You, Exp
 Uma ação que cria ou altera dados exige autenticação. Isso inclui:
 
 * curtir jogo, comentário, tópico ou resposta;
-* Quero jogar, Já joguei, Favoritar e Avaliar;
+
+* Curtir, Quero jogar, Já joguei e Avaliar;
+
 * comentar no For You;
+
 * criar tópico, responder ou seguir uma discussão;
+
 * editar Perfil e seguir outro usuário.
 
 Ao bloquear uma ação, abrir a tela ou modal de autenticação preservando a intenção original. Depois de concluir o login, executar a ação pendente automaticamente. O usuário pode fechar e continuar como visitante.
@@ -1178,11 +1530,13 @@ Catálogos normalizados para filtros e recomendações. `genres(id, name, slug)`
 
 ### `gameMedia`
 
-`id`, `gameId`, `type` (TRAILER, GAMEPLAY, SCREENSHOT), `url`, `thumbnailUrl`, `durationSeconds`, `sortOrder`, `createdAt`.
+Estado implementado/documentado do schema atual: `id`, `gameId`, `type` (TRAILER, GAMEPLAY, SCREENSHOT), `url`, `thumbnailUrl`, `durationSeconds`, `sortOrder`, `createdAt`.
+
+Direção arquitetural aprovada para trailers: o domínio precisa distinguir fonte `direct` autorizada de `youtube` fallback e, quando o schema for evoluído, poderá precisar de metadata como `sourceType`, `provider`, `sourcePage/origin`, `directUrl` ou `youtubeVideoId`, `mimeType`, `poster`, `trailerKind` e `language`. Não afirmar que esses campos já existem no Prisma e não aplicar migration sem aprovação explícita.
 
 ### `userGameLibrary`
 
-Uma linha por usuário e jogo: `userId`, `gameId`, `status` (WANT_TO_PLAY ou PLAYED), `isFavorite`, `rating` de 1 a 5 nullable, `reviewText` nullable, `reviewUpdatedAt`, `createdAt`, `updatedAt`. Chave única (`userId`, `gameId`). Avaliar deve registrar o jogo como PLAYED conforme a regra atual do protótipo.
+Uma linha por usuário e jogo: `userId`, `gameId`, `status` (WANT_TO_PLAY ou PLAYED), `isFavorite` legado, `rating` de 1 a 5 nullable, `reviewText` nullable, `reviewUpdatedAt`, `createdAt`, `updatedAt`. Chave única (`userId`, `gameId`). Avaliar deve registrar o jogo como PLAYED conforme a regra atual. `isFavorite` não deve ser usado por novas UIs/fluxos; sua remoção física depende de migration futura aprovada explicitamente.
 
 ### `gameLikes`
 
@@ -1222,7 +1576,7 @@ Tabelas de relação com chaves únicas por usuário e alvo. Seguir uma discuss�
 
 ### `recommendationEvents`
 
-`id`, `userId` nullable, `guestSessionId` nullable, `gameId` nullable, `eventType`, `position` nullable, `watchDurationMs` nullable, `metadata` JSONB nullable, `createdAt`. Eventos: IMPRESSION, VIEW, LIKE, SAVE, PLAYED, DISLIKE, SEARCH, SWIPE_YES, SWIPE_NO, DETAIL_OPEN, COMMENT.
+`id`, `userId` nullable, `guestSessionId` nullable, `gameId` nullable, `eventType`, `position` nullable, `watchDurationMs` nullable, `metadata` JSONB nullable, `createdAt`. Eventos podem representar IMPRESSION, VIEW, LIKE, WANT_TO_PLAY, PLAYED, DISLIKE, SEARCH, SWIPE_YES, SWIPE_NO, DETAIL_OPEN e COMMENT. Se dados/nomes legados como SAVE existirem, tratá-los como compatibilidade histórica; novos fluxos usam a semântica Quero jogar/WANT_TO_PLAY.
 
 ### `searchQueries`
 
@@ -1236,16 +1590,26 @@ Tabelas de relação com chaves únicas por usuário e alvo. Seguir uma discuss�
 
 # 36. REGRAS DE DOMÍNIO
 
-* Salvar no Feed ou Explorar cria/atualiza `userGameLibrary` com status WANT_TO_PLAY.
+* "Quero jogar" no Feed ou Explorar cria/atualiza `userGameLibrary` com status WANT_TO_PLAY. O rótulo "Salvo" não deve ser usado como ação de produto.
+
 * Já joguei atualiza o mesmo registro para PLAYED.
-* Favorito e avaliação são propriedades do registro do usuário com o jogo.
+
+* Curtir é uma relação/estado separado e idempotente. Favorito não é feature ativa; isFavorite, se ainda existir no schema, é legado até migration futura aprovada. Avaliação continua vinculada ao usuário+jogo.
+
 * Remover uma ação não deve apagar o jogo do catálogo.
+
 * Curtidas são relações idempotentes: repetir a mesma ação não cria duplicata.
+
 * Comentários do For You pertencem ao jogo, não ao tópico do Fórum.
+
 * Tópicos do Fórum são persistentes e podem ter jogo relacionado, tags e respostas.
-* O catálogo é público; mutações exigem usuário autenticado. No protótipo, o `AuthController` simula a conclusão dos provedores; a integração real deve substituir esse adaptador por Firebase Authentication sem mudar o fluxo de UX.
+
+* O catálogo é público; mutações exigem usuário autenticado. Flutter usa Firebase Authentication e envia `Authorization: Bearer <firebaseIdToken>`; o backend valida via Firebase Admin SDK e deriva o usuário do token. Nunca aceitar `x-user-id`, `dev-user` ou UID livremente enviado como identidade normal da API.
+
 * Todas as rotas protegidas devem derivar o usuário do Firebase ID Token validado no backend.
+
 * Listagens devem ter paginação, ordenação determinística e estados loading, empty e error.
+
 * Exclusão de conteúdo deve preferir soft delete e preservar auditoria básica.
 
 ---
@@ -1276,6 +1640,22 @@ Os clientes, tipos e mappers ficam separados em `backend/src/modules/integration
 
 Credenciais devem existir apenas em `.env` local, com nomes documentados em `backend/.env.example`. Não versionar tokens, não chamar IGDB/Steam a partir do Flutter e não expor publicamente um endpoint de sincronização sem autenticação administrativa, limite e logs seguros.
 
+Princípios de catálogo:
+
+* IGDB é a fonte de verdade principal; Steam é enriquecimento complementar.
+
+* `Game.id` UUID interno é a identidade canônica. IDs Steam/IGDB são metadata e nunca substituem o UUID interno.
+
+* Um jogo antigo não é ruim por ser antigo. Clássicos, AA/AAA famosos, jogos cult, hidden gems e indies podem aparecer se houver evidência suficiente de relevância/qualidade.
+
+* Fama não é penalidade. O objetivo é ajudar o usuário a encontrar o próximo jogo para jogar, inclusive redescobrir algo que ele já conhece.
+
+* Evitar desconhecidos sem evidência quase nenhuma no For You principal; não inventar contagem de jogadores. Usar sinais reais disponíveis como `rating_count`, `total_rating_count`, avaliações, comunidade e metadata confiável.
+
+* Não usar corte universal por ano como regra de produto. Filtros e ranking podem considerar recência, mas jogos antigos relevantes devem continuar no catálogo.
+
+* Primary trailer deve favorecer conteúdo official/launch/gameplay/story/announcement/reveal/teaser e penalizar walkthrough, tutorial, guide, review, how-to, let's play, reaction, interview e BTS/dev diary quando existir trailer melhor.
+
 ---
 
 # 40. SEPARAÇÃO FRONTEND/BACKEND
@@ -1287,20 +1667,157 @@ O backend fica exclusivamente em `backend/`, com código TypeScript em `backend/
 ## Manutenção do protótipo
 
 - `lib/features/feed/feed_comments_sheet.dart` concentra o painel de comentários e descarta seus recursos ao fechar. Curtidas e contagens permanecem no `FeedController` durante a sessão.
+
 - Abrir os comentários é público. Curtir, responder e enviar exigem autenticação; cancelar o login preserva o rascunho.
+
 - O contrato `backend/src/modules/games/game.repository.ts` exige o ID persistido nos candidatos; nunca usar título ou slug como ID do banco.
+
 - O backend possui lockfile pnpm e comandos `typecheck`, `test`, `format` e `format:check`. Dependências e arquivos de `dist/` não são versionados.
-- A API e a persistência Prisma do catálogo/biblioteca estão implementadas. Firebase e a sincronização externa automática de produção continuam pendentes. `x-user-id: dev-user` é identidade temporária de desenvolvimento, não autenticação; a API deve permanecer restrita ao computador local e nunca receber dados reais de usuários neste modo.
-- Feed e Explorar usam a API de jogos, com fallback demonstrativo em falha. Feed e Biblioteca compartilham `LibraryStore`/`ApiLibraryRepository`; o GET restaura status, favoritos, notas e curtidas para jogos com Steam ID ou IGDB ID. Curtidas independem da biblioteca e são devolvidas separadamente no campo `likes`. Avaliar implica PLAYED. Login simulado não muda a identidade da API. Fórum, comentários e perfil permanecem demonstrativos/em memória.
+
+- A API e a persistência Prisma do catálogo/biblioteca estão implementadas. A autenticação real usa Firebase Authentication no Flutter e Firebase Admin SDK no backend; rotas protegidas derivam o usuário do ID Token validado. Não reintroduzir `x-user-id`, `dev-user` ou identidade livre enviada pelo cliente. A sincronização externa automática de produção continua sendo uma preocupação separada.
+
+- Feed e Explorar usam a API de jogos. Feed e Biblioteca compartilham `LibraryStore`/`ApiLibraryRepository`; o estado ativo do produto usa Curtidos, Quero jogar, Já joguei e avaliações. `isFavorite` pode existir no banco apenas como legado. Avaliar implica PLAYED. Fórum, comentários e perfil podem conter partes demonstrativas/em memória conforme o código atual; confirme no repositório antes de assumir.
 
 ## Primeira migration aplicada
 
 `backend/prisma/migrations/20260912000100_initial_schema/migration.sql` foi
+
 aplicada ao PostgreSQL local nextplay. O banco contém a estrutura inicial e
+
 relações explícitas das curtidas, seguidores e pesquisas. IDs relacionados
+
 usam UUID compatível. Notas são de 1 a 5 e exigem PLAYED; seguir a si mesmo
+
 é proibido por CHECK, assim como valores inválidos de ofertas e jogadores.
+
 Esses CHECKs são mantidos no SQL. Não editar migrations já aplicadas.
 
-`pnpm.cmd run test:db` e os testes de API, executados em backend, verificam o PostgreSQL local com transações revertidas. A API e o GameRepository Prisma estão implementados. Nunca editar a migration aplicada nem publicar a identidade temporária `dev-user`.
+`pnpm.cmd run test:db` e os testes de API, executados em backend, verificam o PostgreSQL local com transações revertidas quando o banco de teste está disponível. A API e o GameRepository Prisma estão implementados. Nunca editar migration aplicada, resetar o banco ou reintroduzir identidade temporária `dev-user` como autenticação.
 
+---
+
+# 41. TRAILERS E PLAYBACK — ARQUITETURA CANÔNICA
+
+O NextPlay deve tratar trailer como mídia de catálogo, não como postagem de usuário.
+
+Estratégia de source:
+
+1. Direct autorizado — MP4/HLS ou formato direto permitido, vindo de press kit oficial, site oficial, publisher, desenvolvedor, parceiro autorizado ou submissão autorizada. É a opção preferencial porque permite player próprio e controle integral de UX.
+
+2. YouTube — fallback quando não existir fonte Direct autorizada. Usar somente APIs públicas suportadas. Não prometer remoção completa de branding, recomendações ou elementos inevitáveis do iframe.
+
+É proibido implementar como parte normal do produto:
+
+* scraping/download não autorizado de YouTube;
+
+* yt-dlp/youtube-dl para extrair trailers;
+
+* extração de URLs internas de stream do YouTube;
+
+* uso do CDN da Steam como CDN do NextPlay sem permissão;
+
+* re-hospedagem de trailer comercial sem autorização;
+
+* assumir que URL pública implica licença de redistribuição.
+
+A arquitetura é multi-source e vale para AAA, AA, clássicos, jogos médios, cult, hidden gems, indies conhecidos e indies pequenos. Direct não é uma solução exclusiva para indie.
+
+## Abstração de source
+
+Direção arquitetural aprovada: TrailerPlaybackSource distingue pelo menos direct e youtube, com metadata de origem suficiente para rastrear provider/source quando disponível. A UI do Feed não deve conhecer detalhes internos do provider.
+
+## Abstração de player
+
+A interface comum de player deve expor, conforme aplicável:
+
+* load/source;
+
+* play;
+
+* pause;
+
+* seekTo;
+
+* position;
+
+* duration;
+
+* state;
+
+* buffering;
+
+* mute/unmute;
+
+* volume;
+
+* dispose.
+
+Implementações esperadas: DirectTrailerPlayer e YoutubeTrailerPlayer. Não adicionar múltiplos players concorrentes sem necessidade comprovada.
+
+## Autoridade de playback
+
+* Um card ativo pode iniciar autoplay uma vez.
+
+* A intenção explícita do usuário tem prioridade sobre autoplay/reconcile/page update.
+
+* Se o usuário pausar, o mesmo card não pode voltar a tocar automaticamente por lógica de reconciliação.
+
+* Se o usuário pedir play, lógica automática não deve pausá-lo imediatamente enquanto o card continua ativo.
+
+* buffering é estado real do player, não intenção do usuário.
+
+* Ao diagnosticar, instrumentar origem dos comandos (userTap, pageActivation, pageDeactivation, lifecycle, reconcile etc.) em vez de logs genéricos PLAY/PAUSE.
+
+## Seekbar NextPlay
+
+A seekbar pertence ao NextPlay e deve consumir a abstração comum do player (position, duration, seekTo). Deve funcionar em playing e paused, suportar tap e drag/scrub, reconciliar com a posição real e não disparar Play/Pause nem swipe vertical acidentalmente.
+
+## Direct player
+
+Para source Direct:
+
+* tap no trailer alterna Play/Pause;
+
+* pausar preserva frame/timestamp;
+
+* resume continua do mesmo ponto;
+
+* mute/unmute e seek são controlados pelo NextPlay;
+
+* loading usa artwork/capa real do jogo e nunca deve virar retângulo preto por falha de thumbnail externa;
+
+* ended permite replay sem UI externa.
+
+Validar separadamente Android/iOS e Web/Edge. URLs Direct usadas na Web precisam de CORS compatível; não contornar CORS pelo frontend.
+
+## YouTube fallback
+
+Preservar o player YouTube como fallback. Não criar hacks visuais que obscureçam o iframe para fingir remoção de UI inevitável. Usar apenas parâmetros/APIs públicas realmente suportadas pela versão instalada. O iframe não deve roubar foco/input do Feed quando a configuração pública permitir pointerEvents: none/equivalente e teclado desabilitado.
+
+## Lifecycle sensível
+
+O player já passou por correções delicadas. Preserve controller único/reutilizado e proteções contra callbacks atrasados/revisões de vídeo. Não reintroduzir ready gate customizado, fila serial de comandos ou controller por card sem causa técnica comprovada e teste de regressão.
+
+## Validação de player
+
+Testes automatizados são obrigatórios, mas não bastam para declarar concluídos problemas de PlatformView/iframe/gestos. Validar manualmente no Edge e em Android físico, incluindo Samsung Galaxy S20 FE como aparelho real de referência, sem criar layout específico para ele.
+
+---
+
+# 42. ESCALA DO FEED E CATÁLOGO — DIREÇÃO FUTURA APROVADA
+
+O produto deve ser preparado para centenas e depois milhares de jogos sem carregar todo o catálogo no cliente.
+
+Direção:
+
+* Feed paginado/infinito, recebendo lotes pequenos do backend.
+
+* Prefetch antes do lote atual acabar para permitir dezenas/centenas de swipes numa única sessão sem reiniciar o app.
+
+* Histórico persistente de impressões/visualizações por usuário/guest session para reduzir repetição entre sessões e dispositivos.
+
+* Não excluir um jogo para sempre apenas porque foi visto. Usar cooldown/rebaixamento e permitir reentrada futura quando fizer sentido.
+
+* Evitar duplicatas na fila atual e manter ordenação determinística/paginação segura.
+
+* Essa direção ainda não autoriza implementar catálogo de 500 jogos, feed infinito ou novo algoritmo sem solicitação específica. Ela existe para impedir escolhas arquiteturais que bloqueiem essa evolução.

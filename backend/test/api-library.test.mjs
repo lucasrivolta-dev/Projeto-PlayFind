@@ -37,13 +37,16 @@ try {
   await verify('Fluxos completos de biblioteca do usuário persistem corretamente', async (tx) => {
     const token = randomUUID().slice(0, 8);
     const fakeToken = `fake-test-token-${token}`;
+    const secondToken = `fake-second-token-${token}`;
     const testUid = `test_player_${token}`;
+    const secondUid = `test_other_player_${token}`;
     const app = await buildApp({
       prisma: tx,
       tokenVerifier: {
         async verify(value) {
-          if (value !== fakeToken) throw new Error('INVALID_TEST_TOKEN');
-          return { uid: testUid };
+          if (value === fakeToken) return { uid: testUid };
+          if (value === secondToken) return { uid: secondUid };
+          throw new Error('INVALID_TEST_TOKEN');
         },
       },
     });
@@ -60,8 +63,10 @@ try {
       screenshots: [],
       steamAppId: 888123,
     });
+    const storedGame = await tx.game.findUniqueOrThrow({ where: { slug: game.slug } });
 
     const headers = { authorization: `Bearer ${fakeToken}` };
+    const secondHeaders = { authorization: `Bearer ${secondToken}` };
 
     // 1. Recusa sem autenticação
     const unauthRes = await app.inject({
@@ -102,6 +107,8 @@ try {
     const listWantBody = JSON.parse(listWantRes.payload);
     assert.equal(listWantBody.data.length, 1);
     assert.equal(listWantBody.data[0].game.slug, game.slug);
+    assert.equal(listWantBody.data[0].game.id, storedGame.id);
+    assert.equal(listWantBody.data[0].gameId, storedGame.id);
     assert.equal(listWantBody.data[0].game.steamAppId, 888123);
 
     // 5. Favoritar jogo
@@ -143,7 +150,7 @@ try {
     });
     assert.equal(fractionalRateRes.statusCode, 400);
 
-    // 8. Curtir e descurtir jogo (GameLike)
+    // 8. Curtir e descurtir no registro único usuário-jogo.
     const like1 = await app.inject({
       method: 'POST',
       url: `/api/v1/library/${game.slug}/like`,
@@ -184,7 +191,7 @@ try {
     });
     assert.equal(delRes.statusCode, 200);
 
-    // Curtidas independem da biblioteca: recarregar ainda deve mostrá-las.
+    // Uma interação sem status continua visível apenas quando há favorito/like.
     const likeWithoutLibrary = await app.inject({
       method: 'POST',
       url: `/api/v1/library/${game.slug}/like`,
@@ -193,7 +200,9 @@ try {
     assert.equal(JSON.parse(likeWithoutLibrary.payload).liked, true);
     const likesOnlyRes = await app.inject({ method: 'GET', url: '/api/v1/library', headers });
     const likesOnly = JSON.parse(likesOnlyRes.payload);
-    assert.equal(likesOnly.data.length, 0);
+    assert.equal(likesOnly.data.length, 1);
+    assert.equal(likesOnly.data[0].status, null);
+    assert.equal(likesOnly.data[0].liked, true);
     assert.deepEqual(
       likesOnly.likes.map((entry) => entry.steamAppId),
       [888123],
@@ -216,6 +225,106 @@ try {
     );
     assert.equal(igdbEntry.game.steamAppId, null);
     assert.equal(igdbEntry.game.igdbId, igdbId);
+
+    const isolated = await tx.game.create({
+      data: { title: `Interaction ${token}`, slug: `interaction-${token}` },
+    });
+    const url = `/api/v1/library/${isolated.id}/interaction`;
+    const patch = (payload, requestHeaders = headers) =>
+      app.inject({
+        method: 'PATCH',
+        url,
+        headers: requestHeaders,
+        payload,
+      });
+    const getInteraction = (requestHeaders = headers) =>
+      app.inject({
+        method: 'GET',
+        url,
+        headers: requestHeaders,
+      });
+    const first = await patch({ liked: true });
+    assert.equal(first.statusCode, 200);
+    assert.equal(JSON.parse(first.payload).gameId, isolated.id);
+    assert.equal(JSON.parse(first.payload).liked, true);
+    assert.equal(JSON.parse(first.payload).status, null);
+    assert.equal(await tx.userGameLibrary.count({ where: { gameId: isolated.id } }), 1);
+    assert.equal((await app.inject({ method: 'GET', url: `/api/v1/library/${isolated.slug}/interaction`, headers })).statusCode, 404);
+    assert.equal(JSON.parse((await getInteraction()).payload).gameId, isolated.id);
+
+    const second = await patch({ isFavorite: true, status: 'WANT_TO_PLAY' });
+    assert.equal(second.statusCode, 200);
+    assert.equal(JSON.parse(second.payload).liked, true);
+    assert.equal(JSON.parse(second.payload).isFavorite, true);
+    await patch({ isFavorite: true, status: 'WANT_TO_PLAY' });
+    assert.equal(await tx.userGameLibrary.count({ where: { gameId: isolated.id } }), 1);
+
+    const played = await patch({ status: 'PLAYED', rating: 4, reviewText: 'Bom' });
+    assert.equal(JSON.parse(played.payload).status, 'PLAYED');
+    assert.equal(JSON.parse(played.payload).rating, 4);
+    const rerated = await patch({ rating: 5 });
+    assert.equal(JSON.parse(rerated.payload).rating, 5);
+    assert.equal(JSON.parse(rerated.payload).reviewText, 'Bom');
+    const listed = await app.inject({ method: 'GET', url: '/api/v1/library?liked=true', headers });
+    assert.equal(
+      JSON.parse(listed.payload).data.find((item) => item.gameId === isolated.id).rating,
+      5,
+    );
+
+    const other = await patch({ liked: true }, secondHeaders);
+    assert.equal(other.statusCode, 200);
+    assert.equal(JSON.parse(other.payload).status, null);
+    assert.equal(await tx.userGameLibrary.count({ where: { gameId: isolated.id } }), 2);
+    assert.equal(JSON.parse((await getInteraction(secondHeaders)).payload).isFavorite, false);
+
+    await patch({ status: null, rating: null, reviewText: null, isFavorite: false, liked: false });
+    const empty = await getInteraction();
+    assert.equal(JSON.parse(empty.payload).liked, false);
+    assert.equal(await tx.userGameLibrary.count({ where: { gameId: isolated.id } }), 1);
+    const noEmpty = await app.inject({ method: 'GET', url: '/api/v1/library', headers });
+    assert.equal(
+      JSON.parse(noEmpty.payload).data.some((item) => item.gameId === isolated.id),
+      false,
+    );
+    await patch({ liked: false }, secondHeaders);
+    assert.equal(await tx.userGameLibrary.count({ where: { gameId: isolated.id } }), 0);
+
+    const legacyLike = await app.inject({
+      method: 'POST',
+      url: `/api/v1/library/${isolated.slug}/like`,
+      headers,
+    });
+    assert.equal(JSON.parse(legacyLike.payload).liked, true);
+    const legacyUnlike = await app.inject({
+      method: 'POST',
+      url: `/api/v1/library/${isolated.slug}/like`,
+      headers,
+    });
+    assert.equal(JSON.parse(legacyUnlike.payload).liked, false);
+    assert.equal(await tx.userGameLibrary.count({ where: { gameId: isolated.id } }), 0);
+    await patch({ isFavorite: true });
+    const favorites = await app.inject({
+      method: 'GET',
+      url: '/api/v1/library?favorite=true',
+      headers,
+    });
+    assert.equal(
+      JSON.parse(favorites.payload).data.some((item) => item.gameId === isolated.id),
+      true,
+    );
+    await patch({ isFavorite: false });
+    assert.equal(await tx.userGameLibrary.count({ where: { gameId: isolated.id } }), 0);
+
+    for (const payload of [
+      { liked: 'true' },
+      { rating: 4.5 },
+      { status: 'OTHER' },
+      { extra: true },
+    ]) {
+      assert.equal((await patch(payload)).statusCode, 400);
+    }
+    assert.equal((await patch({ status: 'WANT_TO_PLAY', rating: 5 })).statusCode, 400);
+    assert.equal((await patch({ reviewText: 'Sem nota' })).statusCode, 400);
 
     await app.close();
   });
