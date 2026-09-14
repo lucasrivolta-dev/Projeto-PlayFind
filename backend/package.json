@@ -9,7 +9,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
-    "test": "tsc && node --test test/*.test.mjs",
+    "test": "tsc && node --test --test-concurrency=1 test/*.test.mjs",
     "test:db": "node test/database-smoke.mjs",
     "prisma:validate": "prisma validate",
     "prisma:status": "prisma migrate status",

@@ -1,11 +1,11 @@
-import 'dotenv/config';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
 import { buildApp } from '../dist/app.js';
 import { PrismaGameRepository } from '../dist/modules/games/prisma-game.repository.js';
+import { createTestPrismaClient, safeTestFailure } from './test-database.mjs';
 
-const db = new PrismaClient({ log: [] });
+process.env.NODE_ENV = 'test';
+let db;
 const rollback = new Error('ROLLBACK_TEST_FIXTURES');
 
 async function verify(label, action) {
@@ -19,20 +19,13 @@ async function verify(label, action) {
     outcome = error;
   }
   if (outcome !== rollback) {
-    console.error(`Falha em "${label}":`, outcome);
-    throw new Error(label);
+    throw new Error(label, { cause: outcome });
   }
   console.log('OK: ' + label);
 }
 
 try {
-  const target = new URL(process.env.DATABASE_URL);
-  if (
-    !['localhost', '127.0.0.1', '[::1]'].includes(target.hostname) ||
-    target.pathname !== '/nextplay'
-  ) {
-    throw new Error('Este teste exige o banco nextplay local');
-  }
+  db = createTestPrismaClient();
 
   await verify('Fluxos completos de biblioteca do usuário persistem corretamente', async (tx) => {
     const token = randomUUID().slice(0, 8);
@@ -331,8 +324,8 @@ try {
 
   console.log('Todos os testes da biblioteca passaram com sucesso.');
 } catch (error) {
-  console.error('Falha nos testes da biblioteca:', error);
+  console.error(safeTestFailure(error, 'Falha nos testes da biblioteca. Detalhes privados omitidos.'));
   process.exitCode = 1;
 } finally {
-  await db.$disconnect();
+  if (db) await db.$disconnect();
 }

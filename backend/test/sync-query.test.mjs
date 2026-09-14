@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   buildSyncQuery,
+  DEFAULT_IGDB_SYNC_QUERY,
   ensureVideoField,
   parseSyncArgs,
   rankDiscoverCandidates,
@@ -11,20 +12,13 @@ import {
 test('Default IGDB sync query preserves catalog fields without invalid popularity', async () => {
   // Inspect the CLI default without executing a real sync or loading credentials.
   const source = await readFile(new URL('../src/scripts/sync-games.ts', import.meta.url), 'utf8');
-  const querySource = await readFile(
-    new URL('../src/modules/integrations/igdb/igdb-query.ts', import.meta.url),
-    'utf8',
-  );
-  const match = querySource.match(/DEFAULT_IGDB_SYNC_QUERY\s*=\n\s*'([^']+)'/);
-  assert.ok(match, 'The sync script must provide its default query');
-  const query = match[1];
+  const query = DEFAULT_IGDB_SYNC_QUERY;
   assert.doesNotMatch(query, /\bpopularity\b/);
   // Ensure the new quality-filtered default query is correct.
   assert.equal(
     query,
     'fields name,slug,summary,cover.url,artworks.url,screenshots.url,videos.video_id,videos.name,external_games.uid,external_games.external_game_source.name,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,rating_count,total_rating,total_rating_count; where game_type = 0 & version_parent = null & cover != null & total_rating_count >= 10 & total_rating >= 60; sort total_rating desc; limit 50;',
   );
-  assert.match(querySource, /videos\.video_id/);
   assert.match(source, /ensureVideoField\(process\.env\.IGDB_SYNC_QUERY/);
   assert.match(query, /rating_count/);
   assert.match(query, /total_rating_count/);

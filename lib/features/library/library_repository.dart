@@ -58,8 +58,8 @@ class NoopLibraryRepository implements LibraryRepository {
 ///
 /// As mutações lançam erro em falhas HTTP para permitir rollback no store.
 ///
-/// Em producao, o identificador temporario e sempre `dev-user` ate a
-/// autenticacao real substituir este contrato.
+/// No app, a identidade vem do Firebase ID Token fornecido por [tokenProvider].
+/// O header legado x-user-id só atende testes locais com allowTestUsers injetado.
 class ApiLibraryRepository implements LibraryRepository {
   ApiLibraryRepository({
     String? baseUrl,
@@ -76,7 +76,7 @@ class ApiLibraryRepository implements LibraryRepository {
   final String baseUrl;
   final String _userId;
 
-  /// Identificador do usuario enviado no header x-user-id.
+  /// Identificador legado para testes locais sem [tokenProvider].
   String get userId => _userId;
 
   final http.Client _client;
