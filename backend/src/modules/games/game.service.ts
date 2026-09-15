@@ -1,6 +1,14 @@
 import type { Prisma } from '@prisma/client';
 import type { PrismaDbClient } from './prisma-game.repository.js';
 import { describeTrailer, type NormalizedTrailer } from './normalized-game.js';
+import {
+  isEligibleForCatalog,
+  areDuplicateEditions,
+  calculateDiscoveryScore,
+  applyFeedDiversity,
+  isDisqualifiedTrailer,
+  type FeedCandidateInput,
+} from './game-eligibility.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -92,7 +100,15 @@ function orderedTrailerDetails(mediaRows: { url: string; provider: string | null
 function pickPrimaryTrailer(trailerDetails: NormalizedTrailer[]): NormalizedTrailer | undefined {
   for (const t of trailerDetails) {
     if (t.provider === 'DIRECT') return t;
-    if (t.provider === 'YOUTUBE' && t.videoId) return t;
+    if (
+      t.provider === 'YOUTUBE' &&
+      t.videoId &&
+      !isDisqualifiedTrailer(t.videoId) &&
+      !isDisqualifiedTrailer(t.providerLabel) &&
+      !isDisqualifiedTrailer(t.origin)
+    ) {
+      return t;
+    }
   }
   return undefined;
 }
@@ -280,18 +296,12 @@ export class GameService {
   }
 
   async getFeedGames(limit = 20) {
-    const safeLimit = Math.min(50, Math.max(1, limit));
-    // Busca primeiro os jogos que possuem mídia do tipo TRAILER ou GAMEPLAY,
-    // ordenados por nota decrescente (com notas nulas por último).
-    const withTrailer = await this.prisma.game.findMany({
-      take: safeLimit,
-      where: {
-        media: {
-          some: {
-            type: { in: ['TRAILER', 'GAMEPLAY'] },
-          },
-        },
-      },
+    const safeLimit = Math.min(100, Math.max(1, limit));
+    const now = new Date();
+
+    // Fetch an expanded candidate pool (up to 100 games) ordered by quality/recency
+    const records = await this.prisma.game.findMany({
+      take: 100,
       orderBy: [{ rating: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
       include: {
         genres: { include: { genre: true } },
@@ -301,35 +311,26 @@ export class GameService {
       },
     });
 
-    const remaining = safeLimit - withTrailer.length;
-    const withoutTrailer =
-      remaining > 0
-        ? await this.prisma.game.findMany({
-            take: remaining,
-            where: {
-              id: { notIn: withTrailer.map((g) => g.id) },
-            },
-            orderBy: [{ rating: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
-            include: {
-              genres: { include: { genre: true } },
-              platforms: { include: { platform: true } },
-              media: { orderBy: { sortOrder: 'asc' } },
-              steamOffers: { orderBy: { capturedAt: 'desc' }, take: 1 },
-            },
-          })
-        : [];
+    // 1. Filter out ineligible games (mods, DLCs, expansions, demos, playtests, tools, etc.)
+    const eligibleRecords = records.filter((record) => {
+      const eligibility = isEligibleForCatalog({
+        title: record.title,
+        slug: record.slug,
+        rating: record.rating,
+        releaseDate: record.releaseDate,
+        description: record.description,
+        coverUrl: record.coverUrl,
+      });
+      return eligibility.eligible;
+    });
 
-    const records = [...withTrailer, ...withoutTrailer];
-
-    // Deduplicação defensiva por id (o Prisma já garante unicidade, mas é uma
-    // salvaguarda caso queries futuras alterem o comportamento).
-    const seen = new Set<string>();
-    const unique = records.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
-
-    const toDto = (record: (typeof records)[number]) => {
+    // 2. Map records and calculate discovery scores
+    const scoredCandidates = eligibleRecords.map((record) => {
       const latestSteam = record.steamOffers[0];
       const screenshots = record.media.filter((m) => m.type === 'SCREENSHOT').map((m) => m.url);
-      const trailerMediaRows = record.media.filter((m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY');
+      const trailerMediaRows = record.media.filter(
+        (m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY',
+      );
       const trailers = trailerMediaRows.map((m) => m.url);
       const trailerDetails = orderedTrailerDetails(
         trailerMediaRows.map((m) => ({
@@ -339,6 +340,28 @@ export class GameService {
           origin: m.origin,
         })),
       );
+      const primaryTrailer = pickPrimaryTrailer(trailerDetails);
+
+      const scoringInput: FeedCandidateInput = {
+        id: record.id,
+        title: record.title,
+        slug: record.slug,
+        rating: record.rating,
+        releaseDate: record.releaseDate,
+        coverUrl: record.coverUrl,
+        heroUrl: record.heroUrl,
+        description: record.description,
+        studio: record.studio,
+        publisher: record.publisher,
+        genres: record.genres.map((g) => g.genre.name),
+        platforms: record.platforms.map((p) => p.platform.name),
+        trailers,
+        trailerDetails,
+        primaryTrailer,
+      };
+
+      const { score, breakdown } = calculateDiscoveryScore(scoringInput, now);
+
       return {
         id: record.id,
         slug: record.slug,
@@ -357,8 +380,12 @@ export class GameService {
         screenshots,
         trailers,
         trailerDetails,
-        primaryTrailer: pickPrimaryTrailer(trailerDetails) ?? null,
-        matchScore: 95, // Editorial baseline for MVP feed
+        primaryTrailer: primaryTrailer ?? null,
+        matchScore: score,
+        discoveryScore: score,
+        scoreBreakdown: breakdown,
+        releaseDate: record.releaseDate,
+        createdAt: record.createdAt,
         steam: latestSteam
           ? {
               storeUrl: latestSteam.storeUrl,
@@ -369,8 +396,61 @@ export class GameService {
             }
           : null,
       };
-    };
+    });
 
-    return unique.slice(0, safeLimit).map(toDto);
+    // 3. Deterministic sort by discoveryScore DESC, then rating DESC, then createdAt DESC, then id ASC
+    scoredCandidates.sort((a, b) => {
+      if (b.discoveryScore !== a.discoveryScore) {
+        return b.discoveryScore - a.discoveryScore;
+      }
+      const ratingA = a.rating ?? 0;
+      const ratingB = b.rating ?? 0;
+      if (ratingB !== ratingA) {
+        return ratingB - ratingA;
+      }
+      const createdA = a.createdAt?.getTime() ?? 0;
+      const createdB = b.createdAt?.getTime() ?? 0;
+      if (createdB !== createdA) {
+        return createdB - createdA;
+      }
+      return a.id.localeCompare(b.id);
+    });
+
+    // 4. Conservative edition deduplication (preserving remakes, remasters, distinct developers)
+    const deduplicated: typeof scoredCandidates = [];
+    const seenIds = new Set<string>();
+
+    for (const candidate of scoredCandidates) {
+      if (seenIds.has(candidate.id)) continue;
+
+      const isDuplicate = deduplicated.some((picked) =>
+        areDuplicateEditions(
+          {
+            title: picked.title,
+            releaseDate: picked.releaseDate,
+            developer: picked.studio,
+          },
+          {
+            title: candidate.title,
+            releaseDate: candidate.releaseDate,
+            developer: candidate.studio,
+          },
+        ),
+      );
+
+      if (!isDuplicate) {
+        seenIds.add(candidate.id);
+        deduplicated.push(candidate);
+      }
+    }
+
+    // 5. Light deterministic feed diversity (genre and release year interleaving)
+    const diverse = applyFeedDiversity(deduplicated, safeLimit);
+
+    // 6. Return standard DTOs
+    return diverse.slice(0, safeLimit).map((item) => {
+      const { discoveryScore, scoreBreakdown, createdAt, ...dto } = item;
+      return dto;
+    });
   }
 }

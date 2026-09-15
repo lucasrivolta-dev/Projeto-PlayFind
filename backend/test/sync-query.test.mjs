@@ -17,14 +17,14 @@ test('Default IGDB sync query preserves catalog fields without invalid popularit
   // Ensure the new quality-filtered default query is correct.
   assert.equal(
     query,
-    'fields name,slug,summary,cover.url,artworks.url,screenshots.url,videos.video_id,videos.name,external_games.uid,external_games.external_game_source.name,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,rating_count,total_rating,total_rating_count; where game_type = 0 & version_parent = null & cover != null & total_rating_count >= 10 & total_rating >= 60; sort total_rating desc; limit 50;',
+    'fields name,slug,game_type,summary,cover.url,artworks.url,screenshots.url,videos.video_id,videos.name,external_games.uid,external_games.external_game_source.name,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,rating_count,total_rating,total_rating_count; where game_type = (0, 8, 9) & version_parent = null & cover != null & total_rating_count >= 10 & total_rating >= 60; sort total_rating desc; limit 50;',
   );
   assert.match(source, /ensureVideoField\(process\.env\.IGDB_SYNC_QUERY/);
   assert.match(query, /rating_count/);
   assert.match(query, /total_rating_count/);
   assert.match(query, /videos\.video_id/);
-  // Certifica que a nova query usa filtros de qualidade
-  assert.match(query, /game_type = 0/);
+  // Certifica que a nova query usa filtros de qualidade e inclui jogos principais, remakes e remasters
+  assert.match(query, /game_type = \(0, 8, 9\)/);
   assert.match(query, /cover != null/);
   assert.match(query, /total_rating >= 60/);
 });
@@ -69,7 +69,7 @@ test('Discover uses a bounded pool and Bayesian deterministic ranking', () => {
     parseSyncArgs(['--mode', 'discover', '--limit', '20']),
     new Date('2026-09-13T00:00:00Z'),
   );
-  assert.match(query, /game_type = 0/);
+  assert.match(query, /game_type = \(0, 8, 9\)/);
   assert.match(query, /first_release_date >= \d+ & first_release_date <= \d+/);
   assert.match(query, /total_rating >= 70/);
   assert.match(query, /total_rating_count >= 20 & total_rating_count <= 500/);

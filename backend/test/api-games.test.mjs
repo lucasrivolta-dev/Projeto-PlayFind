@@ -122,14 +122,14 @@ try {
     assert.equal(notFoundBody.statusCode, 404);
 
     // 7. Feed de descoberta
-    const feedRes = await app.inject({ method: 'GET', url: '/api/v1/feed' });
+    const feedRes = await app.inject({ method: 'GET', url: '/api/v1/feed?limit=100' });
     assert.equal(feedRes.statusCode, 200);
     const feedBody = JSON.parse(feedRes.payload);
     assert.ok(Array.isArray(feedBody.data));
     assert.ok(feedBody.total >= 1);
     const feedGame = feedBody.data.find((g) => g.slug === `api-test-game-${token}`);
     assert.ok(feedGame, 'Jogo criado deve estar disponível no feed');
-    assert.equal(feedGame.matchScore, 95);
+    assert.ok(typeof feedGame.matchScore === 'number' && feedGame.matchScore >= 1 && feedGame.matchScore <= 100);
     assert.deepEqual(feedGame.trailers, ['https://example.com/api-trailer.mp4']);
     assert.equal(feedGame.isFree, true);
 
@@ -203,7 +203,7 @@ try {
     assert.equal('authorizationRef' in (detail.primaryTrailer || {}), false);
 
     // 2. GET /api/v1/feed
-    const feedRes = await app.inject({ method: 'GET', url: '/api/v1/feed' });
+    const feedRes = await app.inject({ method: 'GET', url: '/api/v1/feed?limit=100' });
     assert.equal(feedRes.statusCode, 200);
     const feedBody = JSON.parse(feedRes.payload);
     const feedDirectGame = feedBody.data.find((g) => g.slug === `direct-priority-game-${token}`);

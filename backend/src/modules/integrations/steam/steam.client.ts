@@ -1,4 +1,6 @@
 import type { SteamAppDetailsDto } from './steam.types.js';
+import { isEligibleForCatalog } from '../../games/game-eligibility.js';
+
 export class SteamClient {
   constructor(
     private readonly apiKey = '',
@@ -40,8 +42,13 @@ export class SteamClient {
     );
     const normalized = normalizeName(name);
     const usable = details.filter(({ detail }) => {
-      const value = normalizeName(detail?.data?.name ?? '');
-      return value && !/(playtest|beta|demo|dlc|soundtrack|tool)/i.test(value);
+      const data = detail?.data;
+      if (!data?.name) return false;
+      if (data.type && data.type.toLowerCase() !== 'game') return false;
+      const eligible = isEligibleForCatalog({ title: data.name });
+      if (!eligible.eligible) return false;
+      const value = normalizeName(data.name);
+      return value && !/(playtest|beta|demo|dlc|soundtrack|tool|server)/i.test(value);
     });
     const exact = usable.find(
       ({ detail }) => normalizeName(detail?.data?.name ?? '') === normalized,
