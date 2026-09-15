@@ -1,5 +1,31 @@
+/**
+ * IGDB Game Category / game_type semantics:
+ * 0 = Main Game
+ * 1 = DLC Addon
+ * 2 = Expansion
+ * 3 = Bundle
+ * 4 = Standalone Expansion
+ * 5 = Mod
+ * 6 = Episode
+ * 7 = Season
+ * 8 = Remake
+ * 9 = Remaster
+ * 10 = Expanded Game
+ * 11 = Port
+ * 12 = Fork
+ * 13 = Pack
+ * 14 = Update
+ *
+ * NextPlay accepts standalone, complete games:
+ * Main Game (0), Remake (8), Remaster (9).
+ * Expanded Game (10), DLCs, mods, expansions, packs, etc. are excluded
+ * to prevent redundant commercial re-releases/editions from polluting discovery.
+ */
+export const ELIGIBLE_IGDB_GAME_TYPES = [0, 8, 9] as const;
+export const IGDB_GAME_TYPE_FILTER = 'game_type = (0, 8, 9)';
+
 export const DEFAULT_IGDB_SYNC_QUERY =
-  'fields name,slug,summary,cover.url,artworks.url,screenshots.url,videos.video_id,videos.name,external_games.uid,external_games.external_game_source.name,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,rating_count,total_rating,total_rating_count; where game_type = 0 & version_parent = null & cover != null & total_rating_count >= 10 & total_rating >= 60; sort total_rating desc; limit 50;';
+  `fields name,slug,game_type,summary,cover.url,artworks.url,screenshots.url,videos.video_id,videos.name,external_games.uid,external_games.external_game_source.name,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,rating_count,total_rating,total_rating_count; where ${IGDB_GAME_TYPE_FILTER} & version_parent = null & cover != null & total_rating_count >= 10 & total_rating >= 60; sort total_rating desc; limit 50;`;
 
 export const MAX_SYNC_LIMIT = 100;
 export const DISCOVER_POOL_MULTIPLIER = 5;
@@ -9,7 +35,7 @@ export const DISCOVER_BASELINE_C = 75;
 const DEFAULT_LIMIT = 20;
 const RECENT_WINDOW_DAYS = 5 * 365;
 const GAME_FIELDS =
-  'name,slug,summary,cover.url,artworks.url,screenshots.url,videos.video_id,videos.name,external_games.uid,external_games.external_game_source.name,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,rating_count,total_rating,total_rating_count';
+  'name,slug,game_type,summary,cover.url,artworks.url,screenshots.url,videos.video_id,videos.name,external_games.uid,external_games.external_game_source.name,genres.name,platforms.name,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,rating_count,total_rating,total_rating_count';
 
 export type SyncMode = 'default' | 'id' | 'popular' | 'recent' | 'discover' | 'custom';
 export interface SyncCliOptions {
@@ -84,24 +110,24 @@ export function buildSyncQuery(options: SyncCliOptions, now = new Date()): strin
   const fields = `fields ${GAME_FIELDS};`;
   if (options.mode === 'id') return `${fields} where id = ${options.igdbId}; limit 1;`;
   if (options.mode === 'popular') {
-    return `${fields} where version_parent = null & cover != null & first_release_date != null & total_rating_count != null; sort total_rating_count desc; limit ${options.limit};`;
+    return `${fields} where ${IGDB_GAME_TYPE_FILTER} & version_parent = null & cover != null & first_release_date != null & total_rating_count != null; sort total_rating_count desc; limit ${options.limit};`;
   }
   if (options.mode === 'recent') {
     const cutoff = Math.floor(now.getTime() / 1000) - RECENT_WINDOW_DAYS * 24 * 60 * 60;
     const current = Math.floor(now.getTime() / 1000);
-    return `${fields} where version_parent = null & cover != null & first_release_date >= ${cutoff} & first_release_date <= ${current}; sort first_release_date desc; limit ${options.limit};`;
+    return `${fields} where ${IGDB_GAME_TYPE_FILTER} & version_parent = null & cover != null & first_release_date >= ${cutoff} & first_release_date <= ${current}; sort first_release_date desc; limit ${options.limit};`;
   }
   if (options.mode === 'discover') {
     const poolLimit = Math.min(options.limit * DISCOVER_POOL_MULTIPLIER, DISCOVER_POOL_MAX);
     const cutoff = Math.floor(now.getTime() / 1000) - RECENT_WINDOW_DAYS * 24 * 60 * 60;
     const current = Math.floor(now.getTime() / 1000);
-    return `${fields} where game_type = 0 & version_parent = null & cover != null & first_release_date >= ${cutoff} & first_release_date <= ${current} & total_rating != null & total_rating >= 70 & total_rating_count >= 20 & total_rating_count <= 500; limit ${poolLimit};`;
+    return `${fields} where ${IGDB_GAME_TYPE_FILTER} & version_parent = null & cover != null & first_release_date >= ${cutoff} & first_release_date <= ${current} & total_rating != null & total_rating >= 70 & total_rating_count >= 20 & total_rating_count <= 500; limit ${poolLimit};`;
   }
-  // Modo default: catálogo de qualidade — jogos principais com capa, ao menos
-  // 10 avaliações e nota >= 60/100. Elimina DLCs, expansões, títulos obsoletos
-  // e entradas com dados insuficientes, acolhendo clássicos de qualquer ano.
+  // Modo default: catálogo de qualidade — jogos principais, remakes e remasters
+  // com capa, ao menos 10 avaliações e nota >= 60/100. Elimina DLCs, expansões,
+  // títulos obsoletos e entradas com dados insuficientes, acolhendo clássicos de qualquer ano.
   const current = Math.floor(now.getTime() / 1000);
-  return `${fields} where game_type = 0 & version_parent = null & cover != null & first_release_date <= ${current} & total_rating_count >= 10 & total_rating >= 60; sort total_rating desc; limit ${options.limit};`;
+  return `${fields} where ${IGDB_GAME_TYPE_FILTER} & version_parent = null & cover != null & first_release_date <= ${current} & total_rating_count >= 10 & total_rating >= 60; sort total_rating desc; limit ${options.limit};`;
 }
 
 export interface DiscoverCandidate {

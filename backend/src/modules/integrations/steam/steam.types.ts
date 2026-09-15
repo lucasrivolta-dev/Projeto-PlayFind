@@ -1,6 +1,7 @@
 export interface SteamAppDetailsDto {
   success: boolean;
   data?: {
+    type?: string;
     name?: string;
     steam_appid?: number;
     short_description?: string;

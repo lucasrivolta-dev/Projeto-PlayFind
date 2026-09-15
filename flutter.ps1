@@ -8,12 +8,15 @@ $mappedDrive = $null
 # Flutter's Windows shader compiler currently fails on non-ASCII SDK paths.
 # A temporary drive alias preserves all project files in their original location.
 if ($projectRoot -match '[^\x00-\x7F]') {
-    foreach ($letter in @('Z', 'Y', 'X', 'W', 'V', 'U')) {
+    $parentDir = Split-Path -Parent $projectRoot
+    $projectName = Split-Path -Leaf $projectRoot
+    $targetDir = if ($parentDir) { $parentDir } else { $projectRoot }
+    foreach ($letter in @('Z', 'Y', 'X', 'W', 'V', 'U', 'T', 'S', 'R', 'Q')) {
         if (-not (Test-Path "${letter}:\")) {
-            & subst "${letter}:" $projectRoot
+            & subst "${letter}:" $targetDir
             if ($LASTEXITCODE -ne 0) { throw 'Não foi possível criar o caminho temporário para Flutter.' }
             $mappedDrive = "${letter}:"
-            $projectRoot = "${letter}:\"
+            $projectRoot = if ($parentDir) { "${letter}:\$projectName" } else { "${letter}:\" }
             break
         }
     }

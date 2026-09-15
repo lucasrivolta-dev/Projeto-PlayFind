@@ -58,6 +58,7 @@ export interface IncomingTrailerMetadata {
 export interface NormalizedGame {
   title: string;
   slug?: string;
+  gameType?: number;
   description?: string;
   coverUrl?: string;
   heroUrl?: string;

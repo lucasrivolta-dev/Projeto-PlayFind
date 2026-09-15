@@ -68,9 +68,14 @@ if (cliOptions.dryRun) {
 
 const games = selectedRawGames.map((game) => mapIgdbGame(game));
 
-console.log(`IGDB: ${games.length} jogos recebidos.`);
-
-const prisma = new PrismaClient();
+const datasourceUrl =
+  process.env.USE_TEST_DB === 'true' && process.env.TEST_DATABASE_URL
+    ? process.env.TEST_DATABASE_URL
+    : undefined;
+const prisma = new PrismaClient(datasourceUrl ? { datasourceUrl } : undefined);
+if (datasourceUrl) {
+  console.log('Ambiente de sincronização: TEST_DATABASE_URL (Neon TEST)');
+}
 try {
   const repository = new PrismaGameRepository(prisma);
   const syncService = new GameSyncService(repository);
@@ -113,8 +118,11 @@ try {
 
   const result = await syncService.sync(games, steamEnricher);
   console.log(
-    `Sincronização concluída: ${result.inserted} novos, ${result.linked} vinculados, ${result.unmatched} sem match.`,
+    `Sincronização concluída: ${result.inserted} novos, ${result.linked} vinculados, ${result.unmatched} sem match${result.rejected ? `, ${result.rejected} rejeitados` : ''}.`,
   );
+  if (result.rejections && Object.keys(result.rejections).length > 0) {
+    console.log('Motivos de rejeição:', JSON.stringify(result.rejections, null, 2));
+  }
 } finally {
   await prisma.$disconnect();
 }

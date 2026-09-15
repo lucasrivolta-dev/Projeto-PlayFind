@@ -5,6 +5,8 @@ import {
   type NormalizedGame,
   type NormalizedTrailer,
 } from '../../games/normalized-game.js';
+import { isDisqualifiedTrailer } from '../../games/game-eligibility.js';
+
 function image(url?: string) {
   if (!url) return undefined;
   return url.startsWith('//') ? `https:${url}` : url;
@@ -72,12 +74,8 @@ export function mapIgdbGame(dto: IgdbGameDto): NormalizedGame {
     const name = videoNames.get(videoId) ?? '';
     if (!name) return 3;
 
-    // Termos desqualificantes: detonados, tutoriais, reviews, let's play, guias
-    const isDisqualified =
-      /\b(guide|walkthrough|tutorial|tips|how to|review|let's play|playthrough|gameplay walkthrough|dev diary|developer diary|making of|interview|unboxing|soundtrack|ost)\b/.test(
-        name,
-      );
-    if (isDisqualified) return 99;
+    // Termos desqualificantes: detonados, tutoriais, reviews, let's play, guias, etc.
+    if (isDisqualifiedTrailer(name)) return 99;
 
     // Trailers oficiais explícitos
     if (
@@ -102,6 +100,7 @@ export function mapIgdbGame(dto: IgdbGameDto): NormalizedGame {
   return {
     title: dto.name,
     slug: dto.slug,
+    gameType: dto.game_type,
     description: dto.summary,
     rating: rating(dto.rating ?? dto.total_rating),
     igdbId: dto.id,

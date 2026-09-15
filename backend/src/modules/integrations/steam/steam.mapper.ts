@@ -11,6 +11,9 @@ export function enrichWithSteam(
   dto?: SteamAppDetailsDto,
 ): NormalizedGame {
   const data = dto?.success ? dto.data : undefined;
+  if (data?.type && data.type.toLowerCase() !== 'game') {
+    return game;
+  }
   const steamScreenshots = unique(
     (data?.screenshots ?? []).map((shot) => shot.path_full ?? shot.path_thumbnail),
   );
