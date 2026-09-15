@@ -25,6 +25,8 @@ export interface CatalogCandidateInput {
   gameType?: number | null;
   rating?: number | null;
   ratingCount?: number | null;
+  totalRating?: number | null;
+  totalRatingCount?: number | null;
   coverUrl?: string | null;
   heroUrl?: string | null;
   releaseDate?: Date | null;
@@ -63,8 +65,6 @@ export const DISCOVERY_SCORING_CONFIG = {
     baselineRating: 75,
     /** m: Minimum confidence sample inertia (calibrated from 30 to 50 based on IGDB live distribution) */
     confidenceThreshold: 50,
-    /** Conservative fallback sample count when candidate has rating but vote count is missing */
-    defaultRatingCount: 20,
     /** Baseline rating applied when candidate has no rating at all */
     defaultRatingIfMissing: 60,
   },
@@ -390,20 +390,28 @@ export function calculateDiscoveryScore(
 } {
   const { bayesian, freshness, discovery, metadata, weights } = DISCOVERY_SCORING_CONFIG;
 
-  // 1. Bayesian Rating Calculation
-  let rawRating: number = bayesian.defaultRatingIfMissing;
-  if (candidate.rating !== undefined && candidate.rating !== null && Number.isFinite(candidate.rating)) {
-    rawRating = candidate.rating > 10 ? candidate.rating : candidate.rating * 10;
-  }
-
-  const v: number =
-    candidate.ratingCount !== undefined &&
-    candidate.ratingCount !== null &&
-    Number.isFinite(candidate.ratingCount)
-      ? candidate.ratingCount
-      : candidate.rating !== undefined && candidate.rating !== null
-        ? bayesian.defaultRatingCount
-        : 0;
+  // 1. Bayesian Rating Calculation. Prefer the IGDB aggregate pair when both
+  // values are valid, then the user-rating pair. A rating without a real count
+  // has unknown confidence (v=0); it must not be presented as invented votes.
+  const validPair = (rating: number | null | undefined, count: number | null | undefined) =>
+    rating !== undefined &&
+    rating !== null &&
+    Number.isFinite(rating) &&
+    count !== undefined &&
+    count !== null &&
+    Number.isSafeInteger(count) &&
+    count >= 0;
+  const selectedRating = validPair(candidate.totalRating, candidate.totalRatingCount)
+    ? { rating: candidate.totalRating!, count: candidate.totalRatingCount! }
+    : validPair(candidate.rating, candidate.ratingCount)
+      ? { rating: candidate.rating!, count: candidate.ratingCount! }
+      : null;
+  const rawRating = selectedRating
+    ? selectedRating.rating > 10
+      ? selectedRating.rating
+      : selectedRating.rating * 10
+    : bayesian.defaultRatingIfMissing;
+  const v = selectedRating?.count ?? 0;
 
   const m = bayesian.confidenceThreshold;
   const C = bayesian.baselineRating;

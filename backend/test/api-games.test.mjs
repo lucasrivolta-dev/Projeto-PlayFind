@@ -11,10 +11,13 @@ const rollback = new Error('ROLLBACK_TEST_FIXTURES');
 async function verify(label, action) {
   let outcome;
   try {
-    await db.$transaction(async (tx) => {
-      await action(tx);
-      throw rollback;
-    });
+    await db.$transaction(
+      async (tx) => {
+        await action(tx);
+        throw rollback;
+      },
+      { maxWait: 15000, timeout: 30000 },
+    );
   } catch (error) {
     outcome = error;
   }

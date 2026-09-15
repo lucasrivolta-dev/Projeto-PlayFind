@@ -84,6 +84,12 @@ evidência suficiente para descoberta. Empates usam volume de avaliações e,
 por fim, o ID IGDB. `--dry-run` consulta e classifica sem criar ou atualizar
 qualquer registro no banco.
 
+Na persistência, `rating`/`ratingCount` mantêm a avaliação de usuários do IGDB
+e `totalRating`/`totalRatingCount` mantêm a avaliação combinada. As notas são
+normalizadas para 0–10 e contagens ausentes permanecem nulas. O feed prefere o
+par total completo, usa o par de usuários como fallback e considera nota sem
+contagem como confiança desconhecida, sem atribuir um número artificial de votos.
+
 O fluxo consulta IGDB, normaliza capas, artworks, screenshots, vídeos, gêneros, plataformas, empresas e IDs externos, faz upsert no `Game` e então consulta os detalhes públicos da Steam para preço, disponibilidade, capa, screenshots e trailers adicionais. Vídeos IGDB/YouTube são a fonte principal: o ID e o provedor são preservados em `trailerDetails` e `primaryTrailer`; a mídia legada continua disponível em `trailers`. Como o schema atual guarda a URL canônica, essa informação é recuperável sem migration. Steam só assume `primaryTrailer` quando não há YouTube válido. IDs externos são preferidos; o matching por metadados só associa títulos idênticos com sinais suficientes de lançamento, empresa ou plataforma. Edições, remakes, demos e sequências permanecem separados. Repetir o comando atualiza o mesmo jogo e não duplica mídia nem snapshots Steam idênticos.
 
 ```powershell

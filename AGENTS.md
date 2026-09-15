@@ -1522,7 +1522,9 @@ Serve para leituras e eventos antes do login. Não armazenar dados pessoais desn
 
 ### `games`
 
-`id` UUID primary key, `source` (ex.: STEAM), `sourceId` unique, `title`, `slug` unique, `description`, `studio`, `publisher`, `coverUrl`, `heroUrl`, `rating`, `releaseDate` nullable, `mode` nullable, `playerCountMin` nullable, `playerCountMax` nullable, `isFree`, `createdAt`, `updatedAt`.
+`id` UUID primary key, `source` (ex.: STEAM), `sourceId` unique, `title`, `slug` unique, `description`, `studio`, `publisher`, `coverUrl`, `heroUrl`, `rating`, `ratingCount`, `totalRating`, `totalRatingCount`, `releaseDate` nullable, `mode` nullable, `playerCountMin` nullable, `playerCountMax` nullable, `isFree`, `createdAt`, `updatedAt`.
+
+Os quatro sinais de avaliação do IGDB preservam semânticas separadas: `rating`/`ratingCount` representam avaliações de usuários, enquanto `totalRating`/`totalRatingCount` representam a média combinada do IGDB. As notas usam a escala interna 0–10. O ranking prefere o par total quando completo, usa o par de usuários como fallback e trata nota sem contagem como confiança desconhecida, sem fabricar votos.
 
 ### `genres`, `gameGenres`, `platforms`, `gamePlatforms`
 

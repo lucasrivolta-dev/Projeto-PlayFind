@@ -522,6 +522,46 @@ test('Validação dos Três Perfis: Perfil A (Indie Gem) compete e vence Perfil 
   );
 });
 
+test('Discovery score prefers aggregate IGDB confidence and preserves conservative fallbacks', () => {
+  const base = {
+    id: 'rating-confidence',
+    title: 'Rating Confidence',
+    releaseDate: new Date('2024-01-01'),
+    coverUrl: 'https://example.com/cover.jpg',
+    description: 'Complete metadata for a deterministic score.',
+    trailerDetails: [
+      { provider: 'YOUTUBE', url: 'https://youtube.com/watch?v=abcdefghijk', videoId: 'abcdefghijk' },
+    ],
+  };
+  const now = new Date('2026-09-15T00:00:00Z');
+
+  const aggregate = calculateDiscoveryScore({
+    ...base,
+    rating: 2,
+    ratingCount: 10000,
+    totalRating: 9,
+    totalRatingCount: 100,
+  }, now);
+  const expectedAggregate = calculateBayesianRating(90, 100);
+  assert.equal(aggregate.breakdown.adjustedRating, expectedAggregate);
+
+  const userFallback = calculateDiscoveryScore({ ...base, rating: 8.5, ratingCount: 75 }, now);
+  assert.equal(userFallback.breakdown.adjustedRating, calculateBayesianRating(85, 75));
+
+  const unknownConfidence = calculateDiscoveryScore({ ...base, rating: 9.9 }, now);
+  const missingRating = calculateDiscoveryScore(base, now);
+  assert.equal(unknownConfidence.breakdown.adjustedRating, 75);
+  assert.equal(
+    unknownConfidence.breakdown.adjustedRating,
+    missingRating.breakdown.adjustedRating,
+    'Nota sem contagem deve ter confiança desconhecida, sem fabricar 20 votos',
+  );
+
+  const lowConfidence = calculateDiscoveryScore({ ...base, rating: 9.5, ratingCount: 5 }, now);
+  const highConfidence = calculateDiscoveryScore({ ...base, rating: 9.5, ratingCount: 5000 }, now);
+  assert.ok(lowConfidence.breakdown.adjustedRating < highConfidence.breakdown.adjustedRating);
+});
+
 test('Deduplicação unifica "Nintendo Switch 2 Edition" como edição redundante do jogo base', () => {
   const original = {
     title: 'The Legend of Zelda: Breath of the Wild',
