@@ -18,6 +18,13 @@ enum MediaType {
   SCREENSHOT
 }
 
+enum MediaProvider {
+  YOUTUBE
+  DIRECT
+  STEAM
+  OTHER
+}
+
 model User {
   id            String                @id @default(uuid()) @db.Uuid
   firebaseUid   String                @unique
@@ -126,15 +133,19 @@ model GamePlatform {
 }
 
 model GameMedia {
-  id              String    @id @default(uuid()) @db.Uuid
-  gameId          String    @db.Uuid
-  type            MediaType
-  url             String
-  thumbnailUrl    String?
-  durationSeconds Int?
-  sortOrder       Int       @default(0)
-  game            Game      @relation(fields: [gameId], references: [id])
-  createdAt       DateTime  @default(now())
+  id               String         @id @default(uuid()) @db.Uuid
+  gameId           String         @db.Uuid
+  type             MediaType
+  url              String
+  thumbnailUrl     String?
+  durationSeconds  Int?
+  sortOrder        Int            @default(0)
+  provider         MediaProvider?
+  mimeType         String?
+  origin           String?
+  authorizationRef String?
+  game             Game           @relation(fields: [gameId], references: [id])
+  createdAt        DateTime       @default(now())
 
   @@index([gameId, sortOrder])
 }

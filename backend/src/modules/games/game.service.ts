@@ -44,8 +44,57 @@ export interface GameDetailDto extends GameSummaryDto {
   primaryTrailer?: NormalizedTrailer;
 }
 
-function orderedTrailerDetails(urls: string[]): NormalizedTrailer[] {
-  return urls.map(describeTrailer).sort((a, b) => Number(a.provider !== 'YOUTUBE') - Number(b.provider !== 'YOUTUBE'));
+/**
+ * Priority order for trailer selection:
+ * 1. DIRECT (authorized, reproducible) — best for native player
+ * 2. YOUTUBE (valid videoId) — reliable fallback
+ * 3. STEAM
+ * 4. OTHER
+ * Within the same provider category, preserve original sortOrder.
+ */
+function providerPriority(provider: NormalizedTrailer['provider']): number {
+  switch (provider) {
+    case 'DIRECT':
+      return 0;
+    case 'YOUTUBE':
+      return 1;
+    case 'STEAM':
+      return 2;
+    default:
+      return 3;
+  }
+}
+
+function orderedTrailerDetails(mediaRows: { url: string; provider: string | null; mimeType: string | null; origin: string | null }[]): NormalizedTrailer[] {
+  return mediaRows
+    .map((m) => {
+      if (m.provider != null) {
+        const described = describeTrailer(m.url);
+        return {
+          provider: m.provider as NormalizedTrailer['provider'],
+          url: m.url,
+          ...(described.videoId ? { videoId: described.videoId } : {}),
+          ...(m.mimeType ? { mimeType: m.mimeType } : {}),
+          ...(m.origin ? { origin: m.origin } : {}),
+          // authorizationRef is NEVER included here
+        } as NormalizedTrailer;
+      }
+      return describeTrailer(m.url);
+    })
+    .sort((a, b) => providerPriority(a.provider) - providerPriority(b.provider));
+}
+
+/**
+ * Selects the primary reproducible trailer.
+ * DIRECT or YOUTUBE with a valid videoId are reproducible.
+ * STEAM and OTHER are NOT used as primaryTrailer — they return null if no DIRECT/YOUTUBE exists.
+ */
+function pickPrimaryTrailer(trailerDetails: NormalizedTrailer[]): NormalizedTrailer | undefined {
+  for (const t of trailerDetails) {
+    if (t.provider === 'DIRECT') return t;
+    if (t.provider === 'YOUTUBE' && t.videoId) return t;
+  }
+  return undefined;
 }
 
 export class GameService {
@@ -187,10 +236,16 @@ export class GameService {
 
     const latestSteam = record.steamOffers[0];
     const screenshots = record.media.filter((m) => m.type === 'SCREENSHOT').map((m) => m.url);
-    const trailers = record.media
-      .filter((m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY')
-      .map((m) => m.url);
-    const trailerDetails = orderedTrailerDetails(trailers);
+    const trailerMediaRows = record.media.filter((m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY');
+    const trailers = trailerMediaRows.map((m) => m.url);
+    const trailerDetails = orderedTrailerDetails(
+      trailerMediaRows.map((m) => ({
+        url: m.url,
+        provider: m.provider as string | null,
+        mimeType: m.mimeType,
+        origin: m.origin,
+      })),
+    );
 
     return {
       id: record.id,
@@ -211,7 +266,7 @@ export class GameService {
       screenshots,
       trailers,
       trailerDetails,
-      primaryTrailer: trailerDetails[0],
+      primaryTrailer: pickPrimaryTrailer(trailerDetails),
       steam: latestSteam
         ? {
             storeUrl: latestSteam.storeUrl,
@@ -274,10 +329,16 @@ export class GameService {
     const toDto = (record: (typeof records)[number]) => {
       const latestSteam = record.steamOffers[0];
       const screenshots = record.media.filter((m) => m.type === 'SCREENSHOT').map((m) => m.url);
-      const trailers = record.media
-        .filter((m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY')
-        .map((m) => m.url);
-      const trailerDetails = orderedTrailerDetails(trailers);
+      const trailerMediaRows = record.media.filter((m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY');
+      const trailers = trailerMediaRows.map((m) => m.url);
+      const trailerDetails = orderedTrailerDetails(
+        trailerMediaRows.map((m) => ({
+          url: m.url,
+          provider: m.provider as string | null,
+          mimeType: m.mimeType,
+          origin: m.origin,
+        })),
+      );
       return {
         id: record.id,
         slug: record.slug,
@@ -296,7 +357,7 @@ export class GameService {
         screenshots,
         trailers,
         trailerDetails,
-        primaryTrailer: trailerDetails[0],
+        primaryTrailer: pickPrimaryTrailer(trailerDetails) ?? null,
         matchScore: 95, // Editorial baseline for MVP feed
         steam: latestSteam
           ? {

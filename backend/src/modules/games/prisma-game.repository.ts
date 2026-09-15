@@ -1,6 +1,11 @@
-import type { Prisma, PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient, MediaProvider } from '@prisma/client';
 import type { GameRepository, StoredGame } from './game.repository.js';
-import { describeTrailer, type NormalizedGame, type GamePlatform } from './normalized-game.js';
+import {
+  describeTrailer,
+  type NormalizedGame,
+  type GamePlatform,
+  type IncomingTrailerMetadata,
+} from './normalized-game.js';
 
 export type PrismaDbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -19,7 +24,28 @@ function validExternalId(value?: number): value is number {
   return value !== undefined && Number.isSafeInteger(value) && value > 0;
 }
 
+/**
+ * Validates that an IncomingTrailerMetadata entry is safe to persist as DIRECT.
+ * Throws if provider=DIRECT but authorizationRef is missing/empty, or URL not HTTPS.
+ */
+function validateIncomingTrailer(trailer: IncomingTrailerMetadata): void {
+  if (trailer.provider === 'DIRECT') {
+    if (!trailer.authorizationRef?.trim()) {
+      throw new Error(
+        `DIRECT trailer requires a non-empty authorizationRef (url: ${trailer.url})`,
+      );
+    }
+    if (!/^https:/i.test(trailer.url)) {
+      throw new Error(`DIRECT trailer URL must use HTTPS (url: ${trailer.url})`);
+    }
+  }
+}
+
 function trailerUrls(game: NormalizedGame): string[] {
+  // Prefer incomingTrailerDetails if present
+  if (game.incomingTrailerDetails && game.incomingTrailerDetails.length > 0) {
+    return game.incomingTrailerDetails.map((t) => t.url);
+  }
   const urls = game.trailers ?? [];
   if (urls.length > 0) return urls;
   return (game.trailerDetails ?? []).map((trailer) => trailer.url);
@@ -77,7 +103,21 @@ export class PrismaGameRepository implements GameRepository {
           .map((m) => m.url),
         trailerDetails: record.media
           .filter((m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY')
-          .map((m) => describeTrailer(m.url)),
+          .map((m) => {
+            // Use persisted provider when available; fall back to describeTrailer for legacy rows.
+            // authorizationRef is NEVER included in the public NormalizedTrailer.
+            if (m.provider != null) {
+              const described = describeTrailer(m.url);
+              return {
+                provider: m.provider as unknown as import('./normalized-game.js').TrailerProvider,
+                url: m.url,
+                ...(described.videoId ? { videoId: described.videoId } : {}),
+                ...(m.mimeType ? { mimeType: m.mimeType } : {}),
+                ...(m.origin ? { origin: m.origin } : {}),
+              };
+            }
+            return describeTrailer(m.url);
+          }),
         steam: latestSteam
           ? {
               storeUrl: latestSteam.storeUrl,
@@ -205,28 +245,107 @@ export class PrismaGameRepository implements GameRepository {
       });
     }
 
-    // 4. Synchronize screenshots
-    const media = [
-      ...(game.screenshots ?? []).map((url) => ({ type: 'SCREENSHOT' as const, url })),
-      ...trailerUrls(game).map((url) => ({ type: 'TRAILER' as const, url })),
-    ];
-    for (let i = 0; i < media.length; i++) {
-      const { type, url } = media[i];
-      if (!url?.trim()) continue;
-      const mediaExists = await this.client.gameMedia.findFirst({
-        where: { gameId, url },
+    // 4. Synchronize screenshots and trailers with structured metadata
+    //
+    // incomingTrailerDetails takes precedence over legacy trailers/trailerDetails arrays.
+    // DIRECT provider requires explicit authorizationRef (validated before any DB write).
+    // authorizationRef is stored in the DB but NEVER returned to public callers.
+
+    const screenshotItems = (game.screenshots ?? []).map((url, idx) => ({
+      type: 'SCREENSHOT' as const,
+      url,
+      sortOrder: idx,
+      provider: undefined as MediaProvider | undefined,
+      mimeType: undefined as string | undefined,
+      origin: undefined as string | undefined,
+      authorizationRef: undefined as string | undefined,
+    }));
+
+    // Build structured trailer items
+    const trailerItems: {
+      type: 'TRAILER';
+      url: string;
+      sortOrder: number;
+      provider: MediaProvider | undefined;
+      mimeType: string | undefined;
+      origin: string | undefined;
+      authorizationRef: string | undefined;
+    }[] = [];
+
+    if (game.incomingTrailerDetails && game.incomingTrailerDetails.length > 0) {
+      // Validate all DIRECT entries before any DB write
+      for (const trailer of game.incomingTrailerDetails) {
+        validateIncomingTrailer(trailer);
+      }
+      for (let i = 0; i < game.incomingTrailerDetails.length; i++) {
+        const t = game.incomingTrailerDetails[i];
+        trailerItems.push({
+          type: 'TRAILER',
+          url: t.url,
+          sortOrder: screenshotItems.length + i,
+          provider: t.provider as MediaProvider,
+          mimeType: t.mimeType,
+          origin: t.origin,
+          authorizationRef: t.authorizationRef,
+        });
+      }
+    } else {
+      // Legacy path: plain URL list, no structured metadata
+      const urls = trailerUrls(game);
+      for (let i = 0; i < urls.length; i++) {
+        trailerItems.push({
+          type: 'TRAILER',
+          url: urls[i],
+          sortOrder: screenshotItems.length + i,
+          provider: undefined,
+          mimeType: undefined,
+          origin: undefined,
+          authorizationRef: undefined,
+        });
+      }
+    }
+
+    const allMedia = [...screenshotItems, ...trailerItems];
+    for (const item of allMedia) {
+      if (!item.url?.trim()) continue;
+      const existing = await this.client.gameMedia.findFirst({
+        where: { gameId, url: item.url },
       });
-      if (!mediaExists) {
+      if (!existing) {
         await this.client.gameMedia.create({
           data: {
             gameId,
-            type,
-            url,
-            sortOrder: i,
+            type: item.type,
+            url: item.url,
+            sortOrder: item.sortOrder,
+            ...(item.provider !== undefined ? { provider: item.provider } : {}),
+            ...(item.mimeType !== undefined ? { mimeType: item.mimeType } : {}),
+            ...(item.origin !== undefined ? { origin: item.origin } : {}),
+            ...(item.authorizationRef !== undefined
+              ? { authorizationRef: item.authorizationRef }
+              : {}),
+          },
+        });
+      } else if (
+        item.provider !== undefined &&
+        // Update structured metadata if we now have it and didn't before,
+        // but never downgrade an existing DIRECT entry to another provider.
+        !(existing.provider === 'DIRECT' && item.provider !== 'DIRECT')
+      ) {
+        await this.client.gameMedia.update({
+          where: { id: existing.id },
+          data: {
+            provider: item.provider,
+            ...(item.mimeType !== undefined ? { mimeType: item.mimeType } : {}),
+            ...(item.origin !== undefined ? { origin: item.origin } : {}),
+            ...(item.authorizationRef !== undefined
+              ? { authorizationRef: item.authorizationRef }
+              : {}),
           },
         });
       }
     }
+
 
     // 5. Record steam offer if present
     if (game.steam) {

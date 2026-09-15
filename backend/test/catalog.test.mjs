@@ -6,6 +6,7 @@ import { matchGames } from '../dist/modules/sync/game-matcher.service.js';
 import { enrichWithSteam } from '../dist/modules/integrations/steam/steam.mapper.js';
 import { IgdbClient } from '../dist/modules/integrations/igdb/igdb.client.js';
 import { SteamClient } from '../dist/modules/integrations/steam/steam.client.js';
+import { describeTrailer } from '../dist/modules/games/normalized-game.js';
 
 test('Matching keeps editions, remakes and demos separate', () => {
   const game = {
@@ -358,4 +359,72 @@ test('Sync keeps an IGDB-only game when Steam has no correspondence', async () =
   assert.equal(records.length, 1);
   assert.equal(records[0].igdbId, 1001);
   assert.equal(records[0].steamAppId, undefined);
+});
+
+test('describeTrailer legacy compat: YouTube URL resolves to YOUTUBE with videoId', () => {
+  const t1 = describeTrailer('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+  assert.equal(t1.provider, 'YOUTUBE');
+  assert.equal(t1.videoId, 'dQw4w9WgXcQ');
+
+  const t2 = describeTrailer('https://youtu.be/dQw4w9WgXcQ');
+  assert.equal(t2.provider, 'YOUTUBE');
+  assert.equal(t2.videoId, 'dQw4w9WgXcQ');
+});
+
+test('describeTrailer legacy compat: Steam CDN URL resolves to STEAM', () => {
+  const t = describeTrailer('https://steamcdn-a.akamaihd.net/steam/apps/256693630/movie480.mp4');
+  assert.equal(t.provider, 'STEAM');
+});
+
+test('describeTrailer legacy compat: unknown .mp4 URL resolves to OTHER and is NEVER auto-promoted to DIRECT', () => {
+  const urls = [
+    'https://example.com/trailer.mp4',
+    'https://cdn.publisher.com/videos/game_trailer.m3u8',
+    'https://my-game.org/direct_trailer.mp4',
+    'https://presskit.studio.com/video.mp4',
+  ];
+  for (const url of urls) {
+    const t = describeTrailer(url);
+    assert.equal(t.provider, 'OTHER', `URL ${url} deve resultar em OTHER, nunca DIRECT`);
+  }
+});
+
+test('IGDB mapper never generates DIRECT provider trailers', () => {
+  const game = mapIgdbGame({
+    id: 100,
+    name: 'IGDB Trailer Game',
+    videos: [
+      { video_id: 'yt_abc_1', name: 'Official Trailer' },
+      { video_id: 'yt_abc_2', name: 'Gameplay Trailer' },
+    ],
+  });
+  assert.ok(game.trailerDetails.length > 0);
+  for (const trailer of game.trailerDetails) {
+    assert.equal(trailer.provider, 'YOUTUBE');
+    assert.notEqual(trailer.provider, 'DIRECT');
+  }
+});
+
+test('Steam mapper never generates DIRECT provider trailers', () => {
+  const baseGame = {
+    title: 'Steam Trailer Game',
+    genres: [],
+    platforms: [],
+    screenshots: [],
+    trailers: [],
+  };
+  const enriched = enrichWithSteam(baseGame, 500, {
+    success: true,
+    data: {
+      movies: [
+        { mp4: { max: 'https://cdn.steam.com/movie_max.mp4' } },
+        { webm: { max: 'https://cdn.steam.com/movie_webm.mp4' } },
+      ],
+    },
+  });
+  assert.ok(enriched.trailerDetails.length > 0);
+  for (const trailer of enriched.trailerDetails) {
+    assert.equal(trailer.provider, 'STEAM');
+    assert.notEqual(trailer.provider, 'DIRECT');
+  }
 });
