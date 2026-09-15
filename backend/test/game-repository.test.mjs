@@ -114,6 +114,131 @@ try {
     assert.ok(gameAfterSync?.lastSyncedAt);
   });
 
+  await verify('PrismaGameRepository persiste metadados de trailer direto e respeita constraints de autorização', async (tx) => {
+    const repo = new PrismaGameRepository(tx);
+    const token = randomUUID().slice(0, 8);
+    const directGame = {
+      title: `Direct Trailer Game ${token}`,
+      slug: `direct-game-${token}`,
+      description: 'Game with direct authorized trailer',
+      genres: ['Action'],
+      platforms: ['PC'],
+      screenshots: [],
+      incomingTrailerDetails: [
+        {
+          provider: 'DIRECT',
+          url: 'https://cdn.example.com/trailers/launch.mp4',
+          mimeType: 'video/mp4',
+          origin: 'publisher-presskit',
+          authorizationRef: 'license-agmt-2026-001',
+        },
+      ],
+    };
+
+    // 1 & 2. DIRECT com authorizationRef persiste provider, mimeType, origin, authorizationRef
+    await repo.upsertByExternalId(directGame);
+
+    const candidates = await repo.findCandidates(directGame);
+    assert.equal(candidates.length, 1);
+    const candidate = candidates[0];
+    assert.equal(candidate.trailerDetails?.length, 1);
+    const candidateTrailer = candidate.trailerDetails[0];
+    assert.equal(candidateTrailer.provider, 'DIRECT');
+    assert.equal(candidateTrailer.url, 'https://cdn.example.com/trailers/launch.mp4');
+    assert.equal(candidateTrailer.mimeType, 'video/mp4');
+    assert.equal(candidateTrailer.origin, 'publisher-presskit');
+    // authorizationRef NÃO deve vazar em candidate.trailerDetails
+    assert.equal('authorizationRef' in candidateTrailer, false);
+
+    // Verificação física no banco de dados
+    const rawMedia = await tx.gameMedia.findFirst({
+      where: { gameId: candidate.id, url: 'https://cdn.example.com/trailers/launch.mp4' },
+    });
+    assert.ok(rawMedia, 'GameMedia row deve existir');
+    assert.equal(rawMedia.provider, 'DIRECT');
+    assert.equal(rawMedia.mimeType, 'video/mp4');
+    assert.equal(rawMedia.origin, 'publisher-presskit');
+    assert.equal(rawMedia.authorizationRef, 'license-agmt-2026-001');
+
+    // 4. DIRECT sem authorizationRef é rejeitado pelo código
+    await assert.rejects(
+      async () => {
+        await repo.upsertByExternalId({
+          title: `Direct Invalid ${token}`,
+          slug: `direct-invalid-${token}`,
+          genres: [],
+          platforms: [],
+          screenshots: [],
+          incomingTrailerDetails: [
+            {
+              provider: 'DIRECT',
+              url: 'https://cdn.example.com/trailers/unauthorized.mp4',
+              // sem authorizationRef
+            },
+          ],
+        });
+      },
+      /DIRECT trailer requires a non-empty authorizationRef/,
+      'Deve rejeitar DIRECT sem authorizationRef no código',
+    );
+
+    // 13 & 14. Persistir duas vezes a mesma URL não duplica e atualiza metadados sem rebaixar DIRECT
+    const updateGame = {
+      ...directGame,
+      incomingTrailerDetails: [
+        {
+          provider: 'DIRECT',
+          url: 'https://cdn.example.com/trailers/launch.mp4',
+          mimeType: 'video/mp4',
+          origin: 'publisher-presskit-v2',
+          authorizationRef: 'license-agmt-2026-001-renewed',
+        },
+      ],
+    };
+    await repo.upsertByExternalId(updateGame);
+    const mediaCount = await tx.gameMedia.count({
+      where: { gameId: candidate.id, url: 'https://cdn.example.com/trailers/launch.mp4' },
+    });
+    assert.equal(mediaCount, 1, 'Mídia repetida não deve duplicar');
+
+    const updatedRawMedia = await tx.gameMedia.findFirst({
+      where: { gameId: candidate.id, url: 'https://cdn.example.com/trailers/launch.mp4' },
+    });
+    assert.equal(updatedRawMedia?.origin, 'publisher-presskit-v2');
+    assert.equal(updatedRawMedia?.authorizationRef, 'license-agmt-2026-001-renewed');
+  });
+
+  await verify('Constraint do banco bloqueia DIRECT com authorizationRef nulo', async (tx) => {
+    const repo = new PrismaGameRepository(tx);
+    const token = randomUUID().slice(0, 8);
+    const baseGame = await repo.upsertByExternalId({
+      title: `Constraint Test ${token}`,
+      slug: `constraint-test-${token}`,
+      genres: [],
+      platforms: [],
+      screenshots: [],
+    });
+    const candidates = await repo.findCandidates(baseGame);
+    const gameId = candidates[0].id;
+
+    // 5. DIRECT sem authorizationRef é rejeitado pela constraint do banco
+    await assert.rejects(
+      async () => {
+        await tx.gameMedia.create({
+          data: {
+            gameId,
+            type: 'TRAILER',
+            url: 'https://cdn.example.com/trailers/bypass-code.mp4',
+            provider: 'DIRECT',
+            authorizationRef: null,
+          },
+        });
+      },
+      /GameMedia_direct_requires_auth|constraint|check/i,
+      'PostgreSQL CHECK constraint deve bloquear DIRECT com authorizationRef nulo',
+    );
+  });
+
   console.log('Todos os testes do PrismaGameRepository passaram com sucesso.');
 } catch (error) {
   console.error(safeTestFailure(error, 'Falha nos testes do repositório. Detalhes privados omitidos.'));

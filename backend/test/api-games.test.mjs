@@ -136,6 +136,131 @@ try {
     await app.close();
   });
 
+  await verify('Endpoints de catálogo e feed priorizam DIRECT e protegem authorizationRef', async (tx) => {
+    const app = await buildApp({ prisma: tx });
+    const repo = new PrismaGameRepository(tx);
+    const token = randomUUID().slice(0, 8);
+
+    // Jogo com DIRECT + YouTube
+    await repo.upsertByExternalId({
+      title: `Direct Priority Game ${token}`,
+      slug: `direct-priority-game-${token}`,
+      description: 'Test direct priority',
+      rating: 9.9,
+      genres: ['Action'],
+      platforms: ['PC'],
+      screenshots: [],
+      incomingTrailerDetails: [
+        {
+          provider: 'YOUTUBE',
+          url: 'https://www.youtube.com/watch?v=fallback123',
+        },
+        {
+          provider: 'DIRECT',
+          url: 'https://cdn.example.com/direct/video.mp4',
+          mimeType: 'video/mp4',
+          origin: 'studio-portal',
+          authorizationRef: 'secret-auth-contract-999',
+        },
+      ],
+    });
+
+    // Jogo apenas com Steam (sem fonte reproduzível no native player)
+    await repo.upsertByExternalId({
+      title: `Steam Only Game ${token}`,
+      slug: `steam-only-game-${token}`,
+      description: 'Game with only Steam trailer',
+      rating: 8.0,
+      genres: ['Strategy'],
+      platforms: ['PC'],
+      screenshots: [],
+      incomingTrailerDetails: [
+        {
+          provider: 'STEAM',
+          url: 'https://cdn.akamai.steamstatic.com/steam/apps/123/movie.mp4',
+        },
+      ],
+    });
+
+    // 1. GET /api/v1/games/:id (Direct Priority Game)
+    const detailRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/games/direct-priority-game-${token}`,
+    });
+    assert.equal(detailRes.statusCode, 200);
+    const detail = JSON.parse(detailRes.payload);
+
+    // Teste 9: DIRECT tem prioridade sobre YouTube no detalhe
+    assert.equal(detail.primaryTrailer?.provider, 'DIRECT');
+    assert.equal(detail.primaryTrailer?.url, 'https://cdn.example.com/direct/video.mp4');
+    assert.equal(detail.trailerDetails[0]?.provider, 'DIRECT');
+    assert.equal(detail.trailerDetails[1]?.provider, 'YOUTUBE');
+
+    // Teste 3: authorizationRef NUNCA vaza no JSON público
+    const detailPayload = detailRes.payload;
+    assert.equal(detailPayload.includes('secret-auth-contract-999'), false);
+    assert.equal(detailPayload.includes('authorizationRef'), false);
+    assert.equal('authorizationRef' in (detail.primaryTrailer || {}), false);
+
+    // 2. GET /api/v1/feed
+    const feedRes = await app.inject({ method: 'GET', url: '/api/v1/feed' });
+    assert.equal(feedRes.statusCode, 200);
+    const feedBody = JSON.parse(feedRes.payload);
+    const feedDirectGame = feedBody.data.find((g) => g.slug === `direct-priority-game-${token}`);
+    assert.ok(feedDirectGame, 'Jogo com Direct deve estar no feed');
+
+    // Teste 10: DIRECT tem prioridade sobre YouTube no feed
+    assert.equal(feedDirectGame.primaryTrailer?.provider, 'DIRECT');
+    assert.equal(feedDirectGame.trailerDetails[0]?.provider, 'DIRECT');
+
+    // Teste 3 (feed): authorizationRef não vaza no feed
+    assert.equal(feedRes.payload.includes('secret-auth-contract-999'), false);
+    assert.equal(feedRes.payload.includes('authorizationRef'), false);
+
+    // 3. Jogo apenas com Steam: Teste 12 (primaryTrailer é null/undefined)
+    const steamDetailRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/games/steam-only-game-${token}`,
+    });
+    assert.equal(steamDetailRes.statusCode, 200);
+    const steamDetail = JSON.parse(steamDetailRes.payload);
+    assert.equal(steamDetail.primaryTrailer, undefined);
+
+    const feedSteamGame = feedBody.data.find((g) => g.slug === `steam-only-game-${token}`);
+    if (feedSteamGame) {
+      assert.equal(feedSteamGame.primaryTrailer, null);
+    }
+
+    // 4. Teste 11: Sem DIRECT, YouTube válido com videoId vira primaryTrailer
+    const ytOnlyGame = {
+      title: `YouTube Only Game ${token}`,
+      slug: `youtube-only-game-${token}`,
+      genres: ['Action'],
+      platforms: ['PC'],
+      screenshots: [],
+      incomingTrailerDetails: [
+        {
+          provider: 'STEAM',
+          url: 'https://cdn.akamai.steamstatic.com/steam/apps/456/movie.mp4',
+        },
+        {
+          provider: 'YOUTUBE',
+          url: 'https://www.youtube.com/watch?v=onlyYT123',
+        },
+      ],
+    };
+    await repo.upsertByExternalId(ytOnlyGame);
+    const ytDetailRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/games/youtube-only-game-${token}`,
+    });
+    const ytDetail = JSON.parse(ytDetailRes.payload);
+    assert.equal(ytDetail.primaryTrailer?.provider, 'YOUTUBE');
+    assert.equal(ytDetail.primaryTrailer?.videoId, 'onlyYT123');
+
+    await app.close();
+  });
+
   console.log('Todos os testes de API passaram com sucesso.');
 } catch (error) {
   console.error(safeTestFailure(error, 'Falha nos testes de API. Detalhes privados omitidos.'));

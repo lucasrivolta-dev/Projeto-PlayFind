@@ -38,6 +38,23 @@ export function trailerKey(trailer: NormalizedTrailer): string {
     : `${trailer.provider}:${trailer.url}`;
 }
 
+/**
+ * Metadata de entrada para persistência de trailers estruturados.
+ * Carrega authorizationRef para uso exclusivo no repositório.
+ * Este tipo NUNCA e exposto em DTOs publicos, respostas HTTP ou Flutter.
+ */
+export interface IncomingTrailerMetadata {
+  provider: TrailerProvider;
+  url: string;
+  mimeType?: string;
+  origin?: string;
+  /**
+   * Referencia de autorizacao de uso do trailer (press kit, contrato, origem).
+   * NUNCA incluir em NormalizedTrailer, GameDetailDto ou qualquer DTO publico.
+   */
+  authorizationRef?: string;
+}
+
 export interface NormalizedGame {
   title: string;
   slug?: string;
@@ -49,6 +66,11 @@ export interface NormalizedGame {
   trailers?: string[];
   /** Structured metadata retained alongside legacy URL arrays. */
   trailerDetails?: NormalizedTrailer[];
+  /**
+   * Incoming structured metadata for persistence, including authorizationRef.
+   * Used ONLY by PrismaGameRepository. Never exposed in public DTOs.
+   */
+  incomingTrailerDetails?: IncomingTrailerMetadata[];
   genres: string[];
   platforms: GamePlatform[];
   releaseDate?: Date;
