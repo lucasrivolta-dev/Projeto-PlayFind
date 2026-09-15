@@ -43,7 +43,9 @@ test('IGDB mapper normalizes media, platforms, rating and Steam external ID', ()
     slug: 'example-game',
     summary: 'Description',
     rating: 91.5,
+    rating_count: 321,
     total_rating: 90,
+    total_rating_count: 654,
     first_release_date: 1704067200,
     cover: { url: '//images.example/cover.jpg' },
     artworks: [{ url: 'https://images.example/hero.jpg' }],
@@ -69,8 +71,32 @@ test('IGDB mapper normalizes media, platforms, rating and Steam external ID', ()
   ]);
   assert.deepEqual(game.platforms, ['PC', 'PlayStation']);
   assert.equal(game.rating, 9.15);
+  assert.equal(game.ratingCount, 321);
+  assert.equal(game.totalRating, 9);
+  assert.equal(game.totalRatingCount, 654);
   assert.equal(game.developer, 'Dev Studio');
   assert.equal(game.publisher, 'Publisher');
+});
+
+test('IGDB mapper preserves missing and rejects invalid rating confidence values', () => {
+  const missing = mapIgdbGame({ id: 1, name: 'Missing confidence' });
+  assert.equal(missing.rating, undefined);
+  assert.equal(missing.ratingCount, undefined);
+  assert.equal(missing.totalRating, undefined);
+  assert.equal(missing.totalRatingCount, undefined);
+
+  const invalid = mapIgdbGame({
+    id: 2,
+    name: 'Invalid confidence',
+    rating: Number.NaN,
+    rating_count: 1.5,
+    total_rating: Number.POSITIVE_INFINITY,
+    total_rating_count: -1,
+  });
+  assert.equal(invalid.rating, undefined);
+  assert.equal(invalid.ratingCount, undefined);
+  assert.equal(invalid.totalRating, undefined);
+  assert.equal(invalid.totalRatingCount, undefined);
 });
 
 test('IGDB client caches the verified access token for repeated requests', async () => {

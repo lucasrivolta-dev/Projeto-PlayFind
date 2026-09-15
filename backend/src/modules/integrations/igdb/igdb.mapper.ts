@@ -33,6 +33,11 @@ function rating(value?: number) {
   return value > 10 ? value / 10 : value;
 }
 
+function ratingCount(value?: number) {
+  if (value === undefined || !Number.isSafeInteger(value) || value < 0) return undefined;
+  return value;
+}
+
 export function mapIgdbGame(dto: IgdbGameDto): NormalizedGame {
   const companies = dto.involved_companies ?? [];
   // A source name containing "steam" is not necessarily the Steam store.
@@ -102,7 +107,10 @@ export function mapIgdbGame(dto: IgdbGameDto): NormalizedGame {
     slug: dto.slug,
     gameType: dto.game_type,
     description: dto.summary,
-    rating: rating(dto.rating ?? dto.total_rating),
+    rating: rating(dto.rating),
+    ratingCount: ratingCount(dto.rating_count),
+    totalRating: rating(dto.total_rating),
+    totalRatingCount: ratingCount(dto.total_rating_count),
     igdbId: dto.id,
     steamAppId,
     ...(steamAppIds.length > 1 ? { steamAppIds } : {}),

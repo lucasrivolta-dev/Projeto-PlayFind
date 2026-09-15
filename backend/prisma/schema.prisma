@@ -80,6 +80,9 @@ model Game {
   coverUrl       String?
   heroUrl        String?
   rating         Float?
+  ratingCount      Int?
+  totalRating      Float?
+  totalRatingCount Int?
   releaseDate    DateTime?
   mode           String?
   playerCountMin Int?

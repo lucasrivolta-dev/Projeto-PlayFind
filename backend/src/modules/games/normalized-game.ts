@@ -78,6 +78,9 @@ export interface NormalizedGame {
   developer?: string;
   publisher?: string;
   rating?: number;
+  ratingCount?: number;
+  totalRating?: number;
+  totalRatingCount?: number;
   isFree?: boolean;
   igdbId?: number;
   steamAppId?: number;

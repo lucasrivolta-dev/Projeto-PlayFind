@@ -38,6 +38,9 @@ try {
       developer: 'Supergiant Games',
       publisher: 'Supergiant Games',
       rating: 9.3,
+      ratingCount: 120,
+      totalRating: 9.1,
+      totalRatingCount: 240,
       releaseDate: new Date('2020-09-17'),
       genres: ['Action', 'Roguelike', 'Indie'],
       platforms: ['PC', 'Switch'],
@@ -74,11 +77,17 @@ try {
     assert.equal(persisted?.source, 'IGDB');
     assert.equal(persisted?.sourceId, String(mockGame.igdbId));
     assert.equal(persisted?.isFree, false);
+    assert.equal(persisted?.ratingCount, 120);
+    assert.equal(persisted?.totalRating, 9.1);
+    assert.equal(persisted?.totalRatingCount, 240);
 
     // 3. Atualização idempotente
     const updatedGame = {
       ...mockGame,
       rating: 9.5,
+      ratingCount: 150,
+      totalRating: 9.2,
+      totalRatingCount: 300,
       genres: ['Action', 'Roguelike', 'Indie', 'RPG'],
       steam: {
         ...mockGame.steam,
@@ -92,6 +101,9 @@ try {
     const updatedStored = candidatesAfterUpdate.find((c) => c.slug === mockGame.slug);
     assert.ok(updatedStored);
     assert.equal(updatedStored.rating, 9.5);
+    assert.equal(updatedStored.ratingCount, 150);
+    assert.equal(updatedStored.totalRating, 9.2);
+    assert.equal(updatedStored.totalRatingCount, 300);
     assert.ok(updatedStored.genres.includes('RPG'));
 
     const mediaCount = await tx.gameMedia.count({ where: { gameId: stored.id } });
