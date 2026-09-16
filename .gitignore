@@ -17,3 +17,4 @@ flutter_*.log
 backend-dev.log
 android/.kotlin/
 .gradle/
+.backend.log

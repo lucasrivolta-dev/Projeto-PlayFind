@@ -25,9 +25,11 @@ class DiscoveryGame {
       this.heroUrl,
       this.steamAppId,
       this.igdbId,
-      this.primaryTrailer});
+      this.primaryTrailer,
+      this.trailerDetails = const []});
   final int? steamAppId, igdbId;
   final TrailerInfo? primaryTrailer;
+  final List<TrailerInfo> trailerDetails;
   final String? releaseDate, mode, publisher, slug, coverUrl, heroUrl;
   /// Identificador interno e estável de Game na API NextPlay.
   final String id;
@@ -83,7 +85,16 @@ class DiscoveryGame {
       coverUrl: json['coverUrl'] as String?,
       heroUrl: json['heroUrl'] as String?,
       primaryTrailer: TrailerInfo.fromJson(json['primaryTrailer']),
+      trailerDetails: _parseTrailerDetails(json['trailerDetails']),
     );
+  }
+
+  static List<TrailerInfo> _parseTrailerDetails(Object? value) {
+    if (value is! List) return const [];
+    return value
+        .map(TrailerInfo.fromJson)
+        .whereType<TrailerInfo>()
+        .toList(growable: false);
   }
 }
 

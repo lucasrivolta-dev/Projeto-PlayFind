@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../design_system/theme.dart';
@@ -8,6 +9,43 @@ import '../explore/explore_data.dart';
 import 'direct_trailer_player.dart';
 import 'trailer_info.dart';
 import 'trailer_player.dart';
+
+const youtubeTrailerStartupTimeout = Duration(seconds: 6);
+
+String _sourceKey(TrailerPlaybackSource source) => switch (source) {
+  YoutubeSource(:final videoId) => 'youtube:$videoId',
+  DirectSource(:final url) => 'direct:$url',
+};
+
+String _sourceValue(TrailerPlaybackSource source) => switch (source) {
+  YoutubeSource(:final videoId) => videoId,
+  DirectSource(:final url) => url,
+};
+
+/// Playable sources in deterministic product order.
+/// Steam/Other entries never become direct playback URLs.
+List<TrailerPlaybackSource> trailerCandidatesFor(DiscoveryGame game) {
+  final direct = <TrailerPlaybackSource>[];
+  final youtube = <TrailerPlaybackSource>[];
+  final seen = <String>{};
+
+  void add(TrailerInfo? info, List<TrailerPlaybackSource> target) {
+    final source = info?.toPlaybackSource();
+    if (source == null || !seen.add(_sourceKey(source))) return;
+    target.add(source);
+  }
+
+  for (final info in [game.primaryTrailer, ...game.trailerDetails]) {
+    if (info?.provider == TrailerProvider.direct) add(info, direct);
+  }
+  if (game.primaryTrailer?.provider == TrailerProvider.youtube) {
+    add(game.primaryTrailer, youtube);
+  }
+  for (final info in game.trailerDetails) {
+    if (info.provider == TrailerProvider.youtube) add(info, youtube);
+  }
+  return [...direct, ...youtube];
+}
 
 /// One player for the entire feed, reused as its active game changes.
 class FeedTrailer extends StatefulWidget {
@@ -58,11 +96,19 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
   bool _manualPaused = false;
   int _revision = 0;
   int _activationRevision = 0;
-  int _autoplayIssuedRevision = -1;
   bool _showOverlay = false;
   IconData _overlayIcon = Icons.play_arrow;
   Timer? _overlayTimer;
+  Timer? _youtubeStartupTimer;
   double? _dragFraction;
+  int _candidateIndex = 0;
+  final Set<String> _attemptedCandidates = {};
+  String? _autoplayCandidateKey;
+  bool _switchingCandidate = false;
+  bool _playbackStarted = false;
+  double _pageDragDistance = 0;
+  double? _pagePointerDownY;
+  int? _pageDragStartIndex;
 
   bool get isEffectivelyPlaying =>
       _player != null &&
@@ -78,7 +124,10 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
   TrailerPlayer? get player => _player;
   double? get dragFraction => _dragFraction;
   bool get showingCurrentVideo =>
-      !_failed && _videoId != null && _player?.displayedVideoId == _videoId;
+      !_failed &&
+      _playbackStarted &&
+      _videoId != null &&
+      _player?.displayedVideoId == _videoId;
   bool get hasVideoId => _videoId != null;
 
   void togglePlayback() => _togglePlayback();
@@ -91,16 +140,125 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
     setState(() => _dragFraction = fraction);
   }
 
+  void preparePageDrag(DragDownDetails details) {
+    _pagePointerDownY = details.globalPosition.dy;
+  }
+
+  void startPageDrag(DragStartDetails details) {
+    final controller = widget.pageController;
+    if (controller == null || !controller.hasClients) return;
+    if (kDebugMode) {
+      debugPrint('[TrailerInput] VERTICAL DRAG START');
+    }
+    _pageDragDistance =
+        details.globalPosition.dy -
+        (_pagePointerDownY ?? details.globalPosition.dy);
+    _pageDragStartIndex = (controller.page ?? widget.currentIndex.toDouble())
+        .round();
+    if (_pageDragDistance != 0) {
+      final position = controller.position;
+      controller.jumpTo(
+        (controller.offset - _pageDragDistance).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        ),
+      );
+    }
+  }
+
+  void updatePageDrag(DragUpdateDetails details) {
+    final controller = widget.pageController;
+    final delta = details.primaryDelta;
+    if (controller == null ||
+        !controller.hasClients ||
+        _pageDragStartIndex == null ||
+        delta == null) {
+      return;
+    }
+    _pageDragDistance += delta;
+    final position = controller.position;
+    controller.jumpTo(
+      (controller.offset - delta).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      ),
+    );
+  }
+
+  void endPageDrag(DragEndDetails details) {
+    final controller = widget.pageController;
+    final start = _pageDragStartIndex;
+    if (controller == null || !controller.hasClients || start == null) {
+      cancelPageDrag();
+      return;
+    }
+    final velocity = details.primaryVelocity ?? 0;
+    final movedEnough = _pageDragDistance.abs() >= 40;
+    final flung = velocity.abs() >= 300;
+    final direction = movedEnough || flung
+        ? (_pageDragDistance != 0
+              ? (_pageDragDistance < 0 ? 1 : -1)
+              : (velocity < 0 ? 1 : -1))
+        : 0;
+    final lastPage =
+        (controller.position.maxScrollExtent /
+                controller.position.viewportDimension)
+            .round();
+    final target = (start + direction).clamp(0, lastPage).toInt();
+    if (kDebugMode) {
+      debugPrint(
+        '[TrailerInput] VERTICAL DRAG END distance=$_pageDragDistance '
+        'velocity=$velocity target=$target',
+      );
+    }
+    _pageDragDistance = 0;
+    _pagePointerDownY = null;
+    _pageDragStartIndex = null;
+    unawaited(
+      controller.animateToPage(
+        target,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeInOut,
+      ),
+    );
+  }
+
+  void cancelPageDrag() {
+    final controller = widget.pageController;
+    final start = _pageDragStartIndex;
+    _pageDragDistance = 0;
+    _pagePointerDownY = null;
+    _pageDragStartIndex = null;
+    if (controller != null && controller.hasClients && start != null) {
+      unawaited(
+        controller.animateToPage(
+          start,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        ),
+      );
+    }
+  }
+
   String formatDuration(Duration d) => _formatDuration(d);
 
-  TrailerPlaybackSource? get _source =>
-      widget.game.primaryTrailer?.toPlaybackSource();
+  List<TrailerPlaybackSource> get _candidates =>
+      trailerCandidatesFor(widget.game);
+
+  TrailerPlaybackSource? get _source {
+    final candidates = _candidates;
+    return _candidateIndex < candidates.length
+        ? candidates[_candidateIndex]
+        : null;
+  }
 
   String? get _videoId => switch (_source) {
     YoutubeSource(:final videoId) => videoId,
     DirectSource(:final url) => url,
     null => null,
   };
+
+  String? get _candidateKey => _source == null ? null : _sourceKey(_source!);
 
   bool get _shouldPlay =>
       widget.active && _foreground && _source != null && !_manualPaused;
@@ -109,7 +267,9 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
     if (widget.playerFactory != null) {
       return true;
     }
-    if (source is YoutubeSource && player is! YoutubeTrailerPlayer) return false;
+    if (source is YoutubeSource && player is! YoutubeTrailerPlayer) {
+      return false;
+    }
     if (source is DirectSource && player is! DirectTrailerPlayer) return false;
     return true;
   }
@@ -147,29 +307,24 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(FeedTrailer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final oldSource = oldWidget.game.primaryTrailer?.toPlaybackSource();
-    final newSource = _source;
-    final sourceChanged = switch ((oldSource, newSource)) {
-      (YoutubeSource(videoId: final a), YoutubeSource(videoId: final b)) => a != b,
-      (DirectSource(url: final a), DirectSource(url: final b)) => a != b,
-      (null, null) => false,
-      _ => true,
-    };
+    final oldKeys = trailerCandidatesFor(
+      oldWidget.game,
+    ).map(_sourceKey).toList();
+    final newKeys = _candidates.map(_sourceKey).toList();
+    final sourceChanged = !listEquals(oldKeys, newKeys);
     final activeChanged = oldWidget.active != widget.active;
     if (sourceChanged) {
-      _failed = false;
-      _manualPaused = false;
       _activationRevision++;
+      _resetCandidateSession();
     } else if (activeChanged) {
       if (widget.active) {
         _activationRevision++;
-        _manualPaused = false;
+        _resetCandidateSession();
+      } else {
+        _cancelStartupTimeout();
       }
     }
-    if (sourceChanged ||
-        oldWidget.game.primaryTrailer?.provider !=
-            widget.game.primaryTrailer?.provider ||
-        activeChanged) {
+    if (sourceChanged || activeChanged) {
       final trigger = activeChanged
           ? (widget.active ? 'pageActivation' : 'pageDeactivation')
           : (sourceChanged ? 'sourceChanged' : 'didUpdateWidget');
@@ -184,21 +339,177 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
     if (_foreground != wasForeground) {
       if (_foreground && !_manualPaused) {
         _activationRevision++;
+        _resetCandidateSession();
+      } else {
+        _cancelStartupTimeout();
       }
       _sync('lifecycle');
     }
   }
 
+  void _resetCandidateSession() {
+    _cancelStartupTimeout();
+    _candidateIndex = 0;
+    _attemptedCandidates.clear();
+    _autoplayCandidateKey = null;
+    _failed = false;
+    _manualPaused = false;
+    _playbackStarted = false;
+    if (kDebugMode) {
+      debugPrint('[TrailerVisual] SHOW_ARTWORK reason=reset_candidate_session');
+    }
+  }
+
+  void _cancelStartupTimeout() {
+    _youtubeStartupTimer?.cancel();
+    _youtubeStartupTimer = null;
+  }
+
+  void _logSource(String event, TrailerPlaybackSource source) {
+    if (!kDebugMode) return;
+    final provider = source is DirectSource ? 'DIRECT' : 'YOUTUBE';
+    debugPrint(
+      '[TrailerSource] gameId=${widget.game.id} provider=$provider '
+      'candidate=${_sourceValue(source)} attempt=${_candidateIndex + 1}',
+    );
+    debugPrint('[TrailerPlayback] $event candidate=${_sourceValue(source)}');
+  }
+
+  void _beginAttempt(TrailerPlaybackSource source) {
+    final key = _sourceKey(source);
+    if (!_attemptedCandidates.add(key)) return;
+    _playbackStarted = false;
+    _logSource('LOAD', source);
+    _startStartupTimeout(source);
+  }
+
+  void _startStartupTimeout(TrailerPlaybackSource source) {
+    if (source is! YoutubeSource) return;
+    _cancelStartupTimeout();
+    final key = _sourceKey(source);
+    final activation = _activationRevision;
+    _youtubeStartupTimer = Timer(youtubeTrailerStartupTimeout, () {
+      if (!mounted ||
+          activation != _activationRevision ||
+          _candidateKey != key ||
+          _playbackStarted) {
+        return;
+      }
+      if (kDebugMode) {
+        debugPrint('[FeedTrailer] TIMEOUT candidate=${_sourceValue(source)}');
+      }
+      _logSource('TIMEOUT', source);
+      unawaited(_advanceCandidate('timeout'));
+    });
+  }
+
   void _onPlayerChanged() {
     if (!mounted) return;
-    final wasFailed = _failed;
-    setState(() => _failed = _player?.failed ?? false);
-    if (_failed && !wasFailed) _sync('playerFailed');
+    final player = _player;
+    if (player == null) return;
+    if (player.failed) {
+      final source = _source;
+      if (source != null) _logSource('ERROR', source);
+      unawaited(_advanceCandidate('playerError'));
+      return;
+    }
+    if (player.isPlaying && player.playingVideoId == _videoId) {
+      if (!_playbackStarted) {
+        _playbackStarted = true;
+        _cancelStartupTimeout();
+        final source = _source;
+        if (source != null) {
+          _logSource('READY', source);
+          _logSource('PLAY', source);
+        }
+      }
+    } else if (player.isBuffering && !_playbackStarted) {
+      final source = _source;
+      if (source != null) _logSource('BUFFERING', source);
+    }
+    setState(() {});
   }
 
   void _onPlayerViewMounted() {
     if (!mounted) return;
     _sync('viewMounted');
+  }
+
+  Future<void> _advanceCandidate(String reason) async {
+    if (_switchingCandidate) return;
+    final failedSource = _source;
+    if (failedSource == null) return;
+    _switchingCandidate = true;
+    _cancelStartupTimeout();
+    _logSource('FALLBACK reason=$reason', failedSource);
+    if (kDebugMode) {
+      debugPrint('[TrailerVisual] SHOW_ARTWORK reason=advance_candidate_$reason');
+    }
+    await Future<void>.value();
+    if (!mounted) {
+      _switchingCandidate = false;
+      return;
+    }
+    final activation = _activationRevision;
+    final old = _player;
+    old?.removeListener(_onPlayerChanged);
+    _player = null;
+    if (old != null) {
+      await old.close().timeout(
+        const Duration(milliseconds: 300),
+        onTimeout: () {},
+      ).catchError((Object _) {});
+    }
+    if (!mounted) {
+      _switchingCandidate = false;
+      return;
+    }
+    if (activation != _activationRevision) {
+      _switchingCandidate = false;
+      setState(() => _sync('activationChangedDuringFallback'));
+      return;
+    }
+    _candidateIndex++;
+    _failed = false;
+    _playbackStarted = false;
+    _autoplayCandidateKey = null;
+    _switchingCandidate = false;
+    if (_source == null) {
+      if (kDebugMode) {
+        debugPrint('[TrailerPlayback] EXHAUSTED gameId=${widget.game.id}');
+      }
+      setState(() {});
+      return;
+    }
+    setState(() => _sync('fallback'));
+  }
+
+  Future<void> _recyclePlayerForSourceChange() async {
+    if (_switchingCandidate) return;
+    _switchingCandidate = true;
+    _cancelStartupTimeout();
+    if (kDebugMode) {
+      debugPrint('[TrailerVisual] SHOW_ARTWORK reason=recycle_player');
+    }
+    await Future<void>.value();
+    if (!mounted) {
+      _switchingCandidate = false;
+      return;
+    }
+    final old = _player;
+    old?.removeListener(_onPlayerChanged);
+    _player = null;
+    if (old != null) {
+      await old.close().timeout(
+        const Duration(milliseconds: 300),
+        onTimeout: () {},
+      ).catchError((Object _) {});
+    }
+    if (!mounted) return;
+    _switchingCandidate = false;
+    _autoplayCandidateKey = null;
+    _playbackStarted = false;
+    setState(() => _sync('providerChanged'));
   }
 
   void _sync(String trigger) {
@@ -217,22 +528,27 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
     }
 
     // If active player is incompatible with current source, recycle it.
-    if (_player != null && source != null && !_isPlayerCompatible(_player!, source)) {
-      final old = _player;
-      old?.removeListener(_onPlayerChanged);
-      _player = null;
-      if (old != null) unawaited(old.close().catchError((Object _) {}));
+    if (_player != null &&
+        source != null &&
+        !_isPlayerCompatible(_player!, source)) {
+      unawaited(_recyclePlayerForSourceChange());
+      return;
     }
 
-    if (_player == null && _shouldPlay && !_failed && source != null) {
+    if (_player == null &&
+        _shouldPlay &&
+        !_failed &&
+        source != null &&
+        !_switchingCandidate) {
       try {
         if (widget.playerFactory != null) {
           _player = widget.playerFactory!(id!)..addListener(_onPlayerChanged);
         } else {
           _player = createTrailerPlayer(source)..addListener(_onPlayerChanged);
         }
-      } catch (_) {
-        _failed = true;
+      } catch (error) {
+        _logSource('ERROR create=$error', source);
+        unawaited(_advanceCandidate('createError'));
       }
     }
     final player = _player;
@@ -243,12 +559,16 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
       if (player.isPlaying || player.isBuffering) {
         final pauseSource = _manualPaused ? 'userTap' : 'pageDeactivation';
         if (kDebugMode) {
-          debugPrint('[TrailerPlayback] PAUSE source=$pauseSource player=${identityHashCode(player)}');
+          debugPrint(
+            '[TrailerPlayback] PAUSE source=$pauseSource player=${identityHashCode(player)}',
+          );
         }
         _dispatch(player.pause(), player: player, revision: revision);
       }
       return;
     }
+
+    _beginAttempt(source!);
 
     if (player.requestedVideoId != id) {
       _dispatch(player.pause(), player: player, revision: revision);
@@ -260,11 +580,14 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
     _dispatch(player.setMuted(_muted), player: player, revision: revision);
 
     // AUTOPLAY: must be issued ONLY ONCE per activation!
-    if (_autoplayIssuedRevision != _activationRevision) {
-      _autoplayIssuedRevision = _activationRevision;
+    if (_autoplayCandidateKey != _candidateKey) {
+      _autoplayCandidateKey = _candidateKey;
       if (kDebugMode) {
-        debugPrint('[TrailerPlayback] PLAY source=pageActivation player=${identityHashCode(player)}');
+        debugPrint(
+          '[TrailerPlayback] PLAY source=pageActivation player=${identityHashCode(player)}',
+        );
       }
+      _startStartupTimeout(source);
       _dispatch(player.play(), player: player, revision: revision);
     }
   }
@@ -279,7 +602,9 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
         if (!mounted || revision != _revision || !identical(player, _player)) {
           return;
         }
-        setState(() => _failed = true);
+        final source = _source;
+        if (source != null) _logSource('ERROR operation', source);
+        unawaited(_advanceCandidate('operationError'));
       }),
     );
   }
@@ -330,6 +655,10 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
           '[TrailerInput] TAP -> PLAY videoId=$_videoId state=${player.stateLabel}',
         );
       }
+      final currentSource = _source;
+      if (currentSource != null && !_playbackStarted) {
+        _startStartupTimeout(currentSource);
+      }
       _dispatch(player.play(), player: player, revision: _revision);
     }
     setState(() {});
@@ -339,6 +668,8 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
   void dispose() {
     ++_revision;
     _overlayTimer?.cancel();
+    _cancelStartupTimeout();
+    cancelPageDrag();
     WidgetsBinding.instance.removeObserver(this);
     final player = _player;
     player?.removeListener(_onPlayerChanged);
@@ -379,13 +710,36 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          FeedArtwork(game: widget.game),
                           if (_player != null && !_failed)
-                            IgnorePointer(
-                              child: _player!.buildView(
-                                onMounted: _onPlayerViewMounted,
+                            if (kIsWeb)
+                              IgnorePointer(
+                                child: _player!.buildView(
+                                  onMounted: _onPlayerViewMounted,
+                                ),
+                              )
+                            else
+                              AnimatedOpacity(
+                                key: const Key('feed_trailer_player_visibility'),
+                                opacity: showingCurrentVideo ? 1 : 0,
+                                duration: const Duration(milliseconds: 180),
+                                child: IgnorePointer(
+                                  child: _player!.buildView(
+                                    onMounted: _onPlayerViewMounted,
+                                  ),
+                                ),
                               ),
+                          if (kIsWeb)
+                            AnimatedOpacity(
+                              key: const Key('feed_trailer_player_visibility'),
+                              opacity: showingCurrentVideo ? 1 : 0,
+                              duration: const Duration(milliseconds: 180),
+                              child: const SizedBox.expand(),
                             ),
+                          AnimatedOpacity(
+                            opacity: showingCurrentVideo ? 0 : 1,
+                            duration: const Duration(milliseconds: 180),
+                            child: FeedArtwork(game: widget.game),
+                          ),
                         ],
                       ),
                     ),
@@ -427,10 +781,7 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
             fit: StackFit.expand,
             children: [
               trailerBox,
-              FeedTrailerScope(
-                state: this,
-                child: widget.child,
-              ),
+              FeedTrailerScope(state: this, child: widget.child),
               if (_videoId != null) controlsBox,
             ],
           );
@@ -451,13 +802,17 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
               fit: StackFit.expand,
               children: [
                 Transform.translate(
+                  key: const Key('feed_trailer_video_transform'),
                   offset: offset,
                   child: trailerBox,
                 ),
-                FeedTrailerScope(
-                  state: this,
-                  child: widget.child,
-                ),
+                FeedTrailerScope(state: this, child: widget.child),
+                if (_videoId != null)
+                  Transform.translate(
+                    key: const Key('feed_trailer_controls_transform'),
+                    offset: offset,
+                    child: controlsBox,
+                  ),
               ],
             );
           },
@@ -512,6 +867,11 @@ class FeedTrailerControls extends StatelessWidget {
               // 1. Toque em toda a área do trailer para Play/Pause
               _TrailerTapTarget(
                 onTap: state.togglePlayback,
+                onVerticalDragDown: state.preparePageDrag,
+                onVerticalDragStart: state.startPageDrag,
+                onVerticalDragUpdate: state.updatePageDrag,
+                onVerticalDragEnd: state.endPageDrag,
+                onVerticalDragCancel: state.cancelPageDrag,
               ),
 
               // 2. Feedback central animado (Overlay estilo YouTube/TikTok)
@@ -689,16 +1049,33 @@ class FeedTrailerControls extends StatelessWidget {
                     final barWidth = barConstraints.maxWidth;
 
                     void handleSeek(double localX) {
-                      if (barWidth <= 0) return;
-                      final fraction = (localX / barWidth).clamp(0.0, 1.0);
-                      if (hasDuration) {
-                        final targetMs =
-                            (fraction * playerDur.inMilliseconds).toInt();
-                        player?.seekTo(Duration(milliseconds: targetMs));
+                      if (barWidth <= 0) {
+                        if (kDebugMode) {
+                          debugPrint(
+                            '[TrailerSeek] SKIP reason=invalid_bar_width',
+                          );
+                        }
+                        return;
                       }
+                      if (!hasDuration) {
+                        if (kDebugMode) {
+                          debugPrint('[TrailerSeek] SKIP reason=zero_duration');
+                        }
+                        return;
+                      }
+                      final fraction = (localX / barWidth).clamp(0.0, 1.0);
+                      final targetMs =
+                          (fraction * playerDur.inMilliseconds).toInt();
+                      if (kDebugMode) {
+                        debugPrint(
+                          '[TrailerSeek] COMMIT target=${targetMs}ms fraction=$fraction',
+                        );
+                      }
+                      player?.seekTo(Duration(milliseconds: targetMs));
                     }
 
                     return GestureDetector(
+                      key: const Key('feed_trailer_seekbar'),
                       behavior: HitTestBehavior.opaque,
                       onTapDown: (details) {
                         if (kDebugMode) {
@@ -712,17 +1089,26 @@ class FeedTrailerControls extends StatelessWidget {
                         handleSeek(details.localPosition.dx);
                       },
                       onHorizontalDragStart: (details) {
-                        final fraction =
-                            (details.localPosition.dx / barWidth).clamp(0.0, 1.0);
                         if (kDebugMode) {
                           debugPrint(
                             '[TrailerSeek] START position=${playerPos.inMilliseconds}ms duration=${playerDur.inMilliseconds}ms',
                           );
                           debugPrint('[TrailerInput] SEEKBAR DRAG START');
                         }
+                        if (barWidth <= 0) {
+                          if (kDebugMode) {
+                            debugPrint(
+                              '[TrailerSeek] SKIP reason=invalid_bar_width',
+                            );
+                          }
+                          return;
+                        }
+                        final fraction =
+                            (details.localPosition.dx / barWidth).clamp(0.0, 1.0);
                         state.setDragFraction(fraction);
                       },
                       onHorizontalDragUpdate: (details) {
+                        if (barWidth <= 0) return;
                         final fraction =
                             (details.localPosition.dx / barWidth).clamp(0.0, 1.0);
                         if (kDebugMode) {
@@ -733,19 +1119,28 @@ class FeedTrailerControls extends StatelessWidget {
                       onHorizontalDragEnd: (details) {
                         final fraction = state.dragFraction;
                         state.setDragFraction(null);
-                        if (fraction != null && hasDuration) {
-                          final targetMs =
-                              (fraction * playerDur.inMilliseconds).toInt();
+                        if (fraction == null) {
                           if (kDebugMode) {
                             debugPrint(
-                              '[TrailerSeek] COMMIT ms=$targetMs fraction=$fraction',
+                              '[TrailerSeek] SKIP reason=null_drag_fraction',
                             );
                           }
-                          player?.seekTo(Duration(milliseconds: targetMs));
+                          return;
                         }
+                        if (!hasDuration) {
+                          if (kDebugMode) {
+                            debugPrint('[TrailerSeek] SKIP reason=zero_duration');
+                          }
+                          return;
+                        }
+                        final targetMs =
+                            (fraction * playerDur.inMilliseconds).toInt();
                         if (kDebugMode) {
-                          debugPrint('[TrailerSeek] END');
+                          debugPrint(
+                            '[TrailerSeek] COMMIT target=${targetMs}ms fraction=$fraction',
+                          );
                         }
+                        player?.seekTo(Duration(milliseconds: targetMs));
                       },
                       child: Container(
                         height: 26,
@@ -843,15 +1238,31 @@ class FeedTrailerControls extends StatelessWidget {
 class _TrailerTapTarget extends StatelessWidget {
   const _TrailerTapTarget({
     required this.onTap,
+    required this.onVerticalDragDown,
+    required this.onVerticalDragStart,
+    required this.onVerticalDragUpdate,
+    required this.onVerticalDragEnd,
+    required this.onVerticalDragCancel,
   });
 
   final VoidCallback onTap;
+  final GestureDragDownCallback onVerticalDragDown;
+  final GestureDragStartCallback onVerticalDragStart;
+  final GestureDragUpdateCallback onVerticalDragUpdate;
+  final GestureDragEndCallback onVerticalDragEnd;
+  final GestureDragCancelCallback onVerticalDragCancel;
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       key: const Key('feed_trailer_tap_target'),
       behavior: HitTestBehavior.opaque,
+      supportedDevices: const {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.stylus,
+        PointerDeviceKind.invertedStylus,
+        PointerDeviceKind.mouse,
+      },
       onTapDown: (details) {
         if (kDebugMode) {
           debugPrint(
@@ -865,6 +1276,11 @@ class _TrailerTapTarget extends StatelessWidget {
         }
         onTap();
       },
+      onVerticalDragDown: onVerticalDragDown,
+      onVerticalDragStart: onVerticalDragStart,
+      onVerticalDragUpdate: onVerticalDragUpdate,
+      onVerticalDragEnd: onVerticalDragEnd,
+      onVerticalDragCancel: onVerticalDragCancel,
       child: const SizedBox.expand(),
     );
   }

@@ -360,13 +360,7 @@ class _FeedPage extends StatelessWidget {
                               ),
                             ),
                             child: active
-                                ? (FeedTrailerScope.maybeOf(context) != null
-                                    ? FeedTrailerControls(
-                                        state: FeedTrailerScope.of(context),
-                                        width: trailerW,
-                                        height: trailerH,
-                                      )
-                                    : const SizedBox.expand())
+                                ? const SizedBox.expand()
                                 : FeedArtwork(game: item.game),
                           ),
                         ),
