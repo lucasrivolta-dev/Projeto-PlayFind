@@ -39,6 +39,8 @@ TrailerPlayer createTrailerPlayer(TrailerPlaybackSource source) => switch (sourc
   DirectSource(:final url) => DirectTrailerPlayer(url),
 };
 
+const Duration kMaxVisualRevealDelay = Duration(milliseconds: 2000);
+
 class YoutubeTrailerPlayer extends TrailerPlayer {
   YoutubeTrailerPlayer(String initialVideoId) {
     // Equivalent to fromVideoId(autoPlay: false), while retaining the
@@ -66,17 +68,12 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
     );
     _controllerId = identityHashCode(_controller);
     if (kDebugMode) {
-      debugPrint('[FeedTrailer] CONTROLLER CREATED hash=$_controllerId');
+      debugPrint(
+        '[FeedTrailer] YOUTUBE CONTROLLER CREATE hash=$_controllerId initialVideoId=$initialVideoId',
+      );
     }
     _subscription = _controller.listen(_onValue);
     _videoStateSubscription = _controller.videoStateStream.listen(_onVideoState);
-    unawaited(
-      _controller.cueVideoById(videoId: initialVideoId).catchError((
-        Object error,
-      ) {
-        _fail('CUE controller=$_controllerId error=$error');
-      }),
-    );
   }
 
   late final YoutubePlayerController _controller;
@@ -86,9 +83,11 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
   bool _closed = false;
   bool _failed = false;
   bool _viewMounted = false;
+  bool _apiReady = false;
   String? _playingVideoId;
   String? _requestedId;
   String? _displayedId;
+  Timer? _safetyRevealTimer;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   PlayerState _state = PlayerState.unknown;
@@ -119,18 +118,73 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
   @override
   Duration get duration => _duration;
 
+  Future<void> _updateDuration() async {
+    if (_closed || _duration > Duration.zero) return;
+    try {
+      final seconds = await _controller.duration.timeout(
+        const Duration(seconds: 1),
+      );
+      if (_closed) return;
+      if (seconds > 0) {
+        final dur = Duration(milliseconds: (seconds * 1000).round());
+        if (_duration != dur) {
+          _duration = dur;
+          if (kDebugMode) {
+            debugPrint(
+              '[FeedTrailer] METADATA RECEIVED controller=$_controllerId '
+              'duration=$_duration source=duration_polling',
+            );
+          }
+          notifyListeners();
+        }
+      }
+    } catch (_) {}
+  }
+
   void _onVideoState(YoutubeVideoState state) {
     if (_closed) return;
-    if (_position.inMilliseconds != state.position.inMilliseconds) {
-      _position = state.position;
+    if (_duration == Duration.zero) {
+      unawaited(_updateDuration());
+    }
+    final posChanged =
+        _position.inMilliseconds != state.position.inMilliseconds;
+    _position = state.position;
+    final currentTarget = _requestedId;
+    if (_state == PlayerState.playing &&
+        _displayedId != currentTarget &&
+        currentTarget != null &&
+        state.position > Duration.zero) {
+      _safetyRevealTimer?.cancel();
+      _safetyRevealTimer = null;
+      _displayedId = currentTarget;
+      if (kDebugMode) {
+        debugPrint(
+          '[TrailerVisual] FIRST_POSITION_ADVANCE position=${state.position.inMilliseconds}ms',
+        );
+        debugPrint(
+          '[TrailerVisual] REVEAL_VIDEO reason=first_position_advance',
+        );
+      }
       notifyListeners();
+    } else if (posChanged) {
+      notifyListeners();
+    }
+  }
+
+  void _markApiReady() {
+    if (_closed || _apiReady) return;
+    _apiReady = true;
+    if (kDebugMode) {
+      debugPrint('[FeedTrailer] API READY controller=$_controllerId');
     }
   }
 
   void _onViewMounted() {
     if (_closed || _viewMounted) return;
     _viewMounted = true;
-    if (kDebugMode) debugPrint('[FeedTrailer] YoutubePlayer mounted');
+    if (kDebugMode) {
+      debugPrint('[FeedTrailer] IFRAME MOUNT controller=$_controllerId');
+    }
   }
 
   void _onValue(YoutubePlayerValue value) {
@@ -149,12 +203,16 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
         eventVideoId != currentTarget;
     if (isStaleVideo) return;
 
+    if (value.playerState != PlayerState.unknown) {
+      _markApiReady();
+    }
+
     final stateChanged = _state != value.playerState;
     var changed = stateChanged;
     _state = value.playerState;
     if (kDebugMode && stateChanged) {
       debugPrint(
-        '[FeedTrailer] VALUE controller=$_controllerId '
+        '[FeedTrailer] PLAYER STATE controller=$_controllerId '
         'state=${value.playerState.name} '
         'videoId=${eventVideoId.isEmpty ? currentTarget : eventVideoId} '
         'error=${value.error}',
@@ -163,23 +221,68 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
 
     if (currentTarget != null) {
       if (value.playerState == PlayerState.playing) {
-        if (_displayedId != currentTarget) changed = true;
-        _displayedId = currentTarget;
         if (_playingVideoId != currentTarget) changed = true;
         _playingVideoId = currentTarget;
+        if (kDebugMode) {
+          debugPrint(
+            '[FeedTrailer] PLAYING controller=$_controllerId videoId=$currentTarget',
+          );
+          debugPrint(
+            '[TrailerVisual] PLAYING position=${_position.inMilliseconds}ms',
+          );
+        }
+        if (_position > Duration.zero) {
+          if (_displayedId != currentTarget) {
+            _displayedId = currentTarget;
+            changed = true;
+            _safetyRevealTimer?.cancel();
+            _safetyRevealTimer = null;
+            if (kDebugMode) {
+              debugPrint(
+                '[TrailerVisual] REVEAL_VIDEO reason=playing_with_position position=${_position.inMilliseconds}ms',
+              );
+            }
+          }
+        } else if (_displayedId != currentTarget && _safetyRevealTimer == null) {
+          _safetyRevealTimer = Timer(kMaxVisualRevealDelay, () {
+            if (!_closed &&
+                _state == PlayerState.playing &&
+                _displayedId != currentTarget) {
+              _displayedId = currentTarget;
+              if (kDebugMode) {
+                debugPrint(
+                  '[TrailerVisual] REVEAL_VIDEO reason=safety_timeout',
+                );
+              }
+              notifyListeners();
+            }
+          });
+        }
+      } else if (value.playerState == PlayerState.buffering) {
+        if (kDebugMode) {
+          debugPrint(
+            '[FeedTrailer] BUFFERING controller=$_controllerId videoId=$currentTarget',
+          );
+        }
       } else if (value.playerState == PlayerState.paused ||
           value.playerState == PlayerState.ended) {
         if (_playingVideoId != null) changed = true;
         _playingVideoId = null;
       }
-      if (eventVideoId == currentTarget) {
-        if (_displayedId != currentTarget) changed = true;
-        _displayedId = currentTarget;
-      }
       if (value.metaData.duration > Duration.zero &&
           _duration != value.metaData.duration) {
         _duration = value.metaData.duration;
         changed = true;
+        if (kDebugMode) {
+          debugPrint(
+            '[FeedTrailer] METADATA RECEIVED controller=$_controllerId '
+            'duration=${value.metaData.duration} title=${value.metaData.title}',
+          );
+        }
+      } else if (_duration == Duration.zero &&
+          (value.playerState == PlayerState.playing ||
+              value.playerState == PlayerState.buffering)) {
+        unawaited(_updateDuration());
       }
     }
     if (changed) notifyListeners();
@@ -188,7 +291,13 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
   void _fail(String message) {
     if (_closed || _failed) return;
     _failed = true;
-    if (kDebugMode) debugPrint('[FeedTrailer] ERROR $message');
+    _safetyRevealTimer?.cancel();
+    _safetyRevealTimer = null;
+    _displayedId = null;
+    if (kDebugMode) {
+      debugPrint('[FeedTrailer] ERROR controller=$_controllerId $message');
+      debugPrint('[TrailerVisual] SHOW_ARTWORK reason=player_fail');
+    }
     notifyListeners();
   }
 
@@ -207,16 +316,21 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
   Future<void> load(String videoId) async {
     if (_closed) return;
     final revision = ++_requestRevision;
+    _safetyRevealTimer?.cancel();
+    _safetyRevealTimer = null;
     _failed = false;
     _playingVideoId = null;
     _displayedId = null;
     _position = Duration.zero;
     _duration = Duration.zero;
     _requestedId = videoId;
+    if (kDebugMode) {
+      debugPrint('[TrailerVisual] SHOW_ARTWORK reason=load videoId=$videoId');
+    }
     notifyListeners();
     if (kDebugMode) {
       debugPrint(
-        '[FeedTrailer] LOAD START controller=$_controllerId videoId=$videoId',
+        '[FeedTrailer] LOAD REQUEST controller=$_controllerId videoId=$videoId',
       );
     }
     // The bridge waits for the YoutubePlayer-mounted iframe to emit Ready.
@@ -224,6 +338,7 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
     try {
       await _controller.loadVideoById(videoId: videoId);
       if (_closed || revision != _requestRevision) return;
+      _markApiReady();
       if (kDebugMode) {
         debugPrint(
           '[FeedTrailer] LOAD COMPLETE controller=$_controllerId videoId=$videoId',
@@ -251,7 +366,7 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
     if (_closed || _requestedId == null) return;
     if (kDebugMode) {
       debugPrint(
-        '[FeedTrailer] PLAY controller=$_controllerId videoId=$_requestedId',
+        '[FeedTrailer] PLAY REQUEST controller=$_controllerId videoId=$_requestedId',
       );
     }
     await _controller.playVideo();
@@ -262,10 +377,20 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
     if (_closed || _requestedId == null) return;
     _position = position;
     notifyListeners();
-    await _controller.seekTo(
-      seconds: position.inMilliseconds / 1000.0,
-      allowSeekAhead: true,
-    );
+    final seconds = position.inMilliseconds / 1000.0;
+    try {
+      await _controller.webViewController.runJavaScript(
+        'player.seekTo(${seconds.toStringAsFixed(3)});',
+      );
+    } catch (_) {
+      await _controller.seekTo(
+        seconds: seconds,
+        allowSeekAhead: true,
+      );
+    }
+    if (kDebugMode) {
+      debugPrint('[TrailerSeek] COMPLETE actual=${_position.inMilliseconds}ms');
+    }
   }
 
   @override
@@ -279,9 +404,18 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
     if (_closed) return;
     _closed = true;
     ++_requestRevision;
+    _safetyRevealTimer?.cancel();
+    _safetyRevealTimer = null;
+    _displayedId = null;
+    _playingVideoId = null;
     await _subscription.cancel();
     await _videoStateSubscription.cancel();
-    await _controller.close();
+    try {
+      await _controller.close().timeout(
+        const Duration(milliseconds: 300),
+        onTimeout: () {},
+      );
+    } catch (_) {}
     dispose();
   }
 }

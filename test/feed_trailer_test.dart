@@ -23,6 +23,7 @@ class FakeTrailerPlayer extends TrailerPlayer {
   bool closed = false;
   bool muted = true;
   bool startsPlaying = true;
+  bool allowPlay = true;
   bool mounted = false;
   Duration _pos = Duration.zero;
   Duration _dur = const Duration(seconds: 90);
@@ -86,6 +87,7 @@ class FakeTrailerPlayer extends TrailerPlayer {
   @override
   Future<void> play() async {
     calls.add('play:$loaded');
+    if (!allowPlay) return;
     _playing = loaded;
     notifyListeners();
   }
@@ -144,6 +146,7 @@ DiscoveryGame game({
   String? videoId = 'abcdefghijk',
   String provider = 'YOUTUBE',
   int id = 1,
+  List<Map<String, Object?>> trailerDetails = const [],
 }) => DiscoveryGame.fromJson({
   'id': 'game-$id',
   'title': 'Game $id',
@@ -154,6 +157,7 @@ DiscoveryGame game({
           'videoId': videoId,
           'url': 'https://www.youtube.com/watch?v=$videoId',
         },
+  'trailerDetails': trailerDetails,
 });
 
 void main() {
@@ -231,35 +235,11 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('a failed load does not freeze a fresh retry', (tester) async {
-    final failed = FakeTrailerPlayer()..failedLoads.add('abcdefghijk');
-    final recovered = FakeTrailerPlayer();
-    var attempts = 0;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: FeedTrailer(
-          game: game(),
-          active: true,
-          child: const SizedBox(),
-          playerFactory: (_) => attempts++ == 0 ? failed : recovered,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('feed_trailer_tap_target')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('feed_trailer_tap_target')));
-    await tester.pumpAndSettle();
-    expect(attempts, 2);
-    expect(recovered.loaded, 'abcdefghijk');
-    expect(recovered.playingVideoId, 'abcdefghijk');
-    await tester.pumpWidget(const SizedBox());
-  });
-
-  testWidgets('failed initialization can be retried with a fresh player', (
+  testWidgets('a failed only candidate is exhausted without a retry loop', (
     tester,
   ) async {
-    var attempts = 0;
-    final player = FakeTrailerPlayer();
+    final failed = FakeTrailerPlayer()..failedLoads.add('abcdefghijk');
+    var creations = 0;
     await tester.pumpWidget(
       MaterialApp(
         home: FeedTrailer(
@@ -267,19 +247,41 @@ void main() {
           active: true,
           child: const SizedBox(),
           playerFactory: (_) {
-            if (attempts++ == 0) throw StateError('Initialization failed');
-            return player;
+            creations++;
+            return failed;
           },
         ),
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('feed_trailer_tap_target')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('feed_trailer_tap_target')));
+    expect(creations, 1);
+    expect(failed.closed, isTrue);
+    expect(find.byType(FeedArtwork), findsOneWidget);
+    expect(find.byKey(const Key('feed_trailer_tap_target')), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('failed initialization is attempted once per activation', (
+    tester,
+  ) async {
+    var attempts = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: FeedTrailer(
+          game: game(),
+          active: true,
+          child: const SizedBox(),
+          playerFactory: (_) {
+            attempts++;
+            throw StateError('Initialization failed');
+          },
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
-    expect(player.loaded, 'abcdefghijk');
-    expect(player.playingVideoId, 'abcdefghijk');
-    expect(attempts, 2);
+    expect(attempts, 1);
+    expect(find.byType(FeedArtwork), findsOneWidget);
+    expect(find.byKey(const Key('feed_trailer_tap_target')), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -424,6 +426,35 @@ void main() {
         'https://www.youtube.com/watch?v=abcdefghijk',
       );
       expect(DiscoveryGame.fromJson({'id': 'trailer-game-id'}).primaryTrailer, isNull);
+      expect(
+        DiscoveryGame.fromJson({'id': 'trailer-game-id'}).trailerDetails,
+        isEmpty,
+      );
+      expect(
+        DiscoveryGame.fromJson({
+          'id': 'trailer-game-id',
+          'trailerDetails': null,
+        }).trailerDetails,
+        isEmpty,
+      );
+      expect(
+        DiscoveryGame.fromJson({
+          'id': 'trailer-game-id',
+          'trailerDetails': 'malformed',
+        }).trailerDetails,
+        isEmpty,
+      );
+      final withDetails = DiscoveryGame.fromJson({
+        'id': 'trailer-game-id',
+        'trailerDetails': [
+          {'provider': 'YOUTUBE', 'videoId': '12345678901'},
+          {'provider': 'STEAM', 'url': 'https://steam.example/trailer'},
+          'malformed',
+        ],
+      });
+      expect(withDetails.trailerDetails, hasLength(2));
+      expect(withDetails.trailerDetails.first.videoId, '12345678901');
+      expect(withDetails.trailerDetails.last.provider, TrailerProvider.steam);
       expect(game(videoId: null).primaryTrailer, isNull);
       for (final id in [
         null,
