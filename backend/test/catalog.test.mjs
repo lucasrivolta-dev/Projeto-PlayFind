@@ -276,6 +276,208 @@ test('Steam client returns only successful details and matches normalized names'
   assert.equal(await client.findByName('Heroe Test'), 10);
 });
 
+test('Steam fallback: app list successful, exact match, nonexistent returns undefined, and cache prevents multiple downloads', async () => {
+  let fetchCount = 0;
+  const requestedUrls = [];
+  const client = new SteamClient('test-key', async (url) => {
+    fetchCount++;
+    requestedUrls.push(String(url));
+    if (String(url).includes('IStoreService/GetAppList/v1')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          response: {
+            apps: [
+              { appid: 1145360, name: 'Hades' },
+              { appid: 1030300, name: 'Hollow Knight: Silksong' },
+            ],
+            have_more_results: false,
+          },
+        }),
+      };
+    }
+    return { ok: false, status: 404 };
+  });
+
+  // 1. app list bem-sucedida
+  // 2. título exato encontra App ID
+  assert.equal(await client.findByName('Hades'), 1145360);
+  assert.equal(await client.findByName('Hollow Knight: Silksong'), 1030300);
+
+  // 3. título inexistente retorna undefined
+  assert.equal(await client.findByName('Nonexistent Game'), undefined);
+
+  // 8. cache evita múltiplos downloads da app list dentro da mesma execução
+  assert.equal(fetchCount, 1);
+  assert.match(requestedUrls[0], /IStoreService\/GetAppList\/v1/);
+  assert.match(requestedUrls[0], /key=test-key/);
+  assert.match(requestedUrls[0], /include_games=true/);
+  assert.match(requestedUrls[0], /max_results=50000/);
+});
+
+test('Steam fallback: ambiguous multiple candidates are NOT arbitrarily associated', async () => {
+  const client = new SteamClient('test-key', async (url) => {
+    const urlStr = String(url);
+    if (urlStr.includes('appdetails')) {
+      const id = Number(new URL(urlStr).searchParams.get('appids'));
+      // Both are type "game" with exact same title: genuinely ambiguous (e.g. Dead Space or Mass Effect 2)
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          [id]: { success: true, data: { name: 'Dead Space', steam_appid: id, type: 'game' } },
+        }),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        response: {
+          apps: [
+            { appid: 17470, name: 'Dead Space' },
+            { appid: 1444000, name: 'Dead Space' },
+          ],
+        },
+      }),
+    };
+  });
+
+  // 5. múltiplos candidatos ambíguos continuam sem associação
+  assert.equal(await client.findByName('Dead Space'), undefined);
+});
+
+test('Steam fallback: HTTP failure on app list does not repeat requests or crash sync', async () => {
+  let appListCalls = 0;
+  const client = new SteamClient('test-key', async (url) => {
+    if (String(url).includes('IStoreService/GetAppList/v1') || String(url).includes('GetAppList')) {
+      appListCalls++;
+      return { ok: false, status: 404 };
+    }
+    return { ok: false, status: 404 };
+  });
+
+  // 4. resposta HTTP inválida não derruba sync e subsequentes não re-executam request inútil
+  await assert.rejects(() => client.findByName('Game 1'), /Steam app list failed \(404\)/);
+  // Subsequent call avoids repeating failing HTTP request
+  assert.equal(await client.findByName('Game 2'), undefined);
+  assert.equal(await client.findByName('Game 3'), undefined);
+  assert.equal(appListCalls, 1);
+
+  // 9. erro do fallback não impede persistência do jogo IGDB
+  const records = [];
+  const repository = {
+    findCandidates: async () => [],
+    upsertByExternalId: async (game) => {
+      const record = { id: 'db-1', ...game };
+      records.push(record);
+      return record;
+    },
+    linkExternalIds: async () => {},
+    markSynced: async () => {},
+  };
+
+  const syncService = new GameSyncService(repository, () => {});
+  const enricher = async (game) => {
+    try {
+      const appId = await client.findByName(game.title);
+      return appId ? enrichWithSteam(game, appId, await client.details(appId)) : game;
+    } catch {
+      return game;
+    }
+  };
+
+  const igdbGame = {
+    title: 'The Last of Us',
+    slug: 'the-last-of-us',
+    igdbId: 1009,
+    genres: ['Action'],
+    platforms: ['PlayStation'],
+    screenshots: [],
+  };
+
+  const result = await syncService.sync([igdbGame], enricher);
+  assert.equal(result.inserted, 1);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].title, 'The Last of Us');
+  assert.equal(records[0].igdbId, 1009);
+});
+
+test('Steam fallback: known IGDB steamAppId has priority and details() works', async () => {
+  let findByNameCalled = false;
+  let detailsCalledId = null;
+
+  const client = new SteamClient('test-key', async (url) => {
+    const urlStr = String(url);
+    if (urlStr.includes('appdetails')) {
+      const id = Number(new URL(urlStr).searchParams.get('appids'));
+      detailsCalledId = id;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          [id]: {
+            success: true,
+            data: {
+              name: 'Hades',
+              steam_appid: id,
+              type: 'game',
+              is_free: false,
+              price_overview: { final: 7399, discount_percent: 0, currency: 'BRL' },
+            },
+          },
+        }),
+      };
+    }
+    findByNameCalled = true;
+    return { ok: true, status: 200, json: async () => ({ response: { apps: [] } }) };
+  });
+
+  // 6. App ID conhecido pela IGDB continua tendo prioridade
+  // 7. details() continua funcionando
+  const records = [];
+  const repository = {
+    findCandidates: async () => [],
+    upsertByExternalId: async (game) => {
+      let record = records.find((r) => r.igdbId === game.igdbId);
+      if (!record) {
+        record = { id: 'db-1', ...game };
+        records.push(record);
+      } else {
+        Object.assign(record, game);
+      }
+      return record;
+    },
+    linkExternalIds: async () => {},
+    markSynced: async () => {},
+  };
+
+  const syncService = new GameSyncService(repository, () => {});
+  const enricher = async (game) => {
+    const appId = game.steamAppId ?? (await client.findByName(game.title));
+    if (!appId) return game;
+    const details = await client.details(appId);
+    return enrichWithSteam(game, appId, details);
+  };
+
+  const igdbWithSteam = {
+    title: 'Hades',
+    slug: 'hades',
+    igdbId: 113112,
+    steamAppId: 1145360,
+    genres: ['Roguelike'],
+    platforms: ['PC'],
+    screenshots: [],
+  };
+
+  await syncService.sync([igdbWithSteam], enricher);
+  assert.equal(findByNameCalled, false, 'findByName não deve ser chamado quando steamAppId já é conhecido');
+  assert.equal(detailsCalledId, 1145360);
+  assert.equal(records[0].steamAppId, 1145360);
+  assert.equal(records[0].steam?.priceCents, 7399);
+});
+
 test('Sync links the stored database ID rather than the title or slug', async () => {
   const source = {
     title: 'Game',

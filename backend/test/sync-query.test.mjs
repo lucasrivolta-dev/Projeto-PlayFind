@@ -4,6 +4,8 @@ import test from 'node:test';
 import {
   buildSyncQuery,
   DEFAULT_IGDB_SYNC_QUERY,
+  EDITORIAL_MIN_RATING,
+  EDITORIAL_MIN_RATING_COUNT,
   ensureVideoField,
   parseSyncArgs,
   rankDiscoverCandidates,
@@ -90,4 +92,56 @@ test('Discover uses a bounded pool and Bayesian deterministic ranking', () => {
     [3, 4],
   );
   assert.equal(parseSyncArgs(['--mode', 'discover', '--limit', '20', '--dry-run']).dryRun, true);
+});
+
+test('Recent mode enforces quality threshold, recency window, and preserved modes without regression', () => {
+  const fixedNow = new Date('2026-09-17T12:00:00Z');
+  const query = buildSyncQuery(
+    parseSyncArgs(['--mode', 'recent', '--limit', '20']),
+    fixedNow,
+  );
+
+  // 1. recent contém filtro de game_type correto: (0, 8, 9)
+  assert.match(query, /game_type = \(0, 8, 9\)/);
+  // 2. version_parent = null
+  assert.match(query, /version_parent = null/);
+  // 3. cover != null
+  assert.match(query, /cover != null/);
+  // 4. janela temporal continua existindo (5 anos)
+  const expectedCutoff = Math.floor(fixedNow.getTime() / 1000) - 5 * 365 * 24 * 60 * 60;
+  assert.match(query, new RegExp(`first_release_date >= ${expectedCutoff}`));
+  // 5. first_release_date futuro continua excluído
+  const expectedCurrent = Math.floor(fixedNow.getTime() / 1000);
+  assert.match(query, new RegExp(`first_release_date <= ${expectedCurrent}`));
+  // 6. total_rating_count mínimo (10)
+  assert.match(query, new RegExp(`total_rating_count >= ${EDITORIAL_MIN_RATING_COUNT}`));
+  assert.equal(EDITORIAL_MIN_RATING_COUNT, 10);
+  // 7. total_rating mínimo (60)
+  assert.match(query, new RegExp(`total_rating >= ${EDITORIAL_MIN_RATING}`));
+  assert.equal(EDITORIAL_MIN_RATING, 60);
+  // 8. ordenação continua sendo first_release_date DESC
+  assert.match(query, /sort first_release_date desc/);
+  assert.match(query, /limit 20/);
+
+  // 9. popular continua sem regressão
+  const popular = buildSyncQuery(parseSyncArgs(['--mode', 'popular', '--limit', '10']));
+  assert.match(popular, /game_type = \(0, 8, 9\)/);
+  assert.match(popular, /version_parent = null/);
+  assert.match(popular, /cover != null/);
+  assert.match(popular, /first_release_date != null/);
+  assert.match(popular, /total_rating_count != null/);
+  assert.match(popular, /sort total_rating_count desc/);
+  assert.match(popular, /limit 10/);
+
+  // 10. discover continua sem regressão
+  const discover = buildSyncQuery(
+    parseSyncArgs(['--mode', 'discover', '--limit', '10']),
+    fixedNow,
+  );
+  assert.match(discover, /game_type = \(0, 8, 9\)/);
+  assert.match(discover, /version_parent = null/);
+  assert.match(discover, /cover != null/);
+  assert.match(discover, /total_rating >= 70/);
+  assert.match(discover, /total_rating_count >= 20 & total_rating_count <= 500/);
+  assert.match(discover, /limit 50/);
 });
