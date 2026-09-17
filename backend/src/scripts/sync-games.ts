@@ -47,18 +47,34 @@ if (cliOptions.dryRun) {
   const candidates = selectedRawGames.slice(0, cliOptions.limit);
   console.log(
     JSON.stringify(
-      candidates.map((game: any) => ({
-        igdbId: game.id,
-        name: game.name,
-        total_rating: game.total_rating,
-        total_rating_count: game.total_rating_count,
-        ...(game.adjustedRating !== undefined
-          ? { adjustedRating: Number(game.adjustedRating.toFixed(3)) }
-          : {}),
-        releaseDate: game.first_release_date
-          ? new Date(game.first_release_date * 1000).toISOString()
-          : null,
-      })),
+      candidates.map((game: any) => {
+        const rawVideos = (game.videos ?? []) as Array<{ name?: string; video_id?: string }>;
+        const videos = rawVideos.map((v) => ({
+          name: v.name ?? null,
+          videoId: v.video_id ?? null,
+        }));
+        const hasPlayableTrailer = rawVideos.some((v) => Boolean(v.video_id?.trim()));
+
+        return {
+          igdbId: game.id,
+          name: game.name,
+          mode: cliOptions.mode,
+          releaseDate: game.first_release_date
+            ? new Date(game.first_release_date * 1000).toISOString()
+            : null,
+          rating: game.rating !== undefined ? Number(game.rating.toFixed(1)) : null,
+          ratingCount: game.rating_count ?? null,
+          total_rating:
+            game.total_rating !== undefined ? Number(game.total_rating.toFixed(1)) : null,
+          total_rating_count: game.total_rating_count ?? null,
+          ...(game.adjustedRating !== undefined
+            ? { adjustedRating: Number(game.adjustedRating.toFixed(3)) }
+            : {}),
+          videoCount: rawVideos.length,
+          hasPlayableTrailer,
+          videos,
+        };
+      }),
       null,
       2,
     ),

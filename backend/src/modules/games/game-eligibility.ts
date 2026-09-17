@@ -145,14 +145,15 @@ export function isDisqualifiedTrailer(videoName?: string): boolean {
  */
 const MOD_TITLE_REGEX = /\b(mod|modification|overhaul mod|community mod)\b/i;
 const DLC_TITLE_REGEX =
-  /\b(dlc|expansion pack|content pack|season pass|expansion|addon|add-on)\b/i;
+  /\b(dlc|expansion pack|content pack|season pass|expansion|addon|add-on|skin pack|costume pack|item pack|booster pack|upgrade pack)\b/i;
 const DEMO_TITLE_REGEX = /\b(demo|prologue|playable teaser)\b/i;
 const PLAYTEST_TITLE_REGEX =
   /\b(playtest|closed beta|open beta|alpha test|technical test|server test)\b/i;
 const BUNDLE_TITLE_REGEX = /\b(bundle|collection bundle|trilogy pack|anthology pack)\b/i;
 const TOOL_OR_SERVER_REGEX =
-  /\b(dedicated server|benchmark|sdk|toolkit|tool|editor|soundtrack|ost|artbook)\b/i;
-const SOUNDTRACK_TITLE_REGEX = /\b(soundtrack|original soundtrack|ost)\b/i;
+  /\b(dedicated server|benchmark|sdk|toolkit|tool|editor|soundtrack|ost|artbook|art book|digital artbook|strategy guide|bonus content)\b/i;
+const SOUNDTRACK_TITLE_REGEX =
+  /\b(soundtrack|original soundtrack|ost|soundtrack edition|bonus track|music collection)\b/i;
 
 /**
  * Validates whether a candidate game is eligible for catalog inclusion.
@@ -496,7 +497,7 @@ export function calculateDiscoveryScore(
   let metadataPoints: number = 0;
   const hasDirect = candidate.trailerDetails?.some((t) => t.provider === 'DIRECT');
   const validYoutube = candidate.trailerDetails?.some(
-    (t) => t.provider === 'YOUTUBE' && t.videoId && !isDisqualifiedTrailer(t.videoId),
+    (t) => t.provider === 'YOUTUBE' && t.videoId,
   );
   const steamTrailer = candidate.trailerDetails?.some((t) => t.provider === 'STEAM');
 
@@ -533,8 +534,8 @@ export function calculateDiscoveryScore(
 
 /**
  * Applies a lightweight, deterministic diversity re-ranking to a scored feed list.
- * Ensures the feed doesn't bunch 3+ consecutive games with the same primary genre
- * or the same exact release year, while keeping overall top quality intact.
+ * Ensures the feed doesn't bunch 3+ consecutive games with the same primary genre,
+ * the same exact release year, or the same studio/developer, while keeping overall top quality intact.
  */
 export function applyFeedDiversity<T extends FeedCandidateInput & { discoveryScore: number }>(
   candidates: T[],
@@ -560,18 +561,24 @@ export function applyFeedDiversity<T extends FeedCandidateInput & { discoverySco
       const prev2Year = prev2.releaseDate?.getFullYear();
       const sameYearStreak = prev1Year && prev2Year && prev1Year === prev2Year;
 
-      if (sameGenreStreak || sameYearStreak) {
-        // Look ahead for the next best candidate that breaks the streak (within top 5 in pool)
-        const lookAhead = Math.min(pool.length, 5);
+      const prev1Studio = (prev1.studio || prev1.publisher)?.trim().toLowerCase();
+      const prev2Studio = (prev2.studio || prev2.publisher)?.trim().toLowerCase();
+      const sameStudioStreak = prev1Studio && prev2Studio && prev1Studio === prev2Studio;
+
+      if (sameGenreStreak || sameYearStreak || sameStudioStreak) {
+        // Look ahead for the next best candidate that breaks the streak (within top 7 in pool)
+        const lookAhead = Math.min(pool.length, 7);
         for (let i = 1; i < lookAhead; i++) {
           const c = pool[i];
           const cGenre = c.genres?.[0]?.toLowerCase();
           const cYear = c.releaseDate?.getFullYear();
+          const cStudio = (c.studio || c.publisher)?.trim().toLowerCase();
 
           const breaksGenre = !sameGenreStreak || cGenre !== prev1Genre;
           const breaksYear = !sameYearStreak || cYear !== prev1Year;
+          const breaksStudio = !sameStudioStreak || cStudio !== prev1Studio;
 
-          if (breaksGenre && breaksYear) {
+          if (breaksGenre && breaksYear && breaksStudio) {
             pickIndex = i;
             break;
           }

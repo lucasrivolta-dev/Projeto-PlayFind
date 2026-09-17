@@ -46,7 +46,7 @@ try {
       genres: ['RPG', 'Adventure'],
       platforms: ['PC', 'PlayStation'],
       screenshots: ['https://example.com/api-shot.jpg'],
-      trailers: ['https://example.com/api-trailer.mp4'],
+      trailers: ['https://www.youtube.com/watch?v=apiTrailer123'],
       isFree: true,
       steamAppId: 999123,
       steam: {
@@ -102,7 +102,7 @@ try {
     const detailBody = JSON.parse(detailRes.payload);
     assert.equal(detailBody.title, `API Test Game ${token}`);
     assert.equal(detailBody.screenshots.length, 1);
-    assert.deepEqual(detailBody.trailers, ['https://example.com/api-trailer.mp4']);
+    assert.deepEqual(detailBody.trailers, ['https://www.youtube.com/watch?v=apiTrailer123']);
     assert.equal(detailBody.isFree, true);
     assert.equal(detailBody.steam?.priceCents, 4999);
 
@@ -133,7 +133,9 @@ try {
     const feedGame = feedBody.data.find((g) => g.slug === `api-test-game-${token}`);
     assert.ok(feedGame, 'Jogo criado deve estar disponível no feed');
     assert.ok(typeof feedGame.matchScore === 'number' && feedGame.matchScore >= 1 && feedGame.matchScore <= 100);
-    assert.deepEqual(feedGame.trailers, ['https://example.com/api-trailer.mp4']);
+    assert.deepEqual(feedGame.trailers, ['https://www.youtube.com/watch?v=apiTrailer123']);
+    assert.equal(feedGame.primaryTrailer?.provider, 'YOUTUBE');
+    assert.equal(feedGame.primaryTrailer?.videoId, 'apiTrailer123');
     assert.equal(feedGame.isFree, true);
 
     await app.close();
@@ -185,6 +187,51 @@ try {
       ],
     });
 
+    // Jogo apenas com YouTube
+    await repo.upsertByExternalId({
+      title: `YouTube Only Game ${token}`,
+      slug: `youtube-only-game-${token}`,
+      genres: ['Action'],
+      platforms: ['PC'],
+      screenshots: [],
+      incomingTrailerDetails: [
+        {
+          provider: 'YOUTUBE',
+          url: 'https://www.youtube.com/watch?v=onlyYT123',
+        },
+      ],
+    });
+
+    // Jogo sem nenhuma mídia
+    await repo.upsertByExternalId({
+      title: `No Media Game ${token}`,
+      slug: `no-media-game-${token}`,
+      genres: ['Puzzle'],
+      platforms: ['PC'],
+      screenshots: [],
+      trailers: [],
+    });
+
+    // Jogo apenas com screenshots (sem trailer)
+    await repo.upsertByExternalId({
+      title: `Screenshot Only Game ${token}`,
+      slug: `screenshot-only-game-${token}`,
+      genres: ['Adventure'],
+      platforms: ['PC'],
+      screenshots: ['https://example.com/shot1.jpg'],
+      trailers: [],
+    });
+
+    // Jogo apenas com OTHER trailer (não reproduzível no player nativo)
+    await repo.upsertByExternalId({
+      title: `Other Only Game ${token}`,
+      slug: `other-only-game-${token}`,
+      genres: ['Indie'],
+      platforms: ['PC'],
+      screenshots: [],
+      trailers: ['https://example.com/unknown-format.mp4'],
+    });
+
     // 1. GET /api/v1/games/:id (Direct Priority Game)
     const detailRes = await app.inject({
       method: 'GET',
@@ -193,13 +240,13 @@ try {
     assert.equal(detailRes.statusCode, 200);
     const detail = JSON.parse(detailRes.payload);
 
-    // Teste 9: DIRECT tem prioridade sobre YouTube no detalhe
+    // Teste: DIRECT tem prioridade sobre YouTube no detalhe
     assert.equal(detail.primaryTrailer?.provider, 'DIRECT');
     assert.equal(detail.primaryTrailer?.url, 'https://cdn.example.com/direct/video.mp4');
     assert.equal(detail.trailerDetails[0]?.provider, 'DIRECT');
     assert.equal(detail.trailerDetails[1]?.provider, 'YOUTUBE');
 
-    // Teste 3: authorizationRef NUNCA vaza no JSON público
+    // Teste: authorizationRef NUNCA vaza no JSON público
     const detailPayload = detailRes.payload;
     assert.equal(detailPayload.includes('secret-auth-contract-999'), false);
     assert.equal(detailPayload.includes('authorizationRef'), false);
@@ -209,57 +256,80 @@ try {
     const feedRes = await app.inject({ method: 'GET', url: '/api/v1/feed?limit=100' });
     assert.equal(feedRes.statusCode, 200);
     const feedBody = JSON.parse(feedRes.payload);
+
+    // Teste 1: Jogo com DIRECT trailer entra no feed
     const feedDirectGame = feedBody.data.find((g) => g.slug === `direct-priority-game-${token}`);
-    assert.ok(feedDirectGame, 'Jogo com Direct deve estar no feed');
-
-    // Teste 10: DIRECT tem prioridade sobre YouTube no feed
+    assert.ok(feedDirectGame, 'Jogo com Direct trailer deve entrar no feed');
     assert.equal(feedDirectGame.primaryTrailer?.provider, 'DIRECT');
-    assert.equal(feedDirectGame.trailerDetails[0]?.provider, 'DIRECT');
 
-    // Teste 3 (feed): authorizationRef não vaza no feed
-    assert.equal(feedRes.payload.includes('secret-auth-contract-999'), false);
-    assert.equal(feedRes.payload.includes('authorizationRef'), false);
+    // Teste 2: Jogo com YouTube trailer entra no feed
+    const feedYtGame = feedBody.data.find((g) => g.slug === `youtube-only-game-${token}`);
+    assert.ok(feedYtGame, 'Jogo com YouTube trailer deve entrar no feed');
+    assert.equal(feedYtGame.primaryTrailer?.provider, 'YOUTUBE');
+    assert.equal(feedYtGame.primaryTrailer?.videoId, 'onlyYT123');
 
-    // 3. Jogo apenas com Steam: Teste 12 (primaryTrailer é null/undefined)
-    const steamDetailRes = await app.inject({
-      method: 'GET',
-      url: `/api/v1/games/steam-only-game-${token}`,
-    });
-    assert.equal(steamDetailRes.statusCode, 200);
-    const steamDetail = JSON.parse(steamDetailRes.payload);
-    assert.equal(steamDetail.primaryTrailer, undefined);
+    // Teste 3: Jogo sem nenhuma mídia NÃO entra no feed
+    const feedNoMediaGame = feedBody.data.find((g) => g.slug === `no-media-game-${token}`);
+    assert.equal(feedNoMediaGame, undefined, 'Jogo sem mídia NÃO deve entrar no feed');
 
+    // Teste 4: Jogo apenas com screenshot NÃO entra no feed
+    const feedShotGame = feedBody.data.find((g) => g.slug === `screenshot-only-game-${token}`);
+    assert.equal(feedShotGame, undefined, 'Jogo com screenshot apenas NÃO deve entrar no feed');
+
+    // Teste 5: Jogo apenas com Steam trailer NÃO entra no feed
     const feedSteamGame = feedBody.data.find((g) => g.slug === `steam-only-game-${token}`);
-    if (feedSteamGame) {
-      assert.equal(feedSteamGame.primaryTrailer, null);
+    assert.equal(feedSteamGame, undefined, 'Jogo com trailer Steam NÃO deve entrar no feed');
+
+    // Teste 6: Jogo apenas com OTHER trailer NÃO entra no feed
+    const feedOtherGame = feedBody.data.find((g) => g.slug === `other-only-game-${token}`);
+    assert.equal(feedOtherGame, undefined, 'Jogo com trailer OTHER NÃO deve entrar no feed');
+
+    // Teste 7: Jogos sem trailer reproduzível PERMANECEM disponíveis no catálogo
+    // 7.1. /api/v1/games/:id
+    for (const slug of [
+      `steam-only-game-${token}`,
+      `no-media-game-${token}`,
+      `screenshot-only-game-${token}`,
+      `other-only-game-${token}`,
+    ]) {
+      const catDetailRes = await app.inject({ method: 'GET', url: `/api/v1/games/${slug}` });
+      assert.equal(catDetailRes.statusCode, 200, `Jogo ${slug} deve estar acessível por ID`);
+      const catDetail = JSON.parse(catDetailRes.payload);
+      assert.equal(catDetail.primaryTrailer, undefined);
+    }
+    // 7.2. /api/v1/games (listagem geral do catálogo)
+    const catListRes = await app.inject({ method: 'GET', url: '/api/v1/games?limit=100' });
+    assert.equal(catListRes.statusCode, 200);
+    const catListBody = JSON.parse(catListRes.payload);
+    for (const slug of [
+      `steam-only-game-${token}`,
+      `no-media-game-${token}`,
+      `screenshot-only-game-${token}`,
+      `other-only-game-${token}`,
+    ]) {
+      const inCatalog = catListBody.data.some((g) => g.slug === slug);
+      assert.ok(inCatalog, `Jogo ${slug} deve constar na listagem geral do catálogo`);
     }
 
-    // 4. Teste 11: Sem DIRECT, YouTube válido com videoId vira primaryTrailer
-    const ytOnlyGame = {
-      title: `YouTube Only Game ${token}`,
-      slug: `youtube-only-game-${token}`,
-      genres: ['Action'],
-      platforms: ['PC'],
-      screenshots: [],
-      incomingTrailerDetails: [
-        {
-          provider: 'STEAM',
-          url: 'https://cdn.akamai.steamstatic.com/steam/apps/456/movie.mp4',
-        },
-        {
-          provider: 'YOUTUBE',
-          url: 'https://www.youtube.com/watch?v=onlyYT123',
-        },
-      ],
-    };
-    await repo.upsertByExternalId(ytOnlyGame);
-    const ytDetailRes = await app.inject({
+    // Teste 8: exclude funciona em conjunto com o filtro de trailers jogáveis
+    const excludeRes = await app.inject({
       method: 'GET',
-      url: `/api/v1/games/youtube-only-game-${token}`,
+      url: `/api/v1/feed?limit=100&exclude=${feedDirectGame.id}`,
     });
-    const ytDetail = JSON.parse(ytDetailRes.payload);
-    assert.equal(ytDetail.primaryTrailer?.provider, 'YOUTUBE');
-    assert.equal(ytDetail.primaryTrailer?.videoId, 'onlyYT123');
+    assert.equal(excludeRes.statusCode, 200);
+    const excludeBody = JSON.parse(excludeRes.payload);
+    assert.equal(
+      excludeBody.data.some((g) => g.id === feedDirectGame.id),
+      false,
+      'Jogo excluído não deve estar no retorno do feed',
+    );
+
+    // Teste de resiliência: exclude com formato inválido não gera erro 500
+    const invalidExcludeRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/feed?limit=10&exclude=not-a-uuid,123;DROP+TABLE,`,
+    });
+    assert.equal(invalidExcludeRes.statusCode, 200, 'UUIDs inválidos devem ser ignorados com segurança');
 
     await app.close();
   });

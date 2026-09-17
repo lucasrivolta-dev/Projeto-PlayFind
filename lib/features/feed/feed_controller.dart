@@ -26,17 +26,30 @@ class FeedItem {
   final List<FeedComment> comments;
 }
 
+typedef FeedLoader = Future<List<DiscoveryGame>> Function({List<String>? excludeIds, int limit});
+
 class FeedController extends ChangeNotifier {
-  FeedController(this.repository, {LibraryStore? library})
-      : library = library ?? LibraryStore(),
+  FeedController(
+    Future<List<DiscoveryGame>> Function() repository, {
+    FeedLoader? feedLoader,
+    LibraryStore? library,
+  })  : repository = repository,
+        _feedLoader = feedLoader ??
+            (({List<String>? excludeIds, int limit = 20}) => repository()),
+        library = library ?? LibraryStore(),
         _ownsLibrary = library == null {
     this.library.addListener(_emit);
   }
   final LibraryStore library;
   final bool _ownsLibrary;
   final Future<List<DiscoveryGame>> Function() repository;
+  final FeedLoader _feedLoader;
   bool loading = true;
   bool error = false;
+  bool loadingMore = false;
+  bool hasMore = true;
+  final Set<String> _seenGameIds = {};
+  Set<String> get seenGameIds => Set.unmodifiable(_seenGameIds);
   List<FeedItem> items = [];
   int current = 0;
   Set<String> get liked => library.liked;
@@ -63,68 +76,127 @@ class FeedController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  List<FeedItem> _buildFeedItems(List<DiscoveryGame> games, {required int offset}) {
+    return games.asMap().entries.map((entry) {
+      final index = offset + entry.key;
+      final game = entry.value;
+      final comments = [
+        FeedComment(
+            user: 'marina.games',
+            text: 'Esse jogo ficou muito melhor do que eu esperava.',
+            time: 'há 12 min',
+            likes: 18),
+        FeedComment(
+            user: 'joaovitor',
+            text: 'A trilha sonora é absurda.',
+            time: 'há 31 min',
+            likes: 7,
+            reply: true),
+      ];
+      // Captions editoriais rotativos — funcionam para qualquer N de jogos.
+      const captions = [
+        'Uma aventura que recompensa cada minuto de exploração.',
+        'Quando você quer uma história para esquecer do mundo por algumas horas.',
+        'Encontre seu esquadrão. A próxima missão começa agora.',
+        'Pequeno no tamanho. Gigante nos segredos.',
+        'Uma mão nunca é igual à outra.',
+        'O mundo está esperando por você.',
+        'Horas se passam sem você perceber.',
+        'Difícil de largár depois do primeiro nível.',
+        'Uma experiência que fica na memória.',
+        'Descubra o que está além do horizonte.',
+      ];
+      // matchScore vem da API quando disponível; caso contrário usa valor editorial rotativo.
+      const fallbackMatches = [94, 87, 91, 82, 89, 78, 85, 92, 88, 80];
+      final match =
+          game.matchScore ?? fallbackMatches[index % fallbackMatches.length];
+      return FeedItem(
+          game: game,
+          match: match,
+          caption: captions[index % captions.length],
+          comments: comments);
+    }).toList();
+  }
+
+  int _loadGeneration = 0;
+
   Future<void> load() async {
+    final generation = ++_loadGeneration;
     loading = true;
+    loadingMore = false;
     error = false;
+    _seenGameIds.clear();
+    hasMore = true;
     _emit();
     try {
-      final rawGames = await repository();
-      // Deduplicação defensiva: o backend garante unicidade por UUID, mas
-      // proteção extra evita cards duplicados em caso de bug de paginação ou
-      // recarregamento acidental.
-      final seen = <String>{};
-      final games = rawGames.where((g) => seen.add(g.id)).toList();
-      items = games.asMap().entries.map((entry) {
-        final index = entry.key;
-        final game = entry.value;
-        final comments = [
-          FeedComment(
-              user: 'marina.games',
-              text: 'Esse jogo ficou muito melhor do que eu esperava.',
-              time: 'há 12 min',
-              likes: 18),
-          FeedComment(
-              user: 'joaovitor',
-              text: 'A trilha sonora é absurda.',
-              time: 'há 31 min',
-              likes: 7,
-              reply: true),
-        ];
-        // Captions editoriais rotativos — funcionam para qualquer N de jogos.
-        const captions = [
-          'Uma aventura que recompensa cada minuto de exploração.',
-          'Quando você quer uma história para esquecer do mundo por algumas horas.',
-          'Encontre seu esquadrão. A próxima missão começa agora.',
-          'Pequeno no tamanho. Gigante nos segredos.',
-          'Uma mão nunca é igual à outra.',
-          'O mundo está esperando por você.',
-          'Horas se passam sem você perceber.',
-          'Difícil de largár depois do primeiro nível.',
-          'Uma experiência que fica na memória.',
-          'Descubra o que está além do horizonte.',
-        ];
-        // matchScore vem da API quando disponível; caso contrário usa valor editorial rotativo.
-        const fallbackMatches = [94, 87, 91, 82, 89, 78, 85, 92, 88, 80];
-        final match =
-            game.matchScore ?? fallbackMatches[index % fallbackMatches.length];
-        return FeedItem(
-            game: game,
-            match: match,
-            caption: captions[index % captions.length],
-            comments: comments);
-      }).toList();
+      final rawGames = await _feedLoader(excludeIds: null, limit: 20);
+      if (generation != _loadGeneration) return;
+      final games = <DiscoveryGame>[];
+      for (final g in rawGames) {
+        if (_seenGameIds.add(g.id)) {
+          games.add(g);
+        }
+      }
+      if (games.isEmpty) {
+        hasMore = false;
+      }
+      items = _buildFeedItems(games, offset: 0);
       // Loading replaces the PageView; its first page and trailer must agree.
       current = 0;
     } catch (_) {
+      if (generation != _loadGeneration) return;
       error = true;
+    } finally {
+      if (generation == _loadGeneration) {
+        loading = false;
+        _emit();
+      }
     }
-    loading = false;
+  }
+
+  Future<void> loadMore() async {
+    if (loading || loadingMore || !hasMore) return;
+    final generation = _loadGeneration;
+    loadingMore = true;
     _emit();
+    try {
+      final rawGames = await _feedLoader(
+        excludeIds: _seenGameIds.toList(),
+        limit: 20,
+      );
+      if (generation != _loadGeneration) return;
+      final newGames = <DiscoveryGame>[];
+      for (final g in rawGames) {
+        if (_seenGameIds.add(g.id)) {
+          newGames.add(g);
+        }
+      }
+      if (newGames.isEmpty) {
+        hasMore = false;
+      } else {
+        final newItems = _buildFeedItems(newGames, offset: items.length);
+        items.addAll(newItems);
+      }
+    } catch (_) {
+      // Falhas de rede ou timeout durante loadMore não quebram o feed nem apagam itens.
+    } finally {
+      if (generation == _loadGeneration) {
+        loadingMore = false;
+        _emit();
+      }
+    }
   }
 
   void setCurrent(int index) {
     current = items.isEmpty ? 0 : index.clamp(0, items.length - 1);
     _emit();
+    // Prefetching contínuo ao se aproximar dos últimos itens da lista
+    final shouldPrefetch = items.length >= 4
+        ? (index >= items.length - 4)
+        : (items.isNotEmpty && index == items.length - 1);
+    if (shouldPrefetch && hasMore && !loadingMore && !loading) {
+      loadMore();
+    }
   }
 
   void toggleLike(String id) {

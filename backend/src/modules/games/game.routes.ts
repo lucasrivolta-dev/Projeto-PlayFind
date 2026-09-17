@@ -66,7 +66,7 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (fastify,
   });
 
   fastify.get('/feed', async (request, reply) => {
-    const query = request.query as { limit?: string };
+    const query = request.query as { limit?: string; exclude?: string | string[] };
     const limit = query.limit === undefined ? 20 : Number(query.limit);
     if (!Number.isSafeInteger(limit) || limit < 1) {
       return reply.status(400).send({
@@ -75,13 +75,38 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (fastify,
         message: 'limit deve ser um inteiro positivo.',
       });
     }
-    const items = await service.getFeedGames(limit);
+
+    // Parse exclude parameter (comma-separated string or array of strings)
+    const rawExclude = query.exclude;
+    const excludeList: string[] = [];
+    if (Array.isArray(rawExclude)) {
+      for (const item of rawExclude) {
+        if (typeof item === 'string') {
+          excludeList.push(...item.split(','));
+        }
+      }
+    } else if (typeof rawExclude === 'string') {
+      excludeList.push(...rawExclude.split(','));
+    }
+
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const sanitizedExcludeIds = Array.from(
+      new Set(
+        excludeList
+          .map((id) => id.trim())
+          .filter((id) => UUID_REGEX.test(id)),
+      ),
+    ).slice(0, 500);
+
+    const items = await service.getFeedGames(limit, sanitizedExcludeIds);
 
     if (process.env.NEXTPLAY_DEV_FIXTURES === 'true') {
       const host = request.headers.host || '127.0.0.1:3333';
       const protocol = request.protocol || 'http';
       const devGame = createDevDirectGame({ baseUrl: `${protocol}://${host}` });
-      items.unshift(devGame as any);
+      if (!sanitizedExcludeIds.includes(devGame.id)) {
+        items.unshift(devGame as any);
+      }
     }
 
     return reply.status(200).send({

@@ -56,9 +56,16 @@ class _NextPlayAppState extends State<NextPlayApp> {
     _repo = widget.exploreRepository ?? ApiExploreRepository();
     controller = ProfileController(DemoProfileRepository())..load();
     explore = ExploreController(_repo, library: library)..load();
+    final repo = _repo;
+    final apiRepo = repo is ApiExploreRepository ? repo : null;
     feed = FeedController(
-        _repo is ApiExploreRepository ? _repo.loadFeed : _repo.load,
-        library: library)..load();
+      apiRepo != null ? apiRepo.loadFeed : repo.load,
+      feedLoader: apiRepo != null
+          ? ({excludeIds, limit = 20}) =>
+              apiRepo.loadFeed(excludeIds: excludeIds, limit: limit)
+          : null,
+      library: library,
+    )..load();
     // O primeiro carregamento acontece somente quando authStateChanges
     // confirma uma identidade autenticada.
     // Quando a sessão já foi restaurada antes da criação do shell, não há

@@ -273,11 +273,22 @@ class ApiExploreRepository implements ExploreRepository {
   Future<List<DiscoveryGame>> load() => _load(allowFallback: true);
 
   /// The real feed must never silently replace the API catalog with demo games.
-  Future<List<DiscoveryGame>> loadFeed() => _load(allowFallback: false);
+  Future<List<DiscoveryGame>> loadFeed({List<String>? excludeIds, int limit = 20}) =>
+      _load(allowFallback: false, excludeIds: excludeIds, limit: limit);
 
-  Future<List<DiscoveryGame>> _load({required bool allowFallback}) async {
+  Future<List<DiscoveryGame>> _load({
+    required bool allowFallback,
+    List<String>? excludeIds,
+    int limit = 20,
+  }) async {
     try {
-      final uri = Uri.parse('$baseUrl/feed');
+      final queryParams = <String, String>{
+        'limit': '$limit',
+      };
+      if (excludeIds != null && excludeIds.isNotEmpty) {
+        queryParams['exclude'] = excludeIds.join(',');
+      }
+      final uri = Uri.parse('$baseUrl/feed').replace(queryParameters: queryParams);
       final response = await _client.get(uri).timeout(timeout);
 
       if (response.statusCode == 200) {

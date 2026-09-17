@@ -103,7 +103,6 @@ function pickPrimaryTrailer(trailerDetails: NormalizedTrailer[]): NormalizedTrai
     if (
       t.provider === 'YOUTUBE' &&
       t.videoId &&
-      !isDisqualifiedTrailer(t.videoId) &&
       !isDisqualifiedTrailer(t.providerLabel) &&
       !isDisqualifiedTrailer(t.origin)
     ) {
@@ -295,13 +294,19 @@ export class GameService {
     };
   }
 
-  async getFeedGames(limit = 20) {
+  async getFeedGames(limit = 20, excludeIds?: string[]) {
     const safeLimit = Math.min(100, Math.max(1, limit));
     const now = new Date();
 
-    // Fetch an expanded candidate pool (up to 100 games) ordered by quality/recency
+    const validExcludeIds = (excludeIds ?? []).filter((id) => UUID_REGEX.test(id));
+    const where: Prisma.GameWhereInput =
+      validExcludeIds.length > 0 ? { id: { notIn: validExcludeIds } } : {};
+
+    // Fetch an expanded candidate pool ordered by quality/recency, excluding already seen games
+    const poolSize = Math.min(200, Math.max(100, safeLimit * 5));
     const records = await this.prisma.game.findMany({
-      take: 100,
+      where,
+      take: poolSize,
       orderBy: [{ rating: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
       include: {
         genres: { include: { genre: true } },
@@ -401,8 +406,13 @@ export class GameService {
       };
     });
 
-    // 3. Deterministic sort by discoveryScore DESC, then rating DESC, then createdAt DESC, then id ASC
-    scoredCandidates.sort((a, b) => {
+    // 3. Filter candidates strictly to those with a playable trailer (DIRECT or YOUTUBE with valid videoId)
+    // Games without playable trailers remain 100% available in catalog (listGames, getGameById, Explore, Search, Library, Forum)
+    const feedCandidates = scoredCandidates.filter((c) => c.primaryTrailer !== null);
+    const withoutPlayableTrailer = scoredCandidates.length - feedCandidates.length;
+
+    // 4. Deterministic sort by discoveryScore DESC, then rating DESC, then createdAt DESC, then id ASC
+    feedCandidates.sort((a, b) => {
       if (b.discoveryScore !== a.discoveryScore) {
         return b.discoveryScore - a.discoveryScore;
       }
@@ -419,11 +429,11 @@ export class GameService {
       return a.id.localeCompare(b.id);
     });
 
-    // 4. Conservative edition deduplication (preserving remakes, remasters, distinct developers)
-    const deduplicated: typeof scoredCandidates = [];
+    // 5. Conservative edition deduplication (preserving remakes, remasters, distinct developers)
+    const deduplicated: typeof feedCandidates = [];
     const seenIds = new Set<string>();
 
-    for (const candidate of scoredCandidates) {
+    for (const candidate of feedCandidates) {
       if (seenIds.has(candidate.id)) continue;
 
       const isDuplicate = deduplicated.some((picked) =>
@@ -447,10 +457,14 @@ export class GameService {
       }
     }
 
-    // 5. Light deterministic feed diversity (genre and release year interleaving)
+    // 6. Light deterministic feed diversity (genre, release year, and studio interleaving)
     const diverse = applyFeedDiversity(deduplicated, safeLimit);
 
-    // 6. Return standard DTOs
+    console.log(
+      `[Feed] candidatePool=${records.length} catalogEligible=${eligibleRecords.length} withoutPlayableTrailer=${withoutPlayableTrailer} excludedSeen=${validExcludeIds.length} deduplicated=${deduplicated.length} returned=${Math.min(diverse.length, safeLimit)}`,
+    );
+
+    // 7. Return standard DTOs
     return diverse.slice(0, safeLimit).map((item) => {
       const { discoveryScore, scoreBreakdown, createdAt, ...dto } = item;
       return dto;

@@ -581,3 +581,43 @@ test('Deduplicação unifica "Nintendo Switch 2 Edition" como edição redundant
     'Switch 2 Edition deve ter o mesmo título canônico que o jogo original',
   );
 });
+
+test('Rejeição explícita de termos adicionais de lixo e não-jogos (artbook, strategy guide, bonus content, soundtrack edition)', () => {
+  assert.equal(isEligibleForCatalog({ title: 'Elden Ring Digital Artbook & Strategy Guide' }).eligible, false);
+  assert.equal(isEligibleForCatalog({ title: 'Persona 5 Soundtrack Edition' }).eligible, false);
+  assert.equal(isEligibleForCatalog({ title: 'Baldur\'s Gate 3 Bonus Content Pack' }).eligible, false);
+  assert.equal(isEligibleForCatalog({ title: 'Cyberpunk 2077 Weapon Skin Pack' }).eligible, false);
+  assert.equal(isEligibleForCatalog({ title: 'Hollow Knight Music Collection' }).eligible, false);
+});
+
+test('applyFeedDiversity interrompe sequências de 3 jogos seguidos do mesmo estúdio', () => {
+  const candidates = [
+    { id: '1', title: 'Studio Game 1', studio: 'FromSoftware', genres: ['RPG'], releaseDate: new Date('2022-01-01'), discoveryScore: 95 },
+    { id: '2', title: 'Studio Game 2', studio: 'FromSoftware', genres: ['Action'], releaseDate: new Date('2023-01-01'), discoveryScore: 94 },
+    { id: '3', title: 'Studio Game 3', studio: 'FromSoftware', genres: ['Adventure'], releaseDate: new Date('2024-01-01'), discoveryScore: 93 },
+    { id: '4', title: 'Other Studio Game', studio: 'Supergiant Games', genres: ['Roguelike'], releaseDate: new Date('2020-01-01'), discoveryScore: 90 },
+  ];
+
+  const diverse = applyFeedDiversity(candidates, 4);
+  assert.equal(diverse[0].id, '1');
+  assert.equal(diverse[1].id, '2');
+  // O terceiro jogo deve ser de outro estúdio para quebrar a sequência de FromSoftware
+  assert.equal(diverse[2].id, '4', 'O terceiro jogo deve vir de outro estúdio para quebrar o streak');
+  assert.equal(diverse[3].id, '3');
+});
+
+test('calculateDiscoveryScore não penaliza vídeo do YouTube cujo hash de 11 caracteres contenha palavras como ost ou review', () => {
+  const candidate = {
+    id: 'yt-hash-test',
+    title: 'Great Game',
+    releaseDate: new Date('2024-01-01'),
+    coverUrl: 'https://example.com/cover.jpg',
+    description: 'A wonderful game with high quality video.',
+    trailerDetails: [
+      { provider: 'YOUTUBE', url: 'https://youtube.com/watch?v=AbCdEfGoSt1', videoId: 'AbCdEfGoSt1' },
+    ],
+  };
+  const res = calculateDiscoveryScore(candidate);
+  // Deve receber o bônus de YouTube (8 pontos) e NÃO penalidade de ausência de trailer
+  assert.ok(res.breakdown.metadataPoints >= 8, `Metadata points devem ser >= 8, recebido: ${res.breakdown.metadataPoints}`);
+});
