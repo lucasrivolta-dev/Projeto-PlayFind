@@ -133,6 +133,9 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
   void togglePlayback() => _togglePlayback();
   void toggleMute() {
     setState(() => _muted = !_muted);
+    if (kDebugMode) {
+      debugPrint('[TrailerInput] MUTE TAP isMuted=$_muted');
+    }
     _sync('toggleMute');
   }
 
@@ -1113,12 +1116,16 @@ class FeedTrailerControls extends StatelessWidget {
                             (details.localPosition.dx / barWidth).clamp(0.0, 1.0);
                         if (kDebugMode) {
                           debugPrint('[TrailerSeek] PREVIEW fraction=$fraction');
+                          debugPrint('[TrailerSeek] DRAG UPDATE fraction=$fraction');
                         }
                         state.setDragFraction(fraction);
                       },
                       onHorizontalDragEnd: (details) {
                         final fraction = state.dragFraction;
                         state.setDragFraction(null);
+                        if (kDebugMode) {
+                          debugPrint('[TrailerSeek] DRAG END fraction=$fraction');
+                        }
                         if (fraction == null) {
                           if (kDebugMode) {
                             debugPrint(
@@ -1142,8 +1149,14 @@ class FeedTrailerControls extends StatelessWidget {
                         }
                         player?.seekTo(Duration(milliseconds: targetMs));
                       },
+                      onHorizontalDragCancel: () {
+                        if (kDebugMode) {
+                          debugPrint('[TrailerSeek] DRAG CANCEL');
+                        }
+                        state.setDragFraction(null);
+                      },
                       child: Container(
-                        height: 26,
+                        height: 30,
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         alignment: Alignment.bottomCenter,
                         child: Column(

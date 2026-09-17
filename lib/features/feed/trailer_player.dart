@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:youtube_player_iframe/webview.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
 import 'direct_trailer_player.dart';
@@ -88,6 +89,12 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
   String? _requestedId;
   String? _displayedId;
   Timer? _safetyRevealTimer;
+  Timer? _visualGuardTimer;
+  String? _guardTargetId;
+  int _guardRevision = 0;
+  Duration _guardStartPosition = Duration.zero;
+  bool _guardPositionAdvanced = false;
+  static const Duration kVisualGuardDuration = Duration(milliseconds: 800);
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   PlayerState _state = PlayerState.unknown;
@@ -141,6 +148,97 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
     } catch (_) {}
   }
 
+  void _cancelVisualGuard(String reason) {
+    if (_visualGuardTimer != null) {
+      _visualGuardTimer?.cancel();
+      _visualGuardTimer = null;
+      if (kDebugMode) {
+        debugPrint(
+          '[TrailerVisual] CANCEL_VISUAL_GUARD reason=$reason videoId=$_guardTargetId',
+        );
+      }
+      _guardTargetId = null;
+      _guardStartPosition = Duration.zero;
+      _guardPositionAdvanced = false;
+    }
+  }
+
+  void _checkFirstPositionAdvance(String currentTarget, Duration currentPos) {
+    if (_closed || _displayedId == currentTarget) return;
+    if (_state != PlayerState.playing || currentPos <= Duration.zero) return;
+
+    if (_visualGuardTimer == null) {
+      _guardTargetId = currentTarget;
+      _guardRevision = _requestRevision;
+      _guardStartPosition = currentPos;
+      _guardPositionAdvanced = false;
+
+      if (kDebugMode) {
+        debugPrint(
+          '[TrailerVisual] FIRST_POSITION_ADVANCE position=${currentPos.inMilliseconds}ms',
+        );
+        debugPrint('[TrailerVisual] WAITING_VISUAL_GUARD');
+      }
+
+      _visualGuardTimer = Timer(kVisualGuardDuration, () {
+        unawaited(_onVisualGuardComplete());
+      });
+    } else if (_guardTargetId == currentTarget &&
+        _guardRevision == _requestRevision) {
+      if (currentPos > _guardStartPosition) {
+        _guardPositionAdvanced = true;
+      }
+    }
+  }
+
+  Future<void> _onVisualGuardComplete() async {
+    _visualGuardTimer = null;
+    if (_closed) return;
+    if (_guardRevision != _requestRevision) return;
+    final currentTarget = _requestedId;
+    if (currentTarget == null || currentTarget != _guardTargetId) return;
+    if (_state != PlayerState.playing) return;
+
+    var positionAdvanced =
+        _guardPositionAdvanced || _position > _guardStartPosition;
+
+    if (!positionAdvanced) {
+      try {
+        final sec = await _controller.currentTime.timeout(
+          const Duration(milliseconds: 300),
+        );
+        if (_closed || _guardRevision != _requestRevision) return;
+        if (sec > (_guardStartPosition.inMilliseconds / 1000.0)) {
+          positionAdvanced = true;
+          _position = Duration(milliseconds: (sec * 1000).round());
+        }
+      } catch (_) {}
+    }
+
+    if (!positionAdvanced) {
+      if (kDebugMode) {
+        debugPrint(
+          '[TrailerVisual] VISUAL_GUARD_ABORTED position_not_advancing start=${_guardStartPosition.inMilliseconds}ms current=${_position.inMilliseconds}ms',
+        );
+      }
+      return;
+    }
+
+    _displayedId = currentTarget;
+    _safetyRevealTimer?.cancel();
+    _safetyRevealTimer = null;
+
+    if (kDebugMode) {
+      debugPrint(
+        '[TrailerVisual] VISUAL_GUARD_COMPLETE position=${_position.inMilliseconds}ms',
+      );
+      debugPrint(
+        '[TrailerVisual] REVEAL_VIDEO reason=visual_guard_complete',
+      );
+    }
+    notifyListeners();
+  }
+
   void _onVideoState(YoutubeVideoState state) {
     if (_closed) return;
     if (_duration == Duration.zero) {
@@ -150,22 +248,10 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
         _position.inMilliseconds != state.position.inMilliseconds;
     _position = state.position;
     final currentTarget = _requestedId;
-    if (_state == PlayerState.playing &&
-        _displayedId != currentTarget &&
-        currentTarget != null &&
-        state.position > Duration.zero) {
-      _safetyRevealTimer?.cancel();
-      _safetyRevealTimer = null;
-      _displayedId = currentTarget;
-      if (kDebugMode) {
-        debugPrint(
-          '[TrailerVisual] FIRST_POSITION_ADVANCE position=${state.position.inMilliseconds}ms',
-        );
-        debugPrint(
-          '[TrailerVisual] REVEAL_VIDEO reason=first_position_advance',
-        );
+    if (currentTarget != null && _displayedId != currentTarget) {
+      if (_state == PlayerState.playing && state.position > Duration.zero) {
+        _checkFirstPositionAdvance(currentTarget, state.position);
       }
-      notifyListeners();
     } else if (posChanged) {
       notifyListeners();
     }
@@ -231,32 +317,23 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
             '[TrailerVisual] PLAYING position=${_position.inMilliseconds}ms',
           );
         }
-        if (_position > Duration.zero) {
-          if (_displayedId != currentTarget) {
-            _displayedId = currentTarget;
-            changed = true;
-            _safetyRevealTimer?.cancel();
-            _safetyRevealTimer = null;
-            if (kDebugMode) {
-              debugPrint(
-                '[TrailerVisual] REVEAL_VIDEO reason=playing_with_position position=${_position.inMilliseconds}ms',
-              );
-            }
-          }
-        } else if (_displayedId != currentTarget && _safetyRevealTimer == null) {
-          _safetyRevealTimer = Timer(kMaxVisualRevealDelay, () {
-            if (!_closed &&
-                _state == PlayerState.playing &&
-                _displayedId != currentTarget) {
-              _displayedId = currentTarget;
-              if (kDebugMode) {
-                debugPrint(
-                  '[TrailerVisual] REVEAL_VIDEO reason=safety_timeout',
-                );
+        if (_displayedId != currentTarget) {
+          if (_position > Duration.zero) {
+            _checkFirstPositionAdvance(currentTarget, _position);
+          } else {
+            _safetyRevealTimer ??= Timer(kMaxVisualRevealDelay, () {
+              if (!_closed &&
+                  _state == PlayerState.playing &&
+                  _displayedId != currentTarget) {
+                if (kDebugMode) {
+                  debugPrint(
+                    '[TrailerVisual] SUPPRESS_TIMEOUT_REVEAL waiting for visual guard',
+                  );
+                }
+                return;
               }
-              notifyListeners();
-            }
-          });
+            });
+          }
         }
       } else if (value.playerState == PlayerState.buffering) {
         if (kDebugMode) {
@@ -268,6 +345,7 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
           value.playerState == PlayerState.ended) {
         if (_playingVideoId != null) changed = true;
         _playingVideoId = null;
+        _cancelVisualGuard('player_state_${value.playerState.name}');
       }
       if (value.metaData.duration > Duration.zero &&
           _duration != value.metaData.duration) {
@@ -291,6 +369,7 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
   void _fail(String message) {
     if (_closed || _failed) return;
     _failed = true;
+    _cancelVisualGuard('player_fail');
     _safetyRevealTimer?.cancel();
     _safetyRevealTimer = null;
     _displayedId = null;
@@ -316,6 +395,7 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
   Future<void> load(String videoId) async {
     if (_closed) return;
     final revision = ++_requestRevision;
+    _cancelVisualGuard('load');
     _safetyRevealTimer?.cancel();
     _safetyRevealTimer = null;
     _failed = false;
@@ -353,6 +433,7 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
   @override
   Future<void> pause() async {
     if (_closed || _requestedId == null) return;
+    _cancelVisualGuard('pause');
     if (kDebugMode) {
       debugPrint(
         '[FeedTrailer] PAUSE controller=$_controllerId videoId=$_requestedId',
@@ -379,14 +460,16 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
     notifyListeners();
     final seconds = position.inMilliseconds / 1000.0;
     try {
-      await _controller.webViewController.runJavaScript(
-        'player.seekTo(${seconds.toStringAsFixed(3)});',
-      );
-    } catch (_) {
       await _controller.seekTo(
         seconds: seconds,
         allowSeekAhead: true,
       );
+    } catch (_) {
+      try {
+        await _controller.webViewController.runJavaScript(
+          'player.seekTo(${seconds.toStringAsFixed(3)}, true);',
+        );
+      } catch (_) {}
     }
     if (kDebugMode) {
       debugPrint('[TrailerSeek] COMPLETE actual=${_position.inMilliseconds}ms');
@@ -404,6 +487,7 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
     if (_closed) return;
     _closed = true;
     ++_requestRevision;
+    _cancelVisualGuard('close');
     _safetyRevealTimer?.cancel();
     _safetyRevealTimer = null;
     _displayedId = null;
@@ -441,12 +525,24 @@ class _YoutubeTrailerView extends StatefulWidget {
 
 class _YoutubeTrailerViewState extends State<_YoutubeTrailerView> {
   bool _loggedBuild = false;
+  bool _webViewReady = !kDebugMode;
 
   @override
   void initState() {
     super.initState();
+    if (!kIsWeb) {
+      widget.controller.webViewController.setBackgroundColor(Colors.black);
+      unawaited(
+        widget.controller.initWithParams(params: widget.controller.params),
+      );
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) widget.onMounted();
+      if (mounted) {
+        if (!_webViewReady) {
+          setState(() => _webViewReady = true);
+        }
+        widget.onMounted();
+      }
     });
   }
 
@@ -460,14 +556,28 @@ class _YoutubeTrailerViewState extends State<_YoutubeTrailerView> {
           'size=${constraints.maxWidth}x${constraints.maxHeight}',
         );
       }
-      return YoutubePlayer(
-        key: ValueKey('youtube-trailer-player-${widget.controllerId}'),
-        controller: widget.controller,
+      if (kIsWeb) {
+        return YoutubePlayer(
+          key: ValueKey('youtube-trailer-player-${widget.controllerId}'),
+          controller: widget.controller,
+          aspectRatio: 16 / 9,
+          keepAlive: true,
+          autoFullScreen: false,
+          enableFullScreenOnVerticalDrag: false,
+          backgroundColor: Colors.black,
+          thumbnailQuality: ThumbnailQuality.max,
+        );
+      }
+
+      if (!_webViewReady) {
+        return const SizedBox.expand();
+      }
+
+      return AspectRatio(
         aspectRatio: 16 / 9,
-        keepAlive: true,
-        autoFullScreen: false,
-        enableFullScreenOnVerticalDrag: false,
-        backgroundColor: Colors.black,
+        child: WebViewWidget(
+          controller: widget.controller.webViewController,
+        ),
       );
     },
   );
