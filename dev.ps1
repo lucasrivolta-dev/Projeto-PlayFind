@@ -92,7 +92,6 @@ function Stop-Backend {
 }
 
 try {
-
     Set-Location $RootDir
 
     if ($Mode -eq "api") {
@@ -154,9 +153,17 @@ try {
 
         Start-Backend
 
-        Write-Host "[PlayFind] Reiniciando adb reverse..."
+        Write-Host "[PlayFind] Configurando adb reverse..."
 
-        & adb.exe reverse --remove tcp:$ApiPort 2>$null
+        # Só remove a regra se ela já existir.
+        $reverseList = & adb.exe reverse --list
+
+        if ($reverseList -match "tcp:$ApiPort tcp:$ApiPort") {
+            Write-Host "[PlayFind] Removendo adb reverse anterior..."
+            & adb.exe reverse --remove tcp:$ApiPort
+        }
+
+        # Criar regra USB: celular 127.0.0.1:3333 -> PC 127.0.0.1:3333
         & adb.exe reverse tcp:$ApiPort tcp:$ApiPort
 
         $reverse = & adb.exe reverse --list
