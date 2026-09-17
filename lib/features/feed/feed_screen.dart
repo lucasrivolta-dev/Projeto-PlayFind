@@ -633,7 +633,7 @@ class _Actions extends StatelessWidget {
                       message: isLiked ? 'Descurtir' : 'Curtir',
                       child: InkWell(
                         onTap: () => onProtected(
-                            () => controller.toggleLike(item.game.id)),
+                            () => controller.toggleLike(item.game.id, item.game)),
                         borderRadius: BorderRadius.circular(AppRadius.base),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
@@ -680,7 +680,7 @@ class _Actions extends StatelessWidget {
                           : 'Adicionar a Quero jogar',
                       child: InkWell(
                         onTap: () => onProtected(
-                            () => controller.toggleSave(item.game.id)),
+                            () => controller.toggleSave(item.game.id, item.game)),
                         borderRadius: BorderRadius.circular(AppRadius.large),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
@@ -755,7 +755,7 @@ class _Actions extends StatelessWidget {
                           isPlayed ? 'Jogado' : 'Marcar como já joguei',
                       child: InkWell(
                         onTap: () => onProtected(
-                            () => controller.markPlayed(item.game.id)),
+                            () => controller.markPlayed(item.game.id, item.game)),
                         borderRadius: BorderRadius.circular(AppRadius.base),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(

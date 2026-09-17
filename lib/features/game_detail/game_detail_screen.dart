@@ -68,7 +68,7 @@ class GameDetailScreen extends StatelessWidget {
                                 tooltip:
                                     '${index + 1} estrela${index == 0 ? '' : 's'}',
                                 onPressed: () => requireAuthentication(context, auth,
-                                    () => library.rate(game.id, index + 1)),
+                                    () => library.rate(game.id, index + 1, game)),
                                 icon: Icon(
                                     index < (library.ratings[game.id] ?? 0)
                                         ? Icons.star_rounded
@@ -108,7 +108,7 @@ class GameDetailScreen extends StatelessWidget {
                                   children: [
                                     FilledButton.icon(
                                         onPressed: () => requireAuthentication(context, auth,
-                                            () => library.toggleSaved(game.id)),
+                                            () => library.toggleSaved(game.id, game)),
                                         icon: Icon(
                                             library.saved.contains(game.id)
                                                 ? Icons.bookmark_added
@@ -119,7 +119,7 @@ class GameDetailScreen extends StatelessWidget {
                                                 : 'Quero jogar')),
                                     OutlinedButton.icon(
                                         onPressed: () => requireAuthentication(context, auth,
-                                            () => library.togglePlayed(game.id)),
+                                            () => library.togglePlayed(game.id, game)),
                                         icon: Icon(
                                             library.played.contains(game.id)
                                                 ? Icons.check_circle
@@ -135,7 +135,7 @@ class GameDetailScreen extends StatelessWidget {
                                                  ? 'Descurtir'
                                                  : 'Curtir',
                                          onPressed: () => requireAuthentication(context, auth,
-                                             () => library.toggleLike(game.id)),
+                                             () => library.toggleLike(game.id, game)),
                                          icon: Icon(
                                              library.liked.contains(game.id)
                                                  ? Icons.favorite

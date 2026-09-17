@@ -77,6 +77,7 @@ class FeedController extends ChangeNotifier {
   }
 
   List<FeedItem> _buildFeedItems(List<DiscoveryGame> games, {required int offset}) {
+    library.registerGames(games);
     return games.asMap().entries.map((entry) {
       final index = offset + entry.key;
       final game = entry.value;
@@ -199,16 +200,26 @@ class FeedController extends ChangeNotifier {
     }
   }
 
-  void toggleLike(String id) {
-    library.toggleLike(id);
+  DiscoveryGame? _findGame(String id) {
+    for (final item in items) {
+      if (item.game.id == id) return item.game;
+    }
+    return null;
   }
 
-  void toggleSave(String id) {
-    library.toggleSaved(id);
+  void toggleLike(String id, [DiscoveryGame? game]) {
+    final g = game ?? _findGame(id);
+    library.toggleLike(id, g);
   }
 
-  void markPlayed(String id) {
-    library.markPlayed(id);
+  void toggleSave(String id, [DiscoveryGame? game]) {
+    final g = game ?? _findGame(id);
+    library.toggleSaved(id, g);
+  }
+
+  void markPlayed(String id, [DiscoveryGame? game]) {
+    final g = game ?? _findGame(id);
+    library.markPlayed(id, g);
   }
 
   void addComment(String id, String text) {

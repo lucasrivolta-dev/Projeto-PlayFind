@@ -28,6 +28,7 @@ class ExploreController extends ChangeNotifier {
     _emit();
     try {
       games = await repository.load();
+      library.registerGames(games);
       status = ExploreStatus.ready;
     } catch (_) {
       status = ExploreStatus.error;
@@ -116,8 +117,16 @@ class ExploreController extends ChangeNotifier {
     _emit();
   }
 
-  void toggleSaved(String id) {
-    library.toggleSaved(id);
+  DiscoveryGame? _findGame(String id) {
+    for (final g in games) {
+      if (g.id == id) return g;
+    }
+    return null;
+  }
+
+  void toggleSaved(String id, [DiscoveryGame? game]) {
+    final g = game ?? _findGame(id);
+    library.toggleSaved(id, g);
   }
 
   @override

@@ -57,7 +57,20 @@ class LibraryStore extends ChangeNotifier {
     if (!_errorController.isClosed) _errorController.add(message);
   }
 
-  void toggleSaved(String id) {
+  /// Registra ou atualiza os metadados do jogo na biblioteca para que cards
+  /// e abas possam renderizá-lo imediatamente mesmo que não esteja em cache local.
+  void registerGame(DiscoveryGame game) {
+    gamesById[game.id] = game;
+  }
+
+  void registerGames(Iterable<DiscoveryGame> games) {
+    for (final game in games) {
+      gamesById[game.id] = game;
+    }
+  }
+
+  void toggleSaved(String id, [DiscoveryGame? game]) {
+    if (game != null) gamesById[id] = game;
     _touch(id);
     final added = saved.add(id);
     if (!added) saved.remove(id);
@@ -101,7 +114,8 @@ class LibraryStore extends ChangeNotifier {
     }
   }
 
-  void markPlayed(String id) {
+  void markPlayed(String id, [DiscoveryGame? game]) {
+    if (game != null) gamesById[id] = game;
     if (played.contains(id) || !_pendingPlayed.add(id)) return;
     _touch(id);
     final wasSaved = saved.remove(id);
@@ -123,9 +137,10 @@ class LibraryStore extends ChangeNotifier {
     }
   }
 
-  void togglePlayed(String id) {
+  void togglePlayed(String id, [DiscoveryGame? game]) {
+    if (game != null) gamesById[id] = game;
     if (!played.contains(id)) {
-      markPlayed(id);
+      markPlayed(id, game);
       return;
     }
     _touch(id);
@@ -185,8 +200,9 @@ class LibraryStore extends ChangeNotifier {
     }
   }
 
-  void rate(String id, int rating) {
+  void rate(String id, int rating, [DiscoveryGame? game]) {
     if (rating < 1 || rating > 5) return;
+    if (game != null) gamesById[id] = game;
     if (!_pendingRatings.add(id)) return;
     _touch(id);
     final previous = ratings[id];
@@ -218,7 +234,8 @@ class LibraryStore extends ChangeNotifier {
     }
   }
 
-  void toggleLike(String id) {
+  void toggleLike(String id, [DiscoveryGame? game]) {
+    if (game != null) gamesById[id] = game;
     if (!_pendingLikes.add(id)) return;
     _touchLike(id);
     final optimistic = liked.add(id);

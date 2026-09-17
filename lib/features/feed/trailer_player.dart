@@ -15,6 +15,7 @@ abstract class TrailerPlayer extends ChangeNotifier {
   String? get requestedVideoId;
   bool get viewMounted;
   bool get failed;
+  String? get lastError => null;
   String get stateLabel;
   PlayerState get state =>
       playingVideoId != null ? PlayerState.playing : PlayerState.paused;
@@ -83,6 +84,7 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
   late final StreamSubscription<YoutubeVideoState> _videoStateSubscription;
   bool _closed = false;
   bool _failed = false;
+  String? _lastError;
   bool _viewMounted = false;
   bool _apiReady = false;
   String? _playingVideoId;
@@ -110,6 +112,8 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
   bool get viewMounted => _viewMounted;
   @override
   bool get failed => _failed;
+  @override
+  String? get lastError => _lastError;
   @override
   String get stateLabel => _state.name;
   @override
@@ -369,6 +373,7 @@ class YoutubeTrailerPlayer extends TrailerPlayer {
   void _fail(String message) {
     if (_closed || _failed) return;
     _failed = true;
+    _lastError = message;
     _cancelVisualGuard('player_fail');
     _safetyRevealTimer?.cancel();
     _safetyRevealTimer = null;

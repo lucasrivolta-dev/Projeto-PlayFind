@@ -141,6 +141,8 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
       _videoId != null &&
       _player?.displayedVideoId == _videoId;
   bool get hasVideoId => _videoId != null;
+  bool get isExhausted =>
+      _candidates.isEmpty || _candidateIndex >= _candidates.length;
 
   void togglePlayback() => _togglePlayback();
   void toggleMute() {
@@ -381,14 +383,22 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
     _youtubeStartupTimer = null;
   }
 
-  void _logSource(String event, TrailerPlaybackSource source) {
+  void _logSource(
+    String event,
+    TrailerPlaybackSource source, {
+    String? details,
+  }) {
     if (!kDebugMode) return;
     final provider = source is DirectSource ? 'DIRECT' : 'YOUTUBE';
+    final candidateVal = _sourceValue(source);
     debugPrint(
-      '[TrailerSource] gameId=${widget.game.id} provider=$provider '
-      'candidate=${_sourceValue(source)} attempt=${_candidateIndex + 1}',
+      '[TrailerSource] gameId=${widget.game.id} title="${widget.game.title}" '
+      'provider=$provider candidate=$candidateVal attempt=${_candidateIndex + 1}',
     );
-    debugPrint('[TrailerPlayback] $event candidate=${_sourceValue(source)}');
+    debugPrint(
+      '[TrailerPlayback] $event candidate=$candidateVal'
+      '${details != null && details.isNotEmpty ? " details=$details" : ""}',
+    );
   }
 
   void _beginAttempt(TrailerPlaybackSource source) {
@@ -413,9 +423,16 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
         return;
       }
       if (kDebugMode) {
-        debugPrint('[FeedTrailer] TIMEOUT candidate=${_sourceValue(source)}');
+        debugPrint(
+          '[FeedTrailer] TIMEOUT gameId=${widget.game.id} title="${widget.game.title}" '
+          'candidate=${_sourceValue(source)}',
+        );
       }
-      _logSource('TIMEOUT', source);
+      _logSource(
+        'TIMEOUT',
+        source,
+        details: 'startup_timeout_${youtubeTrailerStartupTimeout.inSeconds}s',
+      );
       unawaited(_advanceCandidate('timeout'));
     });
   }
@@ -426,7 +443,13 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
     if (player == null) return;
     if (player.failed) {
       final source = _source;
-      if (source != null) _logSource('ERROR', source);
+      if (source != null) {
+        _logSource(
+          'ERROR',
+          source,
+          details: player.lastError ?? player.stateLabel,
+        );
+      }
       unawaited(_advanceCandidate('playerError'));
       return;
     }
@@ -493,7 +516,11 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
     _switchingCandidate = false;
     if (_source == null) {
       if (kDebugMode) {
-        debugPrint('[TrailerPlayback] EXHAUSTED gameId=${widget.game.id}');
+        debugPrint(
+          '[TrailerPlayback] EXHAUSTED gameId=${widget.game.id} '
+          'title="${widget.game.title}" totalAttempts=$_candidateIndex '
+          'candidatesCount=${_candidates.length}',
+        );
       }
       setState(() {});
       return;
@@ -549,6 +576,16 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
         source != null &&
         !_isPlayerCompatible(_player!, source)) {
       unawaited(_recyclePlayerForSourceChange());
+      return;
+    }
+
+    if (_candidates.isEmpty) {
+      if (kDebugMode && _attemptedCandidates.add('empty')) {
+        debugPrint(
+          '[TrailerPlayback] EXHAUSTED gameId=${widget.game.id} '
+          'title="${widget.game.title}" totalAttempts=0 candidatesCount=0',
+        );
+      }
       return;
     }
 
@@ -615,12 +652,14 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
     required int revision,
   }) {
     unawaited(
-      operation.catchError((Object _) {
+      operation.catchError((Object error) {
         if (!mounted || revision != _revision || !identical(player, _player)) {
           return;
         }
         final source = _source;
-        if (source != null) _logSource('ERROR operation', source);
+        if (source != null) {
+          _logSource('ERROR operation', source, details: error.toString());
+        }
         unawaited(_advanceCandidate('operationError'));
       }),
     );
@@ -784,13 +823,56 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
                       borderRadius: BorderRadius.circular(AppRadius.large),
                       child: IgnorePointer(
                         ignoring: showing,
-                        child: AnimatedOpacity(
-                          key: const Key('feed_trailer_artwork_opacity'),
-                          opacity: showing ? 0.0 : 1.0,
-                          duration: const Duration(milliseconds: 200),
-                          curve: Curves.easeOut,
-                          onEnd: _onArtworkFadeEnd,
-                          child: FeedArtwork(game: widget.game),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            AnimatedOpacity(
+                              key: const Key('feed_trailer_artwork_opacity'),
+                              opacity: showing ? 0.0 : 1.0,
+                              duration: const Duration(milliseconds: 200),
+                              curve: Curves.easeOut,
+                              onEnd: _onArtworkFadeEnd,
+                              child: FeedArtwork(game: widget.game),
+                            ),
+                            if (isExhausted)
+                              Positioned(
+                                top: AppSpacing.xs,
+                                left: AppSpacing.xs,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.75),
+                                    borderRadius:
+                                        BorderRadius.circular(AppRadius.small),
+                                    border: Border.all(
+                                      color: Colors.white.withValues(alpha: 0.15),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.videocam_off_outlined,
+                                        size: 13,
+                                        color: AppColors.muted,
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text(
+                                        'Trailer indisponível',
+                                        style: AppTypography.label(10).copyWith(
+                                          color: AppColors.muted,
+                                          fontWeight: FontWeight.w600,
+                                          letterSpacing: 0.4,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     ),

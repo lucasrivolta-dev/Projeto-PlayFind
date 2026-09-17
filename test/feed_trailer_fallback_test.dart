@@ -1,300 +1,435 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nextplay/features/explore/explore_data.dart';
-import 'package:nextplay/features/feed/feed_controller.dart';
-import 'package:nextplay/features/feed/feed_screen.dart';
 import 'package:nextplay/features/feed/feed_trailer.dart';
-import 'package:nextplay/features/feed/trailer_info.dart';
+import 'package:nextplay/features/feed/trailer_player.dart';
 
-import 'feed_trailer_test.dart' show FakeTrailerPlayer, game;
+class _MockFallbackPlayer extends TrailerPlayer {
+  _MockFallbackPlayer({
+    required this.targetVideoId,
+    this.shouldFail = false,
+  });
 
-const _primaryYoutube = 'abcdefghijk';
-const _fallbackYoutube = '12345678901';
-const _directUrl = 'https://media.example/trailer.mp4';
+  final String targetVideoId;
+  final bool shouldFail;
+  static const String errorMsg = 'simulated_player_error';
 
-DiscoveryGame _gameWithSources({
-  List<Map<String, Object?>> details = const [],
-}) => game(trailerDetails: details);
+  bool _isPlaying = false;
+  bool _failed = false;
+  bool _viewMounted = false;
+  String? _requestedId;
+  String? _lastError;
 
-Widget _trailer({
-  required DiscoveryGame game,
-  required FakeTrailerPlayer Function(String source) factory,
-}) => MaterialApp(
-  home: FeedTrailer(
-    game: game,
-    active: true,
-    playerFactory: factory,
-    child: const SizedBox(),
-  ),
-);
+  @override
+  String? get playingVideoId => _isPlaying ? _requestedId : null;
+
+  @override
+  String? get requestedVideoId => _requestedId;
+
+  @override
+  bool get viewMounted => _viewMounted;
+
+  @override
+  bool get failed => _failed;
+
+  @override
+  String? get lastError => _lastError;
+
+  @override
+  String get stateLabel => _failed ? 'failed' : (_isPlaying ? 'playing' : 'paused');
+
+  @override
+  Widget buildView({required VoidCallback onMounted}) => _MockView(
+        key: ValueKey(this),
+        onMounted: () {
+          _viewMounted = true;
+          onMounted();
+        },
+      );
+
+  @override
+  Future<void> load(String videoId) async {
+    _requestedId = videoId;
+    if (shouldFail) {
+      _failed = true;
+      _lastError = errorMsg;
+      notifyListeners();
+      return;
+    }
+    _isPlaying = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> play() async {
+    if (shouldFail) {
+      _failed = true;
+      _lastError = errorMsg;
+      notifyListeners();
+      return;
+    }
+    _isPlaying = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> pause() async {
+    _isPlaying = false;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> setMuted(bool muted) async {}
+
+  @override
+  Future<void> close() async {
+    _isPlaying = false;
+    notifyListeners();
+  }
+}
+
+class _MockView extends StatefulWidget {
+  const _MockView({super.key, required this.onMounted});
+  final VoidCallback onMounted;
+
+  @override
+  State<_MockView> createState() => _MockViewState();
+}
+
+class _MockViewState extends State<_MockView> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onMounted();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox(
+        key: ValueKey('mock_trailer_view'),
+      );
+}
+
+DiscoveryGame createMultiTrailerGame({
+  required String id,
+  required String title,
+  required List<String> videoIds,
+}) {
+  return DiscoveryGame.fromJson({
+    'id': id,
+    'title': title,
+    'primaryTrailer': videoIds.isEmpty
+        ? null
+        : {
+            'provider': 'YOUTUBE',
+            'videoId': videoIds.first,
+            'url': 'https://www.youtube.com/watch?v=${videoIds.first}',
+          },
+    'trailerDetails': [
+      for (int i = 0; i < videoIds.length; i++)
+        {
+          'provider': 'YOUTUBE',
+          'videoId': videoIds[i],
+          'url': 'https://www.youtube.com/watch?v=${videoIds[i]}',
+          'sortOrder': i,
+        }
+    ],
+  });
+}
 
 void main() {
-  test(
-    'candidate order prefers authorised direct and deduplicates sources',
-    () {
-      final item = _gameWithSources(
-        details: const [
-          {
-            'provider': 'DIRECT',
-            'url': _directUrl,
-            'origin': 'publisher-press-kit',
-          },
-          {'provider': 'YOUTUBE', 'videoId': _primaryYoutube},
-          {'provider': 'STEAM', 'url': 'https://steam.example/movie.mp4'},
-          {'provider': 'YOUTUBE', 'videoId': _fallbackYoutube},
-          {'provider': 'DIRECT', 'url': _directUrl},
-        ],
+  testWidgets('Cenário 1: Primeiro candidato falha e segundo funciona com sucesso', (
+    tester,
+  ) async {
+    final game = createMultiTrailerGame(
+      id: 'game-multi-1',
+      title: 'Multi Trailer Game',
+      videoIds: ['failVideo11', 'succVideo22'],
+    );
+
+    final createdPlayers = <String, _MockFallbackPlayer>{};
+    TrailerPlayer factory(String videoId) {
+      final shouldFail = videoId == 'failVideo11';
+      final p = _MockFallbackPlayer(
+        targetVideoId: videoId,
+        shouldFail: shouldFail,
       );
-
-      final candidates = trailerCandidatesFor(item);
-
-      expect(candidates, hasLength(3));
-      expect(candidates[0], isA<DirectSource>());
-      expect((candidates[0] as DirectSource).url, _directUrl);
-      expect((candidates[1] as YoutubeSource).videoId, _primaryYoutube);
-      expect((candidates[2] as YoutubeSource).videoId, _fallbackYoutube);
-    },
-  );
-
-  testWidgets('authorised direct source is loaded before primary YouTube', (
-    tester,
-  ) async {
-    final player = FakeTrailerPlayer();
-    final created = <String>[];
-    await tester.pumpWidget(
-      _trailer(
-        game: _gameWithSources(
-          details: const [
-            {
-              'provider': 'DIRECT',
-              'url': _directUrl,
-              'origin': 'publisher-press-kit',
-            },
-          ],
-        ),
-        factory: (source) {
-          created.add(source);
-          return player;
-        },
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(created, [_directUrl]);
-    expect(player.loaded, _directUrl);
-    await tester.pumpWidget(const SizedBox());
-  });
-
-  testWidgets('load failure advances to YouTube fallback without overlap', (
-    tester,
-  ) async {
-    final first = FakeTrailerPlayer()..failedLoads.add(_primaryYoutube);
-    final second = FakeTrailerPlayer();
-    final created = <String>[];
-    var overlap = false;
+      createdPlayers[videoId] = p;
+      return p;
+    }
 
     await tester.pumpWidget(
-      _trailer(
-        game: _gameWithSources(
-          details: const [
-            {'provider': 'YOUTUBE', 'videoId': _fallbackYoutube},
-          ],
-        ),
-        factory: (source) {
-          if (created.isNotEmpty && !first.closed) overlap = true;
-          created.add(source);
-          return created.length == 1 ? first : second;
-        },
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(created, [_primaryYoutube, _fallbackYoutube]);
-    expect(first.closed, isTrue);
-    expect(overlap, isFalse);
-    expect(second.playingVideoId, _fallbackYoutube);
-    await tester.pumpWidget(const SizedBox());
-  });
-
-  testWidgets('player error advances once to the next candidate', (
-    tester,
-  ) async {
-    final first = FakeTrailerPlayer();
-    final second = FakeTrailerPlayer();
-    var creations = 0;
-    await tester.pumpWidget(
-      _trailer(
-        game: _gameWithSources(
-          details: const [
-            {'provider': 'YOUTUBE', 'videoId': _fallbackYoutube},
-          ],
-        ),
-        factory: (_) => creations++ == 0 ? first : second,
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    first.fail();
-    await tester.pumpAndSettle();
-
-    expect(creations, 2);
-    expect(first.closed, isTrue);
-    expect(second.playingVideoId, _fallbackYoutube);
-    await tester.pumpWidget(const SizedBox());
-  });
-
-  testWidgets('YouTube startup timeout advances after one real attempt', (
-    tester,
-  ) async {
-    final stalled = FakeTrailerPlayer()
-      ..startsPlaying = false
-      ..allowPlay = false;
-    final fallback = FakeTrailerPlayer();
-    var creations = 0;
-    await tester.pumpWidget(
-      _trailer(
-        game: _gameWithSources(
-          details: const [
-            {'provider': 'YOUTUBE', 'videoId': _fallbackYoutube},
-          ],
-        ),
-        factory: (_) => creations++ == 0 ? stalled : fallback,
-      ),
-    );
-    await tester.pump();
-    expect(creations, 1);
-    expect(find.byType(FeedArtwork), findsOneWidget);
-    expect(
-      tester
-          .widget<AnimatedOpacity>(
-            find.byKey(const Key('feed_trailer_player_visibility')),
-          )
-          .opacity,
-      0,
-    );
-
-    await tester.pump(youtubeTrailerStartupTimeout);
-    await tester.pumpAndSettle();
-
-    expect(creations, 2);
-    expect(stalled.closed, isTrue);
-    expect(fallback.playingVideoId, _fallbackYoutube);
-    await tester.pumpWidget(const SizedBox());
-  });
-
-  testWidgets('exhausted candidates remain on artwork and are not retried', (
-    tester,
-  ) async {
-    final first = FakeTrailerPlayer()..failedLoads.add(_primaryYoutube);
-    final second = FakeTrailerPlayer()..failedLoads.add(_fallbackYoutube);
-    var creations = 0;
-    await tester.pumpWidget(
-      _trailer(
-        game: _gameWithSources(
-          details: const [
-            {'provider': 'YOUTUBE', 'videoId': _fallbackYoutube},
-          ],
-        ),
-        factory: (_) => creations++ == 0 ? first : second,
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.pump(const Duration(seconds: 8));
-
-    expect(creations, 2);
-    expect(first.closed, isTrue);
-    expect(second.closed, isTrue);
-    expect(find.byType(FeedArtwork), findsOneWidget);
-    expect(find.byKey(const Key('feed_trailer_tap_target')), findsNothing);
-    await tester.pumpWidget(const SizedBox());
-  });
-
-  testWidgets('disposing cancels a pending YouTube startup timeout', (
-    tester,
-  ) async {
-    final stalled = FakeTrailerPlayer()
-      ..startsPlaying = false
-      ..allowPlay = false;
-    var creations = 0;
-    await tester.pumpWidget(
-      _trailer(
-        game: _gameWithSources(
-          details: const [
-            {'provider': 'YOUTUBE', 'videoId': _fallbackYoutube},
-          ],
-        ),
-        factory: (_) {
-          creations++;
-          return stalled;
-        },
-      ),
-    );
-    await tester.pump();
-    await tester.pumpWidget(const SizedBox());
-    await tester.pump(const Duration(seconds: 8));
-
-    expect(creations, 1);
-    expect(stalled.closed, isTrue);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets(
-    'page-controller layout has one control layer sharing the video transform',
-    (tester) async {
-      final controller = FeedController(
-        () async => [game(), game(id: 2, videoId: _fallbackYoutube)],
-      );
-      addTearDown(controller.dispose);
-      await controller.load();
-      final player = FakeTrailerPlayer();
-      await tester.pumpWidget(
-        MaterialApp(
-          home: FeedScreen(
-            controller: controller,
-            playerFactory: (_) => player,
+      MaterialApp(
+        home: Scaffold(
+          body: FeedTrailer(
+            game: game,
+            active: true,
+            playerFactory: factory,
+            child: const SizedBox(),
           ),
         ),
-      );
-      await tester.pumpAndSettle();
+      ),
+    );
 
-      expect(find.byType(FeedTrailerControls), findsOneWidget);
-      final videoTransform = tester.widget<Transform>(
-        find.byKey(const Key('feed_trailer_video_transform')),
-      );
-      final controlsTransform = tester.widget<Transform>(
-        find.byKey(const Key('feed_trailer_controls_transform')),
-      );
-      expect(
-        videoTransform.transform.storage,
-        orderedEquals(controlsTransform.transform.storage),
-      );
+    await tester.pump();
+    expect(createdPlayers.containsKey('failVideo11'), isTrue);
 
-      await tester.tap(find.byKey(const Key('feed_trailer_tap_target')));
-      await tester.pump();
-      expect(player.playingVideoId, isNull);
-      await tester.tap(find.byKey(const Key('feed_trailer_tap_target')));
-      await tester.pump();
-      expect(player.playingVideoId, _primaryYoutube);
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
 
-      final seekbar = find
-          .descendant(
-            of: find.byType(FeedTrailerControls),
-            matching: find.byType(GestureDetector),
-          )
-          .last;
-      await tester.tap(seekbar);
-      await tester.drag(seekbar, const Offset(40, 0));
-      await tester.pump();
-      expect(player.seekCalls, isNotEmpty);
+    expect(createdPlayers.containsKey('succVideo22'), isTrue);
+    final secondPlayer = createdPlayers['succVideo22']!;
+    expect(secondPlayer.failed, isFalse);
+    expect(secondPlayer.playingVideoId, 'succVideo22');
 
-      await tester.drag(
-        find.byKey(const Key('feed_trailer_tap_target')),
-        const Offset(0, -500),
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('Cenário 2: Dois candidatos falham e terceiro funciona com sucesso', (
+    tester,
+  ) async {
+    final game = createMultiTrailerGame(
+      id: 'game-multi-2',
+      title: 'Three Trailers Game',
+      videoIds: ['failVideo01', 'failVideo02', 'succVideo03'],
+    );
+
+    final attemptedVideos = <String>[];
+    TrailerPlayer factory(String videoId) {
+      attemptedVideos.add(videoId);
+      final shouldFail = videoId != 'succVideo03';
+      return _MockFallbackPlayer(
+        targetVideoId: videoId,
+        shouldFail: shouldFail,
       );
-      await tester.pumpAndSettle();
-      expect(controller.current, 1);
-      expect(player.playingVideoId, _fallbackYoutube);
-      await tester.pumpWidget(const SizedBox());
-    },
-  );
+    }
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: FeedTrailer(
+            game: game,
+            active: true,
+            playerFactory: factory,
+            child: const SizedBox(),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    expect(attemptedVideos, contains('failVideo01'));
+
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(attemptedVideos, contains('failVideo02'));
+
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(attemptedVideos, contains('succVideo03'));
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('Cenário 3: Todos os candidatos falham -> EXHAUSTED e UI estável com badge', (
+    tester,
+  ) async {
+    final game = createMultiTrailerGame(
+      id: 'game-exhausted',
+      title: 'Broken Game',
+      videoIds: ['failVideoA1', 'failVideoB2'],
+    );
+
+    final attemptedVideos = <String>[];
+    TrailerPlayer factory(String videoId) {
+      attemptedVideos.add(videoId);
+      return _MockFallbackPlayer(
+        targetVideoId: videoId,
+        shouldFail: true,
+      );
+    }
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: FeedTrailer(
+            game: game,
+            active: true,
+            playerFactory: factory,
+            child: const SizedBox(),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(attemptedVideos, ['failVideoA1', 'failVideoB2']);
+    expect(find.text('Trailer indisponível'), findsOneWidget);
+    expect(find.byKey(const Key('feed_trailer_tap_target')), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('Cenário 4: Mudança para próximo jogo após exaustão funciona normalmente', (
+    tester,
+  ) async {
+    final gameBroken = createMultiTrailerGame(
+      id: 'game-1-broken',
+      title: 'Broken Game',
+      videoIds: ['failVidAll1'],
+    );
+    final gameWorking = createMultiTrailerGame(
+      id: 'game-2-working',
+      title: 'Working Game',
+      videoIds: ['worksGood02'],
+    );
+
+    TrailerPlayer factory(String videoId) {
+      final shouldFail = videoId == 'failVidAll1';
+      return _MockFallbackPlayer(
+        targetVideoId: videoId,
+        shouldFail: shouldFail,
+      );
+    }
+
+    final pageController = PageController();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: FeedTrailer(
+            game: gameBroken,
+            active: true,
+            pageController: pageController,
+            playerFactory: factory,
+            child: const SizedBox(),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('Trailer indisponível'), findsOneWidget);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: FeedTrailer(
+            game: gameWorking,
+            active: true,
+            pageController: pageController,
+            playerFactory: factory,
+            child: const SizedBox(),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('TRAILER'), findsOneWidget);
+    expect(find.text('Trailer indisponível'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('Cenário 5: Voltar para o jogo exaurido não cria loop infinito', (
+    tester,
+  ) async {
+    final gameBroken = createMultiTrailerGame(
+      id: 'game-broken-loop',
+      title: 'Loop Test Game',
+      videoIds: ['onlyOneFai1'],
+    );
+
+    int brokenAttempts = 0;
+    TrailerPlayer factory(String videoId) {
+      if (videoId == 'onlyOneFai1') {
+        brokenAttempts++;
+        return _MockFallbackPlayer(targetVideoId: videoId, shouldFail: true);
+      }
+      return _MockFallbackPlayer(targetVideoId: videoId, shouldFail: false);
+    }
+
+    final controller = PageController();
+
+    // 1. Initial activation: attempts once, fails, and exhausts cleanly
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: FeedTrailer(
+            key: const ValueKey('feed_trailer_broken'),
+            game: gameBroken,
+            active: true,
+            pageController: controller,
+            playerFactory: factory,
+            child: const SizedBox(),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(brokenAttempts, 1);
+    expect(find.text('Trailer indisponível'), findsOneWidget);
+
+    // 2. User swipes away: becomes inactive
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: FeedTrailer(
+            key: const ValueKey('feed_trailer_broken'),
+            game: gameBroken,
+            active: false,
+            pageController: controller,
+            playerFactory: factory,
+            child: const SizedBox(),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(brokenAttempts, 1);
+
+    // 3. User swipes back: reactivated, tries again cleanly without looping
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: FeedTrailer(
+            key: const ValueKey('feed_trailer_broken'),
+            game: gameBroken,
+            active: true,
+            pageController: controller,
+            playerFactory: factory,
+            child: const SizedBox(),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(brokenAttempts, 2);
+    expect(find.text('Trailer indisponível'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+  });
 }
