@@ -106,9 +106,21 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
   String? _autoplayCandidateKey;
   bool _switchingCandidate = false;
   bool _playbackStarted = false;
+  bool? _lastLoggedShowingCurrentVideo;
+  bool _artworkDismissed = false;
   double _pageDragDistance = 0;
   double? _pagePointerDownY;
   int? _pageDragStartIndex;
+
+  void _onArtworkFadeEnd() {
+    if (!mounted) return;
+    if (showingCurrentVideo && !_artworkDismissed) {
+      setState(() => _artworkDismissed = true);
+      if (kDebugMode) {
+        debugPrint('[TrailerVisual] ROOT_ARTWORK_REMOVED');
+      }
+    }
+  }
 
   bool get isEffectivelyPlaying =>
       _player != null &&
@@ -358,6 +370,7 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
     _failed = false;
     _manualPaused = false;
     _playbackStarted = false;
+    _artworkDismissed = false;
     if (kDebugMode) {
       debugPrint('[TrailerVisual] SHOW_ARTWORK reason=reset_candidate_session');
     }
@@ -382,6 +395,7 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
     final key = _sourceKey(source);
     if (!_attemptedCandidates.add(key)) return;
     _playbackStarted = false;
+    _artworkDismissed = false;
     _logSource('LOAD', source);
     _startStartupTimeout(source);
   }
@@ -682,6 +696,23 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final showing = showingCurrentVideo;
+    if (!showing) {
+      _artworkDismissed = false;
+    }
+    final showArtwork = !showing || !_artworkDismissed;
+
+    if (kDebugMode && _lastLoggedShowingCurrentVideo != showing) {
+      _lastLoggedShowingCurrentVideo = showing;
+      debugPrint('[TrailerVisual] showingCurrentVideo=$showing');
+      if (!showing) {
+        debugPrint('[TrailerVisual] ARTWORK_VISIBLE expected=true');
+        debugPrint('[TrailerVisual] ROOT_ARTWORK_INSERTED');
+      } else {
+        debugPrint('[TrailerVisual] ROOT_ARTWORK_FADE_START duration=200ms');
+      }
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final availableH = constraints.maxHeight;
@@ -714,36 +745,53 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
                         fit: StackFit.expand,
                         children: [
                           if (_player != null && !_failed)
-                            if (kIsWeb)
-                              IgnorePointer(
-                                child: _player!.buildView(
-                                  onMounted: _onPlayerViewMounted,
-                                ),
-                              )
-                            else
-                              AnimatedOpacity(
-                                key: const Key('feed_trailer_player_visibility'),
-                                opacity: showingCurrentVideo ? 1 : 0,
-                                duration: const Duration(milliseconds: 180),
-                                child: IgnorePointer(
-                                  child: _player!.buildView(
-                                    onMounted: _onPlayerViewMounted,
-                                  ),
-                                ),
+                            IgnorePointer(
+                              child: _player!.buildView(
+                                onMounted: _onPlayerViewMounted,
                               ),
-                          if (kIsWeb)
-                            AnimatedOpacity(
-                              key: const Key('feed_trailer_player_visibility'),
-                              opacity: showingCurrentVideo ? 1 : 0,
-                              duration: const Duration(milliseconds: 180),
-                              child: const SizedBox.expand(),
                             ),
                           AnimatedOpacity(
-                            opacity: showingCurrentVideo ? 0 : 1,
+                            key: const Key('feed_trailer_player_visibility'),
+                            opacity: showing ? 1 : 0,
                             duration: const Duration(milliseconds: 180),
-                            child: FeedArtwork(game: widget.game),
+                            child: const SizedBox.shrink(),
                           ),
                         ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+
+        final artworkBox = SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.margin,
+              vertical: AppSpacing.xs,
+            ),
+            child: Column(
+              children: [
+                SizedBox(height: headerH),
+                Center(
+                  child: SizedBox(
+                    width: trailerW,
+                    height: trailerH,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(AppRadius.large),
+                      child: IgnorePointer(
+                        ignoring: showing,
+                        child: AnimatedOpacity(
+                          key: const Key('feed_trailer_artwork_opacity'),
+                          opacity: showing ? 0.0 : 1.0,
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeOut,
+                          onEnd: _onArtworkFadeEnd,
+                          child: FeedArtwork(game: widget.game),
+                        ),
                       ),
                     ),
                   ),
@@ -785,6 +833,7 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
             children: [
               trailerBox,
               FeedTrailerScope(state: this, child: widget.child),
+              if (showArtwork) artworkBox,
               if (_videoId != null) controlsBox,
             ],
           );
@@ -810,6 +859,12 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
                   child: trailerBox,
                 ),
                 FeedTrailerScope(state: this, child: widget.child),
+                if (showArtwork)
+                  Transform.translate(
+                    key: const Key('feed_trailer_artwork_transform'),
+                    offset: offset,
+                    child: artworkBox,
+                  ),
                 if (_videoId != null)
                   Transform.translate(
                     key: const Key('feed_trailer_controls_transform'),
@@ -1337,9 +1392,25 @@ class FeedArtwork extends StatelessWidget {
   const FeedArtwork({super.key, required this.game});
   final DiscoveryGame game;
 
+  static String _feedArtworkUrl(String url) {
+    if (!url.contains('images.igdb.com')) {
+      return url;
+    }
+    return url.replaceFirst(
+      RegExp(r'/t_[^/]+/'),
+      '/t_1080p/',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final urls = [game.heroUrl, game.coverUrl]
+    if (kDebugMode) {
+      debugPrint('[FeedArtwork] BUILD gameId=${game.id} title=${game.title}');
+      debugPrint('[FeedArtwork] heroUrl=${game.heroUrl}');
+      debugPrint('[FeedArtwork] coverUrl=${game.coverUrl}');
+    }
+
+    final rawUrls = [game.heroUrl, game.coverUrl]
         .whereType<String>()
         .where((url) {
           final uri = Uri.tryParse(url);
@@ -1347,8 +1418,20 @@ class FeedArtwork extends StatelessWidget {
               uri.host.isNotEmpty &&
               (uri.scheme == 'https' || uri.scheme == 'http');
         })
-        .toSet()
         .toList();
+
+    final urls = <String>[];
+    for (final rawUrl in rawUrls) {
+      final resolved = _feedArtworkUrl(rawUrl);
+      if (kDebugMode) {
+        debugPrint('[FeedArtwork] ORIGINAL_URL=$rawUrl');
+        debugPrint('[FeedArtwork] RESOLVED_URL=$resolved');
+      }
+      if (!urls.contains(resolved)) {
+        urls.add(resolved);
+      }
+    }
+
     final placeholder = ColoredBox(
       color: AppColors.high,
       child: DecoratedBox(
@@ -1400,16 +1483,30 @@ class FeedArtwork extends StatelessWidget {
         ),
       ),
     );
-    Widget at(int index) => index >= urls.length
-        ? placeholder
-        : Image.network(
-            urls[index],
-            fit: BoxFit.cover,
-            semanticLabel: 'Capa de ${game.title}',
-            errorBuilder: (_, __, ___) => at(index + 1),
-            loadingBuilder: (_, child, progress) =>
-                progress == null ? child : placeholder,
-          );
+    Widget at(int index) {
+      if (index >= urls.length) return placeholder;
+      final url = urls[index];
+      return Image.network(
+        url,
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.high,
+        semanticLabel: 'Capa de ${game.title}',
+        errorBuilder: (context, error, stackTrace) {
+          if (kDebugMode) {
+            debugPrint('[FeedArtwork] IMAGE_ERROR url=$url');
+          }
+          return at(index + 1);
+        },
+        frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+          if ((wasSynchronouslyLoaded || frame == 0) && kDebugMode) {
+            debugPrint('[FeedArtwork] IMAGE_LOADED url=$url');
+          }
+          return child;
+        },
+        loadingBuilder: (_, child, progress) =>
+            progress == null ? child : placeholder,
+      );
+    }
     return at(0);
   }
 }

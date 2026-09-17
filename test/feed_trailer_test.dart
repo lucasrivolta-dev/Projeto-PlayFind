@@ -416,6 +416,32 @@ void main() {
     },
   );
 
+  testWidgets(
+    'FeedArtwork normalizes IGDB image URLs to 1080p',
+    (tester) async {
+      final item = DiscoveryGame.fromJson({
+        'id': 'igdb-art-id',
+        'title': 'IGDB Art Game',
+        'heroUrl': 'https://images.igdb.com/igdb/image/upload/t_thumb/hero123.jpg',
+        'coverUrl': 'https://images.igdb.com/igdb/image/upload/t_cover_big/cover123.jpg',
+      });
+      await tester.pumpWidget(MaterialApp(home: FeedArtwork(game: item)));
+      final hero = tester.widget<Image>(find.byType(Image));
+      expect(
+        (hero.image as NetworkImage).url,
+        'https://images.igdb.com/igdb/image/upload/t_1080p/hero123.jpg',
+      );
+      final context = tester.element(find.byType(FeedArtwork));
+      final cover =
+          hero.errorBuilder!(context, StateError('hero failed'), null) as Image;
+      expect(
+        (cover.image as NetworkImage).url,
+        'https://images.igdb.com/igdb/image/upload/t_1080p/cover123.jpg',
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   test(
     'typed trailer parsing preserves providers and tolerates missing data',
     () {
@@ -1023,6 +1049,45 @@ void main() {
         occludingCanvasBoxes,
         findsNothing,
         reason: 'FeedPager/_FeedPage must not contain an opaque canvas ColoredBox that occludes trailerBox',
+      );
+
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'artwork performs a 200ms fade-out and unmounts after playback starts',
+    (tester) async {
+      final player = FakeTrailerPlayer()..startsPlaying = true;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FeedTrailer(
+            game: game(),
+            active: true,
+            child: const SizedBox(),
+            playerFactory: (_) => player,
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(
+        find.byKey(const Key('feed_trailer_artwork_opacity')),
+        findsOneWidget,
+      );
+
+      // Mid-animation: 100ms
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byType(FeedArtwork), findsOneWidget);
+
+      // Finish the 200ms fade animation
+      await tester.pump(const Duration(milliseconds: 150));
+      await tester.pump();
+
+      // Artwork is now unmounted after fade-out completion
+      expect(find.byType(FeedArtwork), findsNothing);
+      expect(
+        find.byKey(const Key('feed_trailer_artwork_opacity')),
+        findsNothing,
       );
 
       await tester.pumpWidget(const SizedBox());
