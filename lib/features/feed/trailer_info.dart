@@ -43,6 +43,7 @@ class TrailerInfo {
     this.mimeType,
     this.origin,
     this.providerLabel,
+    this.isOfficial = false,
   });
 
   final TrailerProvider provider;
@@ -51,6 +52,7 @@ class TrailerInfo {
   final String? mimeType;
   final String? origin;
   final String? providerLabel;
+  final bool isOfficial;
 
   bool get isPlayableYoutube =>
       provider == TrailerProvider.youtube &&
@@ -92,6 +94,7 @@ class TrailerInfo {
       'DIRECT' => TrailerProvider.direct,
       _ => TrailerProvider.other,
     };
+    final isOfficial = value['isOfficial'] == true;
     return TrailerInfo(
       provider: provider,
       url: value['url'] is String ? value['url'] as String : null,
@@ -102,6 +105,7 @@ class TrailerInfo {
       providerLabel: value['providerLabel'] is String
           ? value['providerLabel'] as String
           : null,
+      isOfficial: isOfficial,
     );
   }
 }

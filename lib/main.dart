@@ -150,8 +150,13 @@ class _AppShellState extends State<_AppShell> {
             builder: (context, _) => IndexedStack(
                   index: pageIndex,
                   children: [
-                    FeedScreen(controller: widget.feed, auth: widget.auth,
-                        active: selected == AppDestination.home),
+                    FeedScreen(
+                      controller: widget.feed,
+                      auth: widget.auth,
+                      active: selected == AppDestination.home,
+                      onSearch: () =>
+                          setState(() => selected = AppDestination.explore),
+                    ),
                     ExploreScreen(controller: widget.explore, auth: widget.auth),
                     ProfileScreen(
                         controller: widget.profile,

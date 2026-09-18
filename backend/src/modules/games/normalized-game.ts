@@ -8,6 +8,7 @@ export interface NormalizedTrailer {
   mimeType?: string;
   origin?: string;
   providerLabel?: string;
+  isOfficial?: boolean;
 }
 
 export function describeTrailer(url: string): NormalizedTrailer {

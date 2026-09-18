@@ -43,8 +43,13 @@ export function createDevDirectGame(options: DevFixtureGameOptions) {
       mimeType: 'video/mp4',
       origin: 'local/dev-test',
       providerLabel: 'NextPlay Development',
+      isOfficial: true,
     },
     matchScore: 99,
+    likeCount: 0,
+    commentCount: 0,
+    ratingCount: 1,
+    stores: [{ name: 'Steam', url: 'https://store.steampowered.com' }],
     steam: null,
   };
 }

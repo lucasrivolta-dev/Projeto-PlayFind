@@ -1,6 +1,8 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nextplay/features/explore/explore_data.dart';
 import 'package:nextplay/features/feed/feed_controller.dart';
+import 'package:nextplay/features/feed/feed_screen.dart';
 
 void main() {
   test('Empty feed accepts page changes', () async {
@@ -297,5 +299,103 @@ void main() {
 
     expect(loadMoreCalled, 1);
     expect(controller.items.length, 7);
+  });
+
+  test('FeedItem sem matchScore na API tem match nulo sem fallback ficticio', () async {
+    const game = DiscoveryGame(
+      id: 'game-real-1',
+      title: 'Jogo Real',
+      studio: 'Estudio Real',
+    );
+    final controller = FeedController(() async => [game]);
+    addTearDown(controller.dispose);
+    await controller.load();
+
+    expect(controller.items.first.match, isNull);
+    expect(controller.items.first.game.hasRating, isFalse);
+    expect(controller.items.first.game.hasGenre, isFalse);
+    expect(controller.items.first.game.hasPlatforms, isFalse);
+    expect(controller.items.first.game.hasSteamPrice, isFalse);
+    expect(controller.items.first.game.hasSteamDiscount, isFalse);
+    expect(controller.items.first.game.hasStoreUrl, isFalse);
+  });
+
+  testWidgets('FeedScreen renderiza apenas dados reais e omite dados ausentes', (tester) async {
+    const gameWithoutFakeData = DiscoveryGame(
+      id: 'game-real-no-fake',
+      title: 'Aventura Real',
+      studio: 'Estúdio Indie',
+    );
+    final controller = FeedController(() async => [gameWithoutFakeData]);
+    addTearDown(controller.dispose);
+    await controller.load();
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: FeedScreen(controller: controller),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // 5 botões de ações
+    expect(find.text('Curtir'), findsOneWidget);
+    expect(find.text('Quero jogar'), findsOneWidget);
+    expect(find.text('Já joguei'), findsOneWidget);
+    expect(find.text('Comentar'), findsOneWidget);
+    expect(find.text('Compartilhar'), findsOneWidget);
+
+    // Título presente
+    expect(find.text('Aventura Real'), findsOneWidget);
+
+    // Botão CTA para jogo sem storeUrl é "Detalhes"
+    expect(find.text('Detalhes'), findsOneWidget);
+    expect(find.text('Ver jogo'), findsNothing);
+
+    // ZERO dados fictícios da imagem de referência
+    expect(find.text('Pacific Drive'), findsNothing);
+    expect(find.text('48.2k'), findsNothing);
+    expect(find.text('1.4k'), findsNothing);
+    expect(find.text('4.5'), findsNothing);
+    expect(find.text('(12.4k)'), findsNothing);
+    expect(find.text('-20%'), findsNothing);
+    expect(find.text('R\$ 73,99'), findsNothing);
+    expect(find.text('TRAILER OFICIAL'), findsNothing);
+  });
+
+  testWidgets('FeedScreen renderiza preco, desconto e Ver jogo quando presentes na API', (tester) async {
+    const gameWithRealSteam = DiscoveryGame(
+      id: 'game-steam-real',
+      title: 'Cyber Odyssey',
+      studio: 'Neon Corp',
+      genre: 'Sci-Fi',
+      tags: ['Sci-Fi', 'Action'],
+      platforms: ['PC'],
+      rating: '8.8',
+      steamAppId: 123456,
+      steamStoreUrl: 'https://store.steampowered.com/app/123456/',
+      steamPriceCents: 5990,
+      steamDiscountPercent: 25,
+      steamAvailable: true,
+      description: 'Uma jornada cyberpunk.',
+    );
+    final controller = FeedController(() async => [gameWithRealSteam]);
+    addTearDown(controller.dispose);
+    await controller.load();
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: FeedScreen(controller: controller),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cyber Odyssey'), findsOneWidget);
+    expect(find.text('Uma jornada cyberpunk.'), findsOneWidget);
+    expect(find.text('8.8'), findsOneWidget);
+    expect(find.text('Sci-Fi'), findsWidgets);
+    expect(find.text('-25%'), findsOneWidget);
+    expect(find.text('R\$ 59,90'), findsOneWidget);
+    expect(find.text('Ver jogo'), findsOneWidget);
+    expect(find.text('Detalhes'), findsNothing);
   });
 }

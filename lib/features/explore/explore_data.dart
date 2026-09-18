@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show SocketException;
 import 'package:http/http.dart' as http;
 import '../../config/api_config.dart';
 import '../feed/trailer_info.dart';
@@ -7,12 +9,14 @@ class DiscoveryGame {
   const DiscoveryGame(
       {required this.id,
       required this.title,
-      required this.studio,
-      required this.genre,
-      required this.description,
-      required this.rating,
+      this.studio = '',
+      this.genre = '',
+      this.description = '',
+      this.rating,
+      this.ratingCount,
       this.tags = const [],
-      this.platforms = const ['PC'],
+      this.platforms = const [],
+      this.stores = const [],
       this.collection = 'destaques',
       this.offer = false,
       this.free = false,
@@ -26,19 +30,48 @@ class DiscoveryGame {
       this.steamAppId,
       this.igdbId,
       this.primaryTrailer,
-      this.trailerDetails = const []});
-  final int? steamAppId, igdbId;
+      this.trailerDetails = const [],
+      this.isOfficialTrailer = false,
+      this.likeCount = 0,
+      this.commentCount = 0,
+      this.steamStoreUrl,
+      this.steamPriceCents,
+      this.steamDiscountPercent,
+      this.steamCurrency,
+      this.steamAvailable});
+  final int? steamAppId, igdbId, ratingCount;
+  final int likeCount, commentCount;
+  final bool isOfficialTrailer;
+  final List<String> stores;
   final TrailerInfo? primaryTrailer;
   final List<TrailerInfo> trailerDetails;
   final String? releaseDate, mode, publisher, slug, coverUrl, heroUrl;
+  final String? steamStoreUrl, steamCurrency;
+  final int? steamPriceCents, steamDiscountPercent;
+  final bool? steamAvailable;
   /// Identificador interno e estável de Game na API NextPlay.
   final String id;
-  final String title, studio, genre, description, rating, collection;
+  final String title, studio, genre, description, collection;
+  final String? rating;
   final List<String> tags, platforms;
   final bool offer, free;
   /// Percentual de compatibilidade retornado pela API (0–100).
   /// Null quando o dado vem de fontes locais/mock.
   final int? matchScore;
+
+  bool get hasRating => rating != null && rating!.trim().isNotEmpty;
+  bool get hasRatingCount => ratingCount != null && ratingCount! > 0;
+  bool get hasStudio => studio.trim().isNotEmpty;
+  bool get hasGenre => genre.trim().isNotEmpty;
+  bool get hasPlatforms => platforms.isNotEmpty;
+  bool get hasStores => stores.isNotEmpty;
+  bool get hasDescription => description.trim().isNotEmpty;
+  bool get isFree => free;
+  bool get hasSteamPrice => steamPriceCents != null;
+  bool get hasSteamDiscount => (steamDiscountPercent ?? 0) > 0;
+  bool get hasStoreUrl => steamStoreUrl != null && steamStoreUrl!.trim().isNotEmpty;
+  List<String> get genres => tags;
+  bool get isSteamAvailable => steamAvailable ?? false;
 
   factory DiscoveryGame.fromJson(Map<String, dynamic> json) {
     final steamAppId = json['steamAppId'] as int?;
@@ -55,10 +88,26 @@ class DiscoveryGame {
     final platforms = (json['platforms'] as List<dynamic>?)
             ?.map((e) => e.toString())
             .toList() ??
-        const ['PC'];
-    final rating = json['rating'] != null ? json['rating'].toString() : '8.5';
+        const [];
+    final stores = (json['stores'] as List<dynamic>?)
+            ?.map((e) => e is Map ? (e['name']?.toString() ?? '') : e.toString())
+            .where((s) => s.isNotEmpty)
+            .toList() ??
+        const [];
+    final rating = json['rating']?.toString();
+    final ratingCount = (json['ratingCount'] as num?)?.toInt();
+    final likeCount = (json['likeCount'] as num?)?.toInt() ?? 0;
+    final commentCount = (json['commentCount'] as num?)?.toInt() ?? 0;
+    final primaryTrailer = TrailerInfo.fromJson(json['primaryTrailer']);
+    final isOfficialTrailer = primaryTrailer?.isOfficial ??
+        (json['isOfficialTrailer'] as bool? ?? false);
     final steam = json['steam'] as Map<String, dynamic>?;
-    final offer = steam != null && (steam['discountPercent'] as int? ?? 0) > 0;
+    final steamStoreUrl = steam?['storeUrl'] as String?;
+    final steamPriceCents = steam?['priceCents'] as int?;
+    final steamDiscountPercent = steam?['discountPercent'] as int?;
+    final steamCurrency = steam?['currency'] as String?;
+    final steamAvailable = steam?['isAvailable'] as bool?;
+    final offer = (steamDiscountPercent ?? 0) > 0;
     final free = json['isFree'] as bool? ?? false;
 
     return DiscoveryGame(
@@ -68,12 +117,17 @@ class DiscoveryGame {
       title: json['title'] as String? ?? 'Sem título',
       studio: json['studio'] as String? ??
           json['developer'] as String? ??
-          'Desconhecido',
-      genre: genres.isNotEmpty ? genres.first : 'Geral',
+          '',
+      genre: genres.isNotEmpty ? genres.first : '',
       description: json['description'] as String? ?? '',
       rating: rating,
+      ratingCount: ratingCount,
+      likeCount: likeCount,
+      commentCount: commentCount,
+      isOfficialTrailer: isOfficialTrailer,
       tags: genres,
       platforms: platforms,
+      stores: stores,
       collection: offer ? 'ofertas' : 'destaques',
       offer: offer,
       free: free,
@@ -84,8 +138,13 @@ class DiscoveryGame {
       slug: json['slug'] as String?,
       coverUrl: json['coverUrl'] as String?,
       heroUrl: json['heroUrl'] as String?,
-      primaryTrailer: TrailerInfo.fromJson(json['primaryTrailer']),
+      primaryTrailer: primaryTrailer,
       trailerDetails: _parseTrailerDetails(json['trailerDetails']),
+      steamStoreUrl: steamStoreUrl,
+      steamPriceCents: steamPriceCents,
+      steamDiscountPercent: steamDiscountPercent,
+      steamCurrency: steamCurrency,
+      steamAvailable: steamAvailable,
     );
   }
 
@@ -258,38 +317,67 @@ class ApiExploreRepository implements ExploreRepository {
     String? baseUrl,
     http.Client? client,
     this.fallback = const DemoExploreRepository(),
-    this.timeout = const Duration(seconds: 2),
-  })  : baseUrl = baseUrl ?? ApiConfig.baseUrl,
-        _client = client ?? http.Client(),
-        _ownsClient = client == null;
+    this.timeout = const Duration(seconds: 15),
+    this.initialFeedTimeout = const Duration(seconds: 60),
+    this.initialFeedRetryDelay = const Duration(milliseconds: 750),
+  }) : baseUrl = baseUrl ?? ApiConfig.baseUrl,
+       _client = client ?? http.Client(),
+       _ownsClient = client == null;
 
   final String baseUrl;
   final http.Client _client;
   final bool _ownsClient;
   final ExploreRepository fallback;
   final Duration timeout;
+  final Duration initialFeedTimeout;
+  final Duration initialFeedRetryDelay;
 
   @override
   Future<List<DiscoveryGame>> load() => _load(allowFallback: true);
 
   /// The real feed must never silently replace the API catalog with demo games.
-  Future<List<DiscoveryGame>> loadFeed({List<String>? excludeIds, int limit = 20}) =>
-      _load(allowFallback: false, excludeIds: excludeIds, limit: limit);
+  Future<List<DiscoveryGame>> loadFeed({
+    List<String>? excludeIds,
+    int limit = 20,
+  }) async {
+    // FeedController sends null only for the initial load, including manual retry.
+    final initialLoad = excludeIds == null;
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return await _load(
+          allowFallback: false,
+          excludeIds: excludeIds,
+          limit: limit,
+          requestTimeout: initialLoad ? initialFeedTimeout : timeout,
+        );
+      } catch (error) {
+        final transient =
+            error is TimeoutException ||
+            error is http.ClientException ||
+            error is SocketException;
+        if (!initialLoad || attempt >= 1 || !transient) rethrow;
+        await Future<void>.delayed(initialFeedRetryDelay);
+      }
+    }
+  }
 
   Future<List<DiscoveryGame>> _load({
     required bool allowFallback,
     List<String>? excludeIds,
     int limit = 20,
+    Duration? requestTimeout,
   }) async {
     try {
-      final queryParams = <String, String>{
-        'limit': '$limit',
-      };
+      final queryParams = <String, String>{'limit': '$limit'};
       if (excludeIds != null && excludeIds.isNotEmpty) {
         queryParams['exclude'] = excludeIds.join(',');
       }
-      final uri = Uri.parse('$baseUrl/feed').replace(queryParameters: queryParams);
-      final response = await _client.get(uri).timeout(timeout);
+      final uri = Uri.parse(
+        '$baseUrl/feed',
+      ).replace(queryParameters: queryParams);
+      final response = await _client
+          .get(uri)
+          .timeout(requestTimeout ?? timeout);
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);

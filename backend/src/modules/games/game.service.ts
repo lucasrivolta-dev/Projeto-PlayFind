@@ -28,6 +28,7 @@ export interface GameSummaryDto {
   publisher?: string;
   description?: string;
   rating?: number;
+  ratingCount?: number;
   releaseDate?: Date;
   coverUrl?: string;
   heroUrl?: string;
@@ -36,6 +37,9 @@ export interface GameSummaryDto {
   igdbId?: number;
   genres: string[];
   platforms: string[];
+  likeCount?: number;
+  commentCount?: number;
+  stores?: Array<{ name: string; url?: string }>;
   steam?: {
     storeUrl: string;
     priceCents?: number;
@@ -76,6 +80,9 @@ function providerPriority(provider: NormalizedTrailer['provider']): number {
 function orderedTrailerDetails(mediaRows: { url: string; provider: string | null; mimeType: string | null; origin: string | null }[]): NormalizedTrailer[] {
   return mediaRows
     .map((m) => {
+      const isOfficial = m.origin
+        ? /\b(launch|official|reveal|announcement|teaser|press|cinematic)\b/i.test(m.origin)
+        : m.provider === 'DIRECT';
       if (m.provider != null) {
         const described = describeTrailer(m.url);
         return {
@@ -84,10 +91,12 @@ function orderedTrailerDetails(mediaRows: { url: string; provider: string | null
           ...(described.videoId ? { videoId: described.videoId } : {}),
           ...(m.mimeType ? { mimeType: m.mimeType } : {}),
           ...(m.origin ? { origin: m.origin } : {}),
+          isOfficial,
           // authorizationRef is NEVER included here
         } as NormalizedTrailer;
       }
-      return describeTrailer(m.url);
+      const described = describeTrailer(m.url);
+      return { ...described, isOfficial };
     })
     .sort((a, b) => providerPriority(a.provider) - providerPriority(b.provider));
 }
@@ -249,6 +258,23 @@ export class GameService {
 
     if (!record) return null;
 
+    let likeCount = 0;
+    let commentCount = 0;
+    if (this.prisma.userGameLibrary?.count) {
+      try {
+        likeCount = await this.prisma.userGameLibrary.count({
+          where: { gameId: record.id, liked: true },
+        });
+      } catch {}
+    }
+    if (this.prisma.comment?.count) {
+      try {
+        commentCount = await this.prisma.comment.count({
+          where: { gameId: record.id, deletedAt: null },
+        });
+      } catch {}
+    }
+
     const latestSteam = record.steamOffers[0];
     const screenshots = record.media.filter((m) => m.type === 'SCREENSHOT').map((m) => m.url);
     const trailerMediaRows = record.media.filter((m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY');
@@ -262,6 +288,24 @@ export class GameService {
       })),
     );
 
+    const stores: Array<{ name: string; url?: string }> = [];
+    if (latestSteam?.storeUrl) {
+      stores.push({ name: 'Steam', url: latestSteam.storeUrl });
+    }
+    const platformNames = record.platforms.map((p) => p.platform.name.toLowerCase());
+    if (platformNames.some((p) => p.includes('playstation') || p.includes('ps5') || p.includes('ps4'))) {
+      stores.push({ name: 'PS Store' });
+    }
+    if (platformNames.some((p) => p.includes('xbox'))) {
+      stores.push({ name: 'Xbox Store' });
+    }
+    if (platformNames.some((p) => p.includes('switch') || p.includes('nintendo'))) {
+      stores.push({ name: 'Nintendo eShop' });
+    }
+    if (platformNames.some((p) => p.includes('pc')) && !stores.some((s) => s.name === 'Epic')) {
+      stores.push({ name: 'Epic' });
+    }
+
     return {
       id: record.id,
       slug: record.slug,
@@ -270,6 +314,7 @@ export class GameService {
       publisher: record.publisher ?? undefined,
       description: record.description ?? undefined,
       rating: record.rating ?? undefined,
+      ratingCount: record.ratingCount ?? record.totalRatingCount ?? undefined,
       releaseDate: record.releaseDate ?? undefined,
       coverUrl: record.coverUrl ?? undefined,
       heroUrl: record.heroUrl ?? undefined,
@@ -278,6 +323,9 @@ export class GameService {
       igdbId: record.igdbId ?? undefined,
       genres: record.genres.map((g) => g.genre.name),
       platforms: record.platforms.map((p) => p.platform.name),
+      likeCount,
+      commentCount,
+      stores,
       screenshots,
       trailers,
       trailerDetails,
@@ -332,6 +380,36 @@ export class GameService {
       return eligibility.eligible;
     });
 
+    const eligibleIds = eligibleRecords.map((r) => r.id);
+    const likeMap = new Map<string, number>();
+    const commentMap = new Map<string, number>();
+
+    if (eligibleIds.length > 0 && this.prisma.userGameLibrary?.groupBy) {
+      try {
+        const likeGroups = await this.prisma.userGameLibrary.groupBy({
+          by: ['gameId'],
+          where: { gameId: { in: eligibleIds }, liked: true },
+          _count: { _all: true },
+        });
+        for (const g of likeGroups) {
+          likeMap.set(g.gameId, g._count._all);
+        }
+      } catch {}
+    }
+
+    if (eligibleIds.length > 0 && this.prisma.comment?.groupBy) {
+      try {
+        const commentGroups = await this.prisma.comment.groupBy({
+          by: ['gameId'],
+          where: { gameId: { in: eligibleIds }, deletedAt: null },
+          _count: { _all: true },
+        });
+        for (const g of commentGroups) {
+          commentMap.set(g.gameId, g._count._all);
+        }
+      } catch {}
+    }
+
     // 2. Map records and calculate discovery scores
     const scoredCandidates = eligibleRecords.map((record) => {
       const latestSteam = record.steamOffers[0];
@@ -370,6 +448,28 @@ export class GameService {
 
       const { score, breakdown } = calculateDiscoveryScore(scoringInput, now);
 
+      const likeCount = likeMap.get(record.id) ?? 0;
+      const commentCount = commentMap.get(record.id) ?? 0;
+      const ratingCount = record.ratingCount ?? record.totalRatingCount ?? null;
+
+      const stores: Array<{ name: string; url?: string }> = [];
+      if (latestSteam?.storeUrl) {
+        stores.push({ name: 'Steam', url: latestSteam.storeUrl });
+      }
+      const platformNames = record.platforms.map((p) => p.platform.name.toLowerCase());
+      if (platformNames.some((p) => p.includes('playstation') || p.includes('ps5') || p.includes('ps4'))) {
+        stores.push({ name: 'PS Store' });
+      }
+      if (platformNames.some((p) => p.includes('xbox'))) {
+        stores.push({ name: 'Xbox Store' });
+      }
+      if (platformNames.some((p) => p.includes('switch') || p.includes('nintendo'))) {
+        stores.push({ name: 'Nintendo eShop' });
+      }
+      if (platformNames.some((p) => p.includes('pc')) && !stores.some((s) => s.name === 'Epic')) {
+        stores.push({ name: 'Epic' });
+      }
+
       return {
         id: record.id,
         slug: record.slug,
@@ -378,6 +478,10 @@ export class GameService {
         publisher: record.publisher ?? '',
         description: record.description ?? '',
         rating: record.rating ? Number(record.rating.toFixed(1)) : null,
+        ratingCount,
+        likeCount,
+        commentCount,
+        stores,
         coverUrl: record.coverUrl ?? null,
         heroUrl: record.heroUrl ?? null,
         isFree: record.isFree,
@@ -468,6 +572,43 @@ export class GameService {
     return diverse.slice(0, safeLimit).map((item) => {
       const { discoveryScore, scoreBreakdown, createdAt, ...dto } = item;
       return dto;
+    });
+  }
+
+  async getGameComments(gameId: string) {
+    return this.prisma.comment.findMany({
+      where: { gameId, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            username: true,
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+  }
+
+  async addGameComment(gameId: string, userId: string, body: string) {
+    return this.prisma.comment.create({
+      data: {
+        gameId,
+        userId,
+        body,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            username: true,
+            avatarUrl: true,
+          },
+        },
+      },
     });
   }
 }

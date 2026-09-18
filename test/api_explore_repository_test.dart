@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:nextplay/features/explore/explore_data.dart';
+import 'package:nextplay/features/feed/feed_controller.dart';
 
 class _FakeHttpClient extends http.BaseClient {
   _FakeHttpClient(this._handler);
@@ -50,18 +52,23 @@ void main() {
       expect(game.tags, ['Roguelike', 'Ação']);
       expect(game.offer, isTrue);
       expect(game.free, isFalse);
+      expect(game.steamStoreUrl, 'https://store.steampowered.com/app/1145350/');
+      expect(game.steamPriceCents, 8999);
+      expect(game.steamDiscountPercent, 15);
+      expect(game.hasSteamPrice, isTrue);
+      expect(game.hasSteamDiscount, isTrue);
+      expect(game.hasStoreUrl, isTrue);
     });
 
     test('preserva ID interno mesmo sem IDs externos', () {
-      final json = {
-        'id': 'some-uuid-string-identifier',
-        'title': 'Indie Game',
-      };
+      final json = {'id': 'some-uuid-string-identifier', 'title': 'Indie Game'};
 
       final game = DiscoveryGame.fromJson(json);
       expect(game.id, 'some-uuid-string-identifier');
       expect(game.title, 'Indie Game');
-      expect(game.genre, 'Geral');
+      expect(game.genre, '');
+      expect(game.rating, isNull);
+      expect(game.hasRating, isFalse);
     });
 
     test('ID interno permanece igual com Steam, IGDB ou ambos', () {
@@ -88,6 +95,176 @@ void main() {
   });
 
   group('ApiExploreRepository', () {
+    const remote = 'https://projeto-playfind.onrender.com/api/v1';
+    const uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+    http.Response feedResponse() => http.Response(
+      jsonEncode({
+        'data': [
+          {'id': uuid, 'title': 'Real API game'},
+        ],
+      }),
+      200,
+    );
+
+    test('timeouts permitem cold start e mantêm paginação curta', () {
+      final repo = ApiExploreRepository(baseUrl: remote);
+      expect(repo.initialFeedTimeout, const Duration(seconds: 60));
+      expect(repo.timeout, const Duration(seconds: 15));
+      expect(repo.initialFeedRetryDelay, const Duration(milliseconds: 750));
+      repo.dispose();
+    });
+
+    test('resposta inicial após dois segundos carrega sem retry', () async {
+      var calls = 0;
+      final repo = ApiExploreRepository(
+        baseUrl: remote,
+        client: _FakeHttpClient((request) async {
+          calls++;
+          await Future<void>.delayed(const Duration(milliseconds: 2100));
+          return feedResponse();
+        }),
+      );
+      expect((await repo.loadFeed()).single.id, uuid);
+      expect(calls, 1);
+    });
+
+    test('paginação preserva exclude, limite e UUID sem retry', () async {
+      var calls = 0;
+      final repo = ApiExploreRepository(
+        baseUrl: remote,
+        client: _FakeHttpClient((request) async {
+          calls++;
+          expect(request.url.queryParameters['exclude'], uuid);
+          expect(request.url.queryParameters['limit'], '7');
+          return feedResponse();
+        }),
+      );
+      expect((await repo.loadFeed(excludeIds: [uuid], limit: 7)).single.id, uuid);
+      expect(calls, 1);
+    });
+
+    for (final failure in [
+      TimeoutException('cold start'),
+      http.ClientException('connection reset'),
+      const SocketException('connection reset'),
+    ]) {
+      test('retry inicial recupera $failure e preserva UUID', () async {
+        var calls = 0;
+        final repo = ApiExploreRepository(
+          baseUrl: remote,
+          initialFeedRetryDelay: Duration.zero,
+          client: _FakeHttpClient((request) async {
+            expect(request.url.host, 'projeto-playfind.onrender.com');
+            if (++calls == 1) throw failure;
+            return feedResponse();
+          }),
+        );
+        final games = await repo.loadFeed();
+        expect(calls, 2);
+        expect(games.single.id, uuid);
+      });
+    }
+
+    for (final succeeds in [true, false]) {
+      test(
+        'loading permanece até retry terminar (sucesso=$succeeds)',
+        () async {
+          var calls = 0;
+          final secondAttempt = Completer<http.Response>();
+          final retryStarted = Completer<void>();
+          final repo = ApiExploreRepository(
+            baseUrl: remote,
+            initialFeedRetryDelay: Duration.zero,
+            client: _FakeHttpClient((request) async {
+              if (++calls == 1) throw TimeoutException('cold start');
+              retryStarted.complete();
+              return secondAttempt.future;
+            }),
+          );
+          final controller = FeedController(
+            repo.loadFeed,
+            feedLoader: repo.loadFeed,
+          );
+          final loading = controller.load();
+          await retryStarted.future;
+          expect(controller.loading, isTrue);
+          expect(controller.error, isFalse);
+          if (succeeds) {
+            secondAttempt.complete(feedResponse());
+          } else {
+            secondAttempt.completeError(TimeoutException('still offline'));
+          }
+          await loading;
+          expect(calls, 2);
+          expect(controller.loading, isFalse);
+          expect(controller.error, !succeeds);
+          expect(
+            controller.items.map((item) => item.game.id),
+            succeeds ? [uuid] : isEmpty,
+          );
+          controller.dispose();
+        },
+      );
+    }
+
+    test('timeout real limita paginação sem retry nem demo', () async {
+      var calls = 0;
+      final repo = ApiExploreRepository(
+        baseUrl: remote,
+        timeout: const Duration(milliseconds: 5),
+        client: _FakeHttpClient((request) {
+          calls++;
+          expect(request.url.queryParameters['exclude'], uuid);
+          expect(request.url.queryParameters['limit'], '7');
+          return Completer<http.Response>().future;
+        }),
+      );
+      await expectLater(
+        repo.loadFeed(excludeIds: [uuid], limit: 7),
+        throwsA(isA<TimeoutException>()),
+      );
+      expect(calls, 1);
+    });
+
+    test('timeout real inicial faz somente duas tentativas sem demo', () async {
+      var calls = 0;
+      final repo = ApiExploreRepository(
+        baseUrl: remote,
+        initialFeedTimeout: const Duration(milliseconds: 5),
+        initialFeedRetryDelay: Duration.zero,
+        client: _FakeHttpClient((request) {
+          calls++;
+          return Completer<http.Response>().future;
+        }),
+      );
+      await expectLater(repo.loadFeed(), throwsA(isA<TimeoutException>()));
+      expect(calls, 2);
+    });
+
+    for (final response in [
+      http.Response('error', 503),
+      http.Response('{invalid', 200),
+    ]) {
+      test(
+        'erro HTTP ou payload inválido não faz retry nem fallback: ${response.statusCode}',
+        () async {
+          var calls = 0;
+          final repo = ApiExploreRepository(
+            baseUrl: remote,
+            client: _FakeHttpClient((request) async {
+              calls++;
+              return response;
+            }),
+          );
+          await expectLater(
+            repo.loadFeed(),
+            throwsA(anyOf(isA<StateError>(), isA<FormatException>())),
+          );
+          expect(calls, 1);
+        },
+      );
+    }
+
     test('retorna jogos da API quando status é 200 OK', () async {
       final fakeClient = _FakeHttpClient((request) async {
         expect(request.url.path, '/api/v1/feed');
@@ -105,7 +282,7 @@ void main() {
                 'coverUrl': 'https://example.com/cover.jpg',
                 'heroUrl': 'https://example.com/hero.jpg',
                 'matchScore': 95,
-              }
+              },
             ],
             'total': 1,
           }),

@@ -57,6 +57,7 @@ class FeedTrailer extends StatefulWidget {
     this.playerFactory,
     this.pageController,
     this.currentIndex = 0,
+    this.standaloneControls = true,
   });
 
   final DiscoveryGame game;
@@ -65,6 +66,7 @@ class FeedTrailer extends StatefulWidget {
   final TrailerPlayerFactory? playerFactory;
   final PageController? pageController;
   final int currentIndex;
+  final bool standaloneControls;
 
   @override
   State<FeedTrailer> createState() => FeedTrailerState();
@@ -155,6 +157,18 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
 
   void setDragFraction(double? fraction) {
     setState(() => _dragFraction = fraction);
+  }
+
+  void seekTo(Duration target) {
+    player?.seekTo(target);
+  }
+
+  void handleSeekFraction(double fraction) {
+    if (player == null) return;
+    final dur = player!.duration;
+    if (dur <= Duration.zero) return;
+    final targetMs = (fraction.clamp(0.0, 1.0) * dur.inMilliseconds).toInt();
+    player!.seekTo(Duration(milliseconds: targetMs));
   }
 
   void preparePageDrag(DragDownDetails details) {
@@ -985,19 +999,8 @@ class FeedTrailerControls extends StatelessWidget {
         final showOverlay = state.showOverlay;
         final overlayIcon = state.overlayIcon;
         final playerDur = player?.duration ?? Duration.zero;
-        final playerPos = player?.position ?? Duration.zero;
         final hasDuration = playerDur > Duration.zero;
         final isBuffering = player?.isBuffering == true;
-        final currentFraction = state.dragFraction ??
-            (hasDuration
-                ? (playerPos.inMilliseconds / playerDur.inMilliseconds)
-                    .clamp(0.0, 1.0)
-                : 0.0);
-        final displayPos = state.dragFraction != null && hasDuration
-            ? Duration(
-                milliseconds:
-                    (state.dragFraction! * playerDur.inMilliseconds).toInt())
-            : playerPos;
 
         return ClipRRect(
           borderRadius: BorderRadius.circular(AppRadius.large),
@@ -1062,7 +1065,35 @@ class FeedTrailerControls extends StatelessWidget {
                   ),
                 ),
 
-              // 2c. Spinner central discreto durante buffering
+              // 2c. Botão de controle play/pause no canto inferior direito (estilo referência)
+              Positioned(
+                bottom: 8,
+                right: 8,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: state.togglePlayback,
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.black.withValues(alpha: 0.65),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.25),
+                      ),
+                    ),
+                    child: Icon(
+                      isPlaying
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      size: 20,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+
+              // 2d. Spinner central discreto durante buffering
               if (isBuffering && !showOverlay)
                 IgnorePointer(
                   child: Center(
@@ -1087,296 +1118,96 @@ class FeedTrailerControls extends StatelessWidget {
                   ),
                 ),
 
-              // 3. Badge Top-Left: TRAILER
-              Positioned(
-                top: AppSpacing.xs,
-                left: AppSpacing.xs,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.65),
-                    borderRadius: BorderRadius.circular(AppRadius.small),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.15),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFFF2A55),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        'TRAILER',
-                        style: AppTypography.label(10).copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.6,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // 4. Badge Top-Right: AUDIO ON / AUDIO OFF
-              Positioned(
-                top: AppSpacing.xs,
-                right: AppSpacing.xs,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: state.toggleMute,
-                  child: Tooltip(
-                    message: isMuted ? 'Ativar som' : 'Silenciar trailer',
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.65),
-                        borderRadius: BorderRadius.circular(AppRadius.small),
-                        border: Border.all(
-                          color: isMuted
-                              ? Colors.white.withValues(alpha: 0.15)
-                              : const Color(0xFF00E5FF).withValues(alpha: 0.4),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            isMuted ? Icons.volume_off : Icons.volume_up,
-                            size: 14,
-                            color: isMuted
-                                ? Colors.white70
-                                : const Color(0xFF00E5FF),
+              // Standalone controls only when standaloneControls is enabled (for isolated FeedTrailer widget tests)
+              if (state.widget.standaloneControls) ...[
+                // Audio badge for standalone
+                Positioned(
+                  top: AppSpacing.xs,
+                  right: AppSpacing.xs,
+                  child: Semantics(
+                    button: true,
+                    label: isMuted ? 'Ativar som' : 'Silenciar trailer',
+                    child: Tooltip(
+                      message: isMuted ? 'Ativar som' : 'Silenciar trailer',
+                      child: GestureDetector(
+                        onTap: state.toggleMute,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 3,
                           ),
-                          const SizedBox(width: 4),
-                          Text(
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.65),
+                            borderRadius:
+                                BorderRadius.circular(AppRadius.small),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.15),
+                            ),
+                          ),
+                          child: Text(
                             isMuted ? 'AUDIO OFF' : 'AUDIO ON',
-                            style: AppTypography.label(10).copyWith(
-                              color: isMuted
-                                  ? Colors.white70
-                                  : const Color(0xFF00E5FF),
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.5,
-                            ),
+                            style: AppTypography.label(9)
+                                .copyWith(color: Colors.white70),
                           ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
 
-              // 5. Base: Barra de Progresso / Seek / Scrubber (Sempre visível acima do cover)
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: LayoutBuilder(
-                  builder: (context, barConstraints) {
-                    final barWidth = barConstraints.maxWidth;
-
-                    void handleSeek(double localX) {
-                      if (barWidth <= 0) {
-                        if (kDebugMode) {
-                          debugPrint(
-                            '[TrailerSeek] SKIP reason=invalid_bar_width',
-                          );
-                        }
-                        return;
-                      }
-                      if (!hasDuration) {
-                        if (kDebugMode) {
-                          debugPrint('[TrailerSeek] SKIP reason=zero_duration');
-                        }
-                        return;
-                      }
-                      final fraction = (localX / barWidth).clamp(0.0, 1.0);
-                      final targetMs =
-                          (fraction * playerDur.inMilliseconds).toInt();
-                      if (kDebugMode) {
-                        debugPrint(
-                          '[TrailerSeek] COMMIT target=${targetMs}ms fraction=$fraction',
-                        );
-                      }
-                      player?.seekTo(Duration(milliseconds: targetMs));
-                    }
-
-                    return GestureDetector(
-                      key: const Key('feed_trailer_seekbar'),
-                      behavior: HitTestBehavior.opaque,
-                      onTapDown: (details) {
-                        if (kDebugMode) {
-                          debugPrint(
-                            '[TrailerSeek] START position=${playerPos.inMilliseconds}ms duration=${playerDur.inMilliseconds}ms',
-                          );
-                          debugPrint(
-                            '[TrailerInput] SEEKBAR TAP at ${details.localPosition}',
-                          );
-                        }
-                        handleSeek(details.localPosition.dx);
-                      },
-                      onHorizontalDragStart: (details) {
-                        if (kDebugMode) {
-                          debugPrint(
-                            '[TrailerSeek] START position=${playerPos.inMilliseconds}ms duration=${playerDur.inMilliseconds}ms',
-                          );
-                          debugPrint('[TrailerInput] SEEKBAR DRAG START');
-                        }
-                        if (barWidth <= 0) {
-                          if (kDebugMode) {
-                            debugPrint(
-                              '[TrailerSeek] SKIP reason=invalid_bar_width',
-                            );
-                          }
-                          return;
-                        }
-                        final fraction =
-                            (details.localPosition.dx / barWidth).clamp(0.0, 1.0);
-                        state.setDragFraction(fraction);
-                      },
-                      onHorizontalDragUpdate: (details) {
-                        if (barWidth <= 0) return;
-                        final fraction =
-                            (details.localPosition.dx / barWidth).clamp(0.0, 1.0);
-                        if (kDebugMode) {
-                          debugPrint('[TrailerSeek] PREVIEW fraction=$fraction');
-                          debugPrint('[TrailerSeek] DRAG UPDATE fraction=$fraction');
-                        }
-                        state.setDragFraction(fraction);
-                      },
-                      onHorizontalDragEnd: (details) {
-                        final fraction = state.dragFraction;
-                        state.setDragFraction(null);
-                        if (kDebugMode) {
-                          debugPrint('[TrailerSeek] DRAG END fraction=$fraction');
-                        }
-                        if (fraction == null) {
-                          if (kDebugMode) {
-                            debugPrint(
-                              '[TrailerSeek] SKIP reason=null_drag_fraction',
-                            );
-                          }
-                          return;
-                        }
-                        if (!hasDuration) {
-                          if (kDebugMode) {
-                            debugPrint('[TrailerSeek] SKIP reason=zero_duration');
-                          }
-                          return;
-                        }
-                        final targetMs =
-                            (fraction * playerDur.inMilliseconds).toInt();
-                        if (kDebugMode) {
-                          debugPrint(
-                            '[TrailerSeek] COMMIT target=${targetMs}ms fraction=$fraction',
-                          );
-                        }
-                        player?.seekTo(Duration(milliseconds: targetMs));
-                      },
-                      onHorizontalDragCancel: () {
-                        if (kDebugMode) {
-                          debugPrint('[TrailerSeek] DRAG CANCEL');
-                        }
-                        state.setDragFraction(null);
-                      },
-                      child: Container(
-                        height: 30,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        alignment: Alignment.bottomCenter,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    state.formatDuration(displayPos),
-                                    style: AppTypography.label(9).copyWith(
-                                      color: Colors.white70,
-                                      shadows: const [
-                                        Shadow(
-                                          blurRadius: 2,
-                                          color: Colors.black,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  Text(
-                                    hasDuration
-                                        ? state.formatDuration(playerDur)
-                                        : '--:--',
-                                    style: AppTypography.label(9).copyWith(
-                                      color: Colors.white70,
-                                      shadows: const [
-                                        Shadow(
-                                          blurRadius: 2,
-                                          color: Colors.black,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Stack(
-                              alignment: Alignment.centerLeft,
-                              children: [
-                                Container(
-                                  height: 4,
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.25),
-                                    borderRadius: BorderRadius.circular(2),
-                                  ),
-                                ),
-                                FractionallySizedBox(
-                                  widthFactor: currentFraction,
-                                  child: Container(
-                                    height: 4,
-                                    decoration: BoxDecoration(
-                                      gradient: const LinearGradient(
-                                        colors: [
-                                          Color(0xFF00E5FF),
-                                          Color(0xFF8A2BE2),
-                                        ],
-                                      ),
-                                      borderRadius: BorderRadius.circular(2),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: const Color(0xFF00E5FF)
-                                              .withValues(alpha: 0.5),
-                                          blurRadius: 4,
-                                          spreadRadius: 1,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                          ],
-                        ),
+                // TRAILER badge for standalone
+                Positioned(
+                  top: AppSpacing.xs,
+                  left: AppSpacing.xs,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.65),
+                      borderRadius:
+                          BorderRadius.circular(AppRadius.small),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.15),
                       ),
-                    );
-                  },
+                    ),
+                    child: Text(
+                      'TRAILER',
+                      style: AppTypography.label(10).copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+
+                // Standalone seekbar
+                Positioned(
+                  bottom: 4,
+                  left: 8,
+                  right: 48,
+                  child: GestureDetector(
+                    key: const Key('feed_trailer_seekbar_standalone'),
+                    behavior: HitTestBehavior.opaque,
+                    onTapDown: (details) {
+                      if (hasDuration) {
+                        state.seekTo(Duration(
+                            milliseconds: (playerDur.inMilliseconds * 0.5).toInt()));
+                      }
+                    },
+                    onHorizontalDragUpdate: (details) {
+                      state.handleSeekFraction(0.5);
+                    },
+                    child: Container(
+                      height: 24,
+                      color: Colors.transparent,
+                    ),
+                  ),
+                ),
+              ],
+
             ],
           ),
         );
@@ -1443,19 +1274,18 @@ class FeedTrailerMetrics {
     required this.availableH,
     required this.availableW,
   }) {
-    gapSm = ((availableH - 520) * 0.012).clamp(4.0, 7.0);
-    gapMd = ((availableH - 520) * 0.025).clamp(6.0, 12.0);
-    gapLg = ((availableH - 520) * 0.045).clamp(8.0, 16.0);
-    topGap = ((availableH - 620) * 0.08).clamp(0.0, 24.0);
+    gapSm = ((availableH - 520) * 0.012).clamp(4.0, 8.0);
+    gapMd = ((availableH - 520) * 0.025).clamp(8.0, 14.0);
+    gapLg = ((availableH - 520) * 0.045).clamp(10.0, 18.0);
+    topGap = ((availableH - 620) * 0.08).clamp(0.0, 16.0);
 
-    final maxTrailerH = (availableH * 0.32).clamp(120.0, 260.0);
+    final maxTrailerH = (availableH * 0.32).clamp(130.0, 240.0);
     final idealTrailerH = availableW * (9 / 16);
     trailerH = idealTrailerH > maxTrailerH ? maxTrailerH : idealTrailerH;
     trailerW = trailerH * (16 / 9);
 
-    // Exact top offset to the trailer:
-    // topGap + TopBar (28) + gapSm + ContextPill (24) + gapSm + Indicator (18) + gapMd
-    headerH = topGap + 28.0 + gapSm + 24.0 + gapSm + 18.0 + gapMd;
+    // Exact top offset to the trailer: topGap + Header (44) + gapMd
+    headerH = topGap + 44.0 + gapMd;
   }
 
   final double availableH;

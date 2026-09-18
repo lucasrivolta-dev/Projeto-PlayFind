@@ -128,60 +128,126 @@ class AppBottomNavigation extends StatelessWidget {
   final AppDestination selected;
   final ValueChanged<AppDestination> onSelected;
 
+  static const List<AppDestination> visualDestinations = [
+    AppDestination.home,
+    AppDestination.explore,
+    AppDestination.forum,
+    AppDestination.library,
+    AppDestination.profile,
+  ];
+
   @override
-  Widget build(BuildContext context) => ClipRect(
+  Widget build(BuildContext context) => ClipRRect(
+        borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(AppRadius.hero)),
         child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
             child: Container(
-              decoration: const BoxDecoration(
-                  color: AppColors.glass,
-                  border: Border(top: BorderSide(color: AppColors.border))),
+              decoration: BoxDecoration(
+                color: AppColors.glass,
+                borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(AppRadius.hero)),
+                border: Border(
+                  top: BorderSide(
+                    color: AppColors.primary.withValues(alpha: 0.22),
+                    width: 1.0,
+                  ),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.12),
+                    blurRadius: 20,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+              ),
               child: SafeArea(
-                  top: false,
-                  child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-                    child: Row(
-                        children: AppDestination.values.map((item) {
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.only(
+                    top: AppSpacing.xs,
+                    bottom: AppSpacing.xxs,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: visualDestinations.map((item) {
                       final active = item == selected;
+
                       return Expanded(
-                          child: Semantics(
-                        selected: active,
-                        child: InkWell(
-                          key: ValueKey(item),
-                          onTap: () => onSelected(item),
-                          child: Padding(
+                        child: Semantics(
+                          button: true,
+                          selected: active,
+                          label: item.label,
+                          child: InkWell(
+                            key: ValueKey(item),
+                            onTap: () => onSelected(item),
+                            borderRadius: BorderRadius.circular(AppRadius.large),
+                            child: Padding(
                               padding: const EdgeInsets.symmetric(
                                   vertical: AppSpacing.xxs),
                               child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    AnimatedContainer(
-                                        duration:
-                                            const Duration(milliseconds: 180),
-                                        padding:
-                                            const EdgeInsets.all(AppSpacing.xs),
-                                        decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            color: active
-                                                ? AppColors.primary
-                                                : AppColors.transparent),
-                                        child: Icon(item.icon,
-                                            size: 22,
-                                            color: active
-                                                ? AppColors.text
-                                                : AppColors.secondary)),
-                                    const SizedBox(height: AppSpacing.xxs),
-                                    Text(item.label,
-                                        style: AppTypography.label(10).copyWith(
-                                            color: active
-                                                ? AppColors.primary
-                                                : AppColors.secondary)),
-                                  ])),
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  AnimatedContainer(
+                                    duration:
+                                        const Duration(milliseconds: 200),
+                                    width: 44,
+                                    height: 44,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: active
+                                          ? AppColors.primary
+                                          : AppColors.transparent,
+                                      border: active
+                                          ? Border.all(
+                                              color: Colors.white
+                                                  .withValues(alpha: 0.3),
+                                              width: 1.0,
+                                            )
+                                          : null,
+                                      boxShadow: active
+                                          ? [
+                                              BoxShadow(
+                                                color: AppColors.primary
+                                                    .withValues(alpha: 0.45),
+                                                blurRadius: 14,
+                                                spreadRadius: 1,
+                                                offset: const Offset(0, 2),
+                                              ),
+                                            ]
+                                          : null,
+                                    ),
+                                    child: Icon(
+                                      item.icon,
+                                      size: 22,
+                                      color: active
+                                          ? Colors.white
+                                          : AppColors.secondary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    item.label,
+                                    style: AppTypography.label(10).copyWith(
+                                      color: active
+                                          ? AppColors.primary
+                                          : AppColors.secondary,
+                                      fontWeight: active
+                                          ? FontWeight.w700
+                                          : FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
-                      ));
-                    }).toList()),
-                  )),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
             )),
       );
 }

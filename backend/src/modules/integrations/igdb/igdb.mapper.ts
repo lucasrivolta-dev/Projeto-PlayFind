@@ -101,6 +101,11 @@ export function mapIgdbGame(dto: IgdbGameDto): NormalizedGame {
   trailerDetails.sort((a, b) =>
     trailerNamePriority(a.videoId ?? '') - trailerNamePriority(b.videoId ?? ''),
   );
+  for (const t of trailerDetails) {
+    if (trailerNamePriority(t.videoId ?? '') === 0) {
+      t.isOfficial = true;
+    }
+  }
   const trailers = trailerDetails.map((trailer) => trailer.url);
   return {
     title: dto.name,

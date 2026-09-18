@@ -17,11 +17,11 @@ class FeedComment {
 class FeedItem {
   const FeedItem(
       {required this.game,
-      required this.match,
-      required this.caption,
-      required this.comments});
+      this.match,
+      this.caption = '',
+      this.comments = const []});
   final DiscoveryGame game;
-  final int match;
+  final int? match;
   final String caption;
   final List<FeedComment> comments;
 }
@@ -76,11 +76,27 @@ class FeedController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  List<FeedItem> _buildFeedItems(List<DiscoveryGame> games, {required int offset}) {
+  int realLikeCount(DiscoveryGame game) {
+    final isLikedNow = liked.contains(game.id);
+    return game.likeCount + (isLikedNow ? 1 : 0);
+  }
+
+  int realCommentCount(DiscoveryGame game) {
+    final added = addedComments[game.id]?.length ?? 0;
+    if (game.commentCount > 0) {
+      return game.commentCount + added;
+    }
+    for (final it in items) {
+      if (it.game.id == game.id) {
+        return it.comments.length + added;
+      }
+    }
+    return added;
+  }
+
+  List<FeedItem> _buildFeedItems(List<DiscoveryGame> games) {
     library.registerGames(games);
-    return games.asMap().entries.map((entry) {
-      final index = offset + entry.key;
-      final game = entry.value;
+    return games.map((game) {
       final comments = [
         FeedComment(
             user: 'marina.games',
@@ -94,28 +110,14 @@ class FeedController extends ChangeNotifier {
             likes: 7,
             reply: true),
       ];
-      // Captions editoriais rotativos — funcionam para qualquer N de jogos.
-      const captions = [
-        'Uma aventura que recompensa cada minuto de exploração.',
-        'Quando você quer uma história para esquecer do mundo por algumas horas.',
-        'Encontre seu esquadrão. A próxima missão começa agora.',
-        'Pequeno no tamanho. Gigante nos segredos.',
-        'Uma mão nunca é igual à outra.',
-        'O mundo está esperando por você.',
-        'Horas se passam sem você perceber.',
-        'Difícil de largár depois do primeiro nível.',
-        'Uma experiência que fica na memória.',
-        'Descubra o que está além do horizonte.',
-      ];
-      // matchScore vem da API quando disponível; caso contrário usa valor editorial rotativo.
-      const fallbackMatches = [94, 87, 91, 82, 89, 78, 85, 92, 88, 80];
-      final match =
-          game.matchScore ?? fallbackMatches[index % fallbackMatches.length];
       return FeedItem(
-          game: game,
-          match: match,
-          caption: captions[index % captions.length],
-          comments: comments);
+        game: game,
+        match: game.matchScore,
+        caption: game.description.isNotEmpty
+            ? game.description
+            : 'Uma aventura que recompensa cada minuto de exploração.',
+        comments: comments,
+      );
     }).toList();
   }
 
@@ -141,7 +143,7 @@ class FeedController extends ChangeNotifier {
       if (games.isEmpty) {
         hasMore = false;
       }
-      items = _buildFeedItems(games, offset: 0);
+      items = _buildFeedItems(games);
       // Loading replaces the PageView; its first page and trailer must agree.
       current = 0;
     } catch (_) {
@@ -175,7 +177,7 @@ class FeedController extends ChangeNotifier {
       if (newGames.isEmpty) {
         hasMore = false;
       } else {
-        final newItems = _buildFeedItems(newGames, offset: items.length);
+        final newItems = _buildFeedItems(newGames);
         items.addAll(newItems);
       }
     } catch (_) {

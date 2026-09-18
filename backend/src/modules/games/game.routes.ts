@@ -65,6 +65,24 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (fastify,
     return reply.status(200).send(game);
   });
 
+  fastify.get('/games/:id/comments', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const comments = await service.getGameComments(id);
+    return reply.status(200).send({
+      data: comments.map((c) => ({
+        id: c.id,
+        gameId: c.gameId,
+        user: c.user.username || c.user.name,
+        avatarUrl: c.user.avatarUrl,
+        text: c.body,
+        time: c.createdAt.toISOString(),
+        likes: 0,
+        reply: Boolean(c.parentId),
+      })),
+      total: comments.length,
+    });
+  });
+
   fastify.get('/feed', async (request, reply) => {
     const query = request.query as { limit?: string; exclude?: string | string[] };
     const limit = query.limit === undefined ? 20 : Number(query.limit);

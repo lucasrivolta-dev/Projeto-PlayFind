@@ -1,7 +1,8 @@
 import 'dart:async';
 
-import '../game_detail/game_detail_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../game_detail/game_detail_screen.dart';
 import '../../design_system/components.dart';
 import '../../design_system/theme.dart';
 import 'feed_controller.dart';
@@ -19,11 +20,13 @@ class FeedScreen extends StatefulWidget {
     this.auth,
     this.active = true,
     this.playerFactory,
+    this.onSearch,
   });
   final FeedController controller;
   final AuthController? auth;
   final bool active;
   final TrailerPlayerFactory? playerFactory;
+  final VoidCallback? onSearch;
 
   @override
   State<FeedScreen> createState() => _FeedScreenState();
@@ -137,6 +140,7 @@ class _FeedScreenState extends State<FeedScreen> {
                                 playerFactory: widget.playerFactory,
                                 pageController: _pageController,
                                 currentIndex: widget.controller.current,
+                                standaloneControls: false,
                                 child: pages,
                               ),
                               itemCount: widget.controller.items.length,
@@ -151,10 +155,21 @@ class _FeedScreenState extends State<FeedScreen> {
                                     context, widget.controller.items[index]),
                                 onDetails: () => _details(
                                     context, widget.controller.items[index]),
+                                onSearch: widget.onSearch,
                               ),
                             )));
             });
           }));
+}
+
+String _formatCompact(int count) {
+  if (count < 1000) return count.toString();
+  if (count < 1000000) {
+    final d = count / 1000;
+    return '${d.toStringAsFixed(d >= 10 ? 0 : 1)}k';
+  }
+  final d = count / 1000000;
+  return '${d.toStringAsFixed(d >= 10 ? 0 : 1)}M';
 }
 
 class _FeedPage extends StatelessWidget {
@@ -165,6 +180,7 @@ class _FeedPage extends StatelessWidget {
     required this.onComments,
     required this.onDetails,
     required this.onProtected,
+    this.onSearch,
   });
 
   final FeedItem item;
@@ -172,291 +188,284 @@ class _FeedPage extends StatelessWidget {
   final FeedController controller;
   final VoidCallback onComments, onDetails;
   final Future<void> Function(VoidCallback action) onProtected;
+  final VoidCallback? onSearch;
 
   @override
-  Widget build(BuildContext context) => Material(
-        type: MaterialType.transparency,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final availableH = constraints.maxHeight;
-            final availableW = constraints.maxWidth - (AppSpacing.margin * 2);
-            final metrics = FeedTrailerMetrics(
-              availableH: availableH,
-              availableW: availableW,
-            );
-            final trailerH = metrics.trailerH;
-            final trailerW = metrics.trailerW;
+  Widget build(BuildContext context) {
+    final trailerState = FeedTrailerScope.maybeOf(context);
+    final game = item.game;
 
-            return SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.margin,
-                  vertical: AppSpacing.xs,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SizedBox(height: metrics.topGap),
+    return Material(
+      type: MaterialType.transparency,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final availableH = constraints.maxHeight;
+          final availableW = constraints.maxWidth - (AppSpacing.margin * 2);
+          final metrics = FeedTrailerMetrics(
+            availableH: availableH,
+            availableW: availableW,
+          );
+          final trailerH = metrics.trailerH;
+          final trailerW = metrics.trailerW;
 
-                    // 1. Top bar
-                    Row(
+          return SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.margin,
+                vertical: AppSpacing.xs,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(height: metrics.topGap),
+
+                  // 1. Top Header Bar (44px) - Glass Search, NextPlay Logo, Audio Toggle
+                  SizedBox(
+                    height: 44.0,
+                    child: Row(
                       children: [
-                        Container(
-                          padding: const EdgeInsets.all(5),
-                          decoration: BoxDecoration(
-                            color: AppColors.primary.withValues(alpha: 0.2),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.sports_esports_rounded,
-                            color: AppColors.primary,
-                            size: 18,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        RichText(
-                          text: TextSpan(
-                            style: AppTypography.title(18).copyWith(
-                              fontWeight: FontWeight.w800,
-                            ),
-                            children: const [
-                              TextSpan(
-                                text: 'Next',
-                                style: TextStyle(color: Colors.white),
-                              ),
-                              TextSpan(
-                                text: 'Play',
-                                style: TextStyle(color: AppColors.primary),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const Spacer(),
-                        CircleAvatar(
-                          radius: 14,
-                          backgroundColor: AppColors.surface,
-                          child: const Icon(
-                            Icons.person_outline,
-                            size: 16,
-                            color: AppColors.text,
-                          ),
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: metrics.gapSm),
-
-                    // 2. Context Pill (baseada em dados reais)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface.withValues(alpha: 0.8),
-                        borderRadius: BorderRadius.circular(AppRadius.base),
-                        border: Border.all(color: AppColors.border),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.auto_awesome,
-                            size: 13,
-                            color: Color(0xFF00E5FF),
-                          ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              item.game.genre.isNotEmpty
-                                  ? 'Destaque em ${item.game.genre}'
-                                  : '${item.match}% de afinidade com o seu perfil',
-                              style: AppTypography.label(10).copyWith(
-                                color: AppColors.text,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    SizedBox(height: metrics.gapSm),
-
-                    // 3. Linha de paginação do Feed (dados reais)
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.high,
-                            borderRadius:
-                                BorderRadius.circular(AppRadius.small),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                'FEED ${(controller.current + 1).toString().padLeft(2, '0')}/${controller.items.length.toString().padLeft(2, '0')}',
-                                style: AppTypography.label(9).copyWith(
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.5,
+                        // Search Button
+                        Semantics(
+                          button: true,
+                          label: 'Buscar',
+                          child: Tooltip(
+                            message: 'Buscar jogos',
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: onSearch,
+                                borderRadius: BorderRadius.circular(22),
+                                child: Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: AppColors.low.withValues(alpha: 0.8),
+                                    border: Border.all(color: AppColors.border),
+                                  ),
+                                  child: const Icon(
+                                    Icons.search_rounded,
+                                    color: AppColors.text,
+                                    size: 20,
+                                  ),
                                 ),
                               ),
-                              const SizedBox(width: 2),
-                              const Icon(
-                                Icons.swap_vert,
-                                size: 12,
-                                color: AppColors.secondary,
-                              ),
-                            ],
+                            ),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: List.generate(
-                            controller.items.length.clamp(1, 6),
-                            (dotIdx) => Container(
-                              margin:
-                                  const EdgeInsets.symmetric(horizontal: 2),
-                              width: dotIdx == controller.current ? 12 : 5,
-                              height: 5,
-                              decoration: BoxDecoration(
-                                color: dotIdx == controller.current
-                                    ? AppColors.primary
-                                    : AppColors.border,
-                                borderRadius: BorderRadius.circular(3),
+
+                        // Logo Central NextPlay
+                        Expanded(
+                          child: Center(
+                            child: RichText(
+                              text: TextSpan(
+                                style: AppTypography.title(20).copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.5,
+                                ),
+                                children: const [
+                                  TextSpan(
+                                    text: 'Next',
+                                    style: TextStyle(color: Colors.white),
+                                  ),
+                                  TextSpan(
+                                    text: 'Play',
+                                    style: TextStyle(color: AppColors.primary),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // Audio Toggle Button
+                        Semantics(
+                          button: true,
+                          label: 'Alternar áudio',
+                          child: Tooltip(
+                            message: (trailerState?.isMuted ?? true)
+                                ? 'Ativar som'
+                                : 'Silenciar trailer',
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: () => trailerState?.toggleMute(),
+                                borderRadius: BorderRadius.circular(22),
+                                child: Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: AppColors.low.withValues(alpha: 0.8),
+                                    border: Border.all(color: AppColors.border),
+                                  ),
+                                  child: Icon(
+                                    (trailerState?.isMuted ?? true)
+                                        ? Icons.volume_off_rounded
+                                        : Icons.volume_up_rounded,
+                                    color: (trailerState?.isMuted ?? true)
+                                        ? AppColors.secondary
+                                        : const Color(0xFF00E5FF),
+                                    size: 20,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ],
                     ),
-                    SizedBox(height: metrics.gapMd),
+                  ),
 
-                    // 4. Trailer 16:9 contido em caixa elegante
-                    Center(
-                      child: SizedBox(
-                        width: trailerW,
-                        height: trailerH,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(AppRadius.large),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: AppColors.surface
-                                  .withValues(alpha: active ? 0.0 : 1.0),
-                              borderRadius:
-                                  BorderRadius.circular(AppRadius.large),
-                              border: Border.all(
-                                color: active
-                                    ? Colors.transparent
-                                    : AppColors.border,
-                              ),
+                  SizedBox(height: metrics.gapMd),
+
+                  // 2. Trailer Container 16:9 (Alinhado exatamente com FeedTrailer e FeedTrailerControls)
+                  Center(
+                    child: SizedBox(
+                      width: trailerW,
+                      height: trailerH,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(AppRadius.hero),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color:
+                                active ? Colors.transparent : AppColors.surface,
+                            borderRadius:
+                                BorderRadius.circular(AppRadius.hero),
+                            border: Border.all(
+                              color: active
+                                  ? AppColors.primary.withValues(alpha: 0.25)
+                                  : AppColors.border,
+                              width: 1.0,
                             ),
-                            child: active
-                                ? const SizedBox.expand()
-                                : FeedArtwork(game: item.game),
+                            boxShadow: active
+                                ? [
+                                    BoxShadow(
+                                      color: AppColors.primary
+                                          .withValues(alpha: 0.15),
+                                      blurRadius: 16,
+                                      spreadRadius: 0,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ]
+                                : null,
                           ),
+                          child: active
+                              ? const SizedBox.expand()
+                              : FeedArtwork(game: game),
                         ),
                       ),
                     ),
-                    SizedBox(height: metrics.gapMd),
+                  ),
 
-                    // 5. Barra Social Integrada (logo abaixo do trailer)
-                    _Actions(
-                      item: item,
-                      controller: controller,
-                      onComments: onComments,
-                      onProtected: onProtected,
-                    ),
-                    SizedBox(height: metrics.gapMd),
+                  SizedBox(height: metrics.gapMd),
 
-                    // 6. Informações do Jogo (Abaixo das Ações)
-                    InkWell(
-                      onTap: onDetails,
-                      borderRadius: BorderRadius.circular(AppRadius.base),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            // Título + Plataformas
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    item.game.title,
-                                    style: AppTypography.title(19).copyWith(
-                                      fontWeight: FontWeight.w800,
+                  // 3. 5 Botões Circulares de Ações Sociais (Estilo Obsidian Kinetic / Referência Visual)
+                  _Actions(
+                    item: item,
+                    controller: controller,
+                    onComments: onComments,
+                    onProtected: onProtected,
+                  ),
+
+                  SizedBox(height: metrics.gapSm),
+
+                  // 4. Detalhes do Jogo (Apenas dados reais recebidos da API!)
+                  InkWell(
+                    onTap: onDetails,
+                    borderRadius: BorderRadius.circular(AppRadius.large),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 4,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Badges: Trailer Oficial + Nota real + Afinidade real + Gêneros reais + Modo
+                          Row(
+                            children: [
+                              if (game.isOfficialTrailer) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary
+                                        .withValues(alpha: 0.18),
+                                    borderRadius:
+                                        BorderRadius.circular(AppRadius.base),
+                                    border: Border.all(
+                                      color: AppColors.primary
+                                          .withValues(alpha: 0.5),
                                     ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  child: Text(
+                                    'TRAILER OFICIAL',
+                                    style: AppTypography.label(10).copyWith(
+                                      color: AppColors.primary,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.4,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(width: 6),
-                                ...item.game.platforms.take(3).map(
-                                  (p) => Padding(
-                                    padding: const EdgeInsets.only(left: 4),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 5,
-                                        vertical: 2,
+                              ],
+                              if (game.hasRating) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF10B981)
+                                        .withValues(alpha: 0.15),
+                                    borderRadius:
+                                        BorderRadius.circular(AppRadius.base),
+                                    border: Border.all(
+                                      color: const Color(0xFF10B981)
+                                          .withValues(alpha: 0.4),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.star_rounded,
+                                        size: 13,
+                                        color: Color(0xFF10B981),
                                       ),
-                                      decoration: BoxDecoration(
-                                        color: AppColors.high,
-                                        borderRadius: BorderRadius.circular(
-                                            AppRadius.small),
-                                        border:
-                                            Border.all(color: AppColors.border),
-                                      ),
-                                      child: Text(
-                                        p,
-                                        style: AppTypography.label(9).copyWith(
-                                          color: AppColors.text,
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        game.hasRatingCount
+                                            ? '${game.rating} (${_formatCompact(game.ratingCount!)})'
+                                            : game.rating!,
+                                        style: AppTypography.label(10).copyWith(
+                                          color: const Color(0xFF10B981),
                                           fontWeight: FontWeight.w700,
                                         ),
                                       ),
-                                    ),
+                                    ],
                                   ),
                                 ),
+                                const SizedBox(width: 6),
                               ],
-                            ),
-                            const SizedBox(height: 2),
-                            // Estúdio
-                            Text(
-                              item.game.studio +
-                                  (item.game.publisher != null &&
-                                          item.game.publisher!.isNotEmpty
-                                      ? ' • ${item.game.publisher}'
-                                      : ''),
-                              style: AppTypography.body(11)
-                                  .copyWith(color: AppColors.secondary),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 5),
-                            // Badges de compatibilidade e rating
-                            Row(
-                              children: [
+                              if (item.match != null) ...[
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 2,
+                                    horizontal: 7,
+                                    vertical: 3,
                                   ),
                                   decoration: BoxDecoration(
                                     color: const Color(0xFFFF2A55)
-                                        .withValues(alpha: 0.15),
-                                    borderRadius: BorderRadius.circular(
-                                        AppRadius.small),
+                                        .withValues(alpha: 0.12),
+                                    borderRadius:
+                                        BorderRadius.circular(AppRadius.base),
                                     border: Border.all(
                                       color: const Color(0xFFFF2A55)
-                                          .withValues(alpha: 0.4),
+                                          .withValues(alpha: 0.35),
                                     ),
                                   ),
                                   child: Row(
@@ -468,9 +477,8 @@ class _FeedPage extends StatelessWidget {
                                       ),
                                       const SizedBox(width: 3),
                                       Text(
-                                        '${item.match}% compatível',
-                                        style:
-                                            AppTypography.label(9).copyWith(
+                                        '${item.match}%',
+                                        style: AppTypography.label(10).copyWith(
                                           color: const Color(0xFFFF5277),
                                           fontWeight: FontWeight.w700,
                                         ),
@@ -479,114 +487,338 @@ class _FeedPage extends StatelessWidget {
                                   ),
                                 ),
                                 const SizedBox(width: 6),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF00E5FF)
-                                        .withValues(alpha: 0.12),
-                                    borderRadius: BorderRadius.circular(
-                                        AppRadius.small),
-                                    border: Border.all(
-                                      color: const Color(0xFF00E5FF)
-                                          .withValues(alpha: 0.35),
-                                    ),
-                                  ),
+                              ],
+                              // Gêneros reais e Modo
+                              Expanded(
+                                child: SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
                                   child: Row(
-                                    mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const Icon(
-                                        Icons.star_rounded,
-                                        size: 12,
-                                        color: Color(0xFF00E5FF),
-                                      ),
-                                      const SizedBox(width: 2),
-                                      Text(
-                                        '${item.game.rating} Meta',
-                                        style:
-                                            AppTypography.label(9).copyWith(
-                                          color: const Color(0xFF00E5FF),
-                                          fontWeight: FontWeight.w700,
+                                      for (final g in (game.genres.isNotEmpty
+                                          ? game.genres.take(3)
+                                          : (game.hasGenre
+                                              ? [game.genre]
+                                              : <String>[])))
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(right: 6),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 7,
+                                              vertical: 3,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.high,
+                                              borderRadius:
+                                                  BorderRadius.circular(
+                                                      AppRadius.base),
+                                              border: Border.all(
+                                                  color: AppColors.border),
+                                            ),
+                                            child: Text(
+                                              g,
+                                              style: AppTypography.label(10)
+                                                  .copyWith(
+                                                color: AppColors.text,
+                                              ),
+                                            ),
+                                          ),
                                         ),
-                                      ),
+                                      if (game.mode != null &&
+                                          game.mode!.isNotEmpty)
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(right: 6),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 7,
+                                              vertical: 3,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.high,
+                                              borderRadius:
+                                                  BorderRadius.circular(
+                                                      AppRadius.base),
+                                              border: Border.all(
+                                                  color: AppColors.border),
+                                            ),
+                                            child: Text(
+                                              game.mode!,
+                                              style: AppTypography.label(10)
+                                                  .copyWith(
+                                                color: AppColors.secondary,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
                                     ],
                                   ),
                                 ),
-                                if (item.game.genre.isNotEmpty) ...[
-                                  const SizedBox(width: 6),
-                                  Flexible(
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: AppColors.high,
-                                        borderRadius: BorderRadius.circular(
-                                            AppRadius.small),
-                                        border: Border.all(
-                                            color: AppColors.border),
-                                      ),
-                                      child: Text(
-                                        item.game.genre,
-                                        style:
-                                            AppTypography.label(9).copyWith(
-                                          color: AppColors.text,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ],
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+
+                          // Título do Jogo
+                          Text(
+                            game.title,
+                            style: AppTypography.title(22).copyWith(
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.5,
                             ),
-                            const SizedBox(height: 5),
-                            // Descrição curta
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 3),
+
+                          // Descrição Curta (Apenas dados reais, sem texto inventado)
+                          if (game.hasDescription) ...[
                             Text(
-                              item.caption,
-                              style: AppTypography.body(11)
-                                  .copyWith(color: AppColors.text),
+                              game.description,
+                              style: AppTypography.body(12).copyWith(
+                                color: AppColors.secondary,
+                              ),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
+                            const SizedBox(height: 6),
+                          ] else if (item.caption.isNotEmpty) ...[
+                            Text(
+                              item.caption,
+                              style: AppTypography.body(12).copyWith(
+                                color: AppColors.secondary,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 6),
                           ],
-                        ),
-                      ),
-                    ),
 
-                    const Spacer(),
+                          // Linha de Preço, Lojas e Ação CTA
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Expanded(
+                                child: SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
+                                    children: [
+                                      // Desconto real se existir
+                                      if (game.hasSteamDiscount) ...[
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 3,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.positive
+                                                .withValues(alpha: 0.2),
+                                            borderRadius: BorderRadius.circular(
+                                                AppRadius.small),
+                                            border: Border.all(
+                                              color: AppColors.positive
+                                                  .withValues(alpha: 0.5),
+                                            ),
+                                          ),
+                                          child: Text(
+                                            '-${game.steamDiscountPercent}%',
+                                            style: AppTypography.label(11).copyWith(
+                                              color: AppColors.positive,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                      ],
 
-                    // 7. Dica discreta de scroll no rodapé
-                    Padding(
-                      padding: EdgeInsets.only(bottom: metrics.gapSm),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(
-                            Icons.keyboard_arrow_down_rounded,
-                            size: 15,
-                            color: AppColors.muted,
-                          ),
-                          const SizedBox(width: 2),
-                          Text(
-                            'Deslize para ver o próximo',
-                            style: AppTypography.label(9)
-                                .copyWith(color: AppColors.muted),
+                                      // Preço real se existir ou Grátis
+                                      if (game.isFree) ...[
+                                        Text(
+                                          'Grátis',
+                                          style: AppTypography.title(16).copyWith(
+                                            color: AppColors.positive,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                      ] else if (game.hasSteamPrice) ...[
+                                        Text(
+                                          'R\$ ${(game.steamPriceCents! / 100).toStringAsFixed(2).replaceAll('.', ',')}',
+                                          style: AppTypography.title(16).copyWith(
+                                            color: AppColors.text,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                      ],
+
+                                      // Plataformas reais em chips
+                                      for (final p in game.platforms.take(2)) ...[
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.surface,
+                                            borderRadius:
+                                                BorderRadius.circular(AppRadius.small),
+                                            border: Border.all(color: AppColors.border),
+                                          ),
+                                          child: Text(
+                                            p,
+                                            style: AppTypography.label(9).copyWith(
+                                              color: AppColors.text,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                      ],
+
+                                      // Lojas reais
+                                      if (game.stores.isNotEmpty ||
+                                          game.isSteamAvailable)
+                                        Text(
+                                          (game.stores.isNotEmpty
+                                                  ? game.stores
+                                                  : [
+                                                      if (game.isSteamAvailable)
+                                                        'Steam'
+                                                    ])
+                                              .map((s) => '• $s')
+                                              .join(' '),
+                                          style: AppTypography.label(10).copyWith(
+                                            color: AppColors.muted,
+                                          ),
+                                          maxLines: 1,
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+
+                              // Botão CTA: Ver jogo (Link real da loja) ou Detalhes
+                              if (game.hasStoreUrl)
+                                GestureDetector(
+                                  onTap: () {
+                                    final url = game.steamStoreUrl!;
+                                    Clipboard.setData(ClipboardData(text: url));
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Link copiado: $url'),
+                                        behavior: SnackBarBehavior.floating,
+                                        duration: const Duration(seconds: 3),
+                                      ),
+                                    );
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      gradient: const LinearGradient(
+                                        colors: [
+                                          Color(0xFF8B5CF6),
+                                          Color(0xFF7C3AED),
+                                        ],
+                                      ),
+                                      borderRadius: BorderRadius.circular(
+                                          AppRadius.medium),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: AppColors.primary
+                                              .withValues(alpha: 0.35),
+                                          blurRadius: 8,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          'Ver jogo',
+                                          style:
+                                              AppTypography.label(12).copyWith(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        const Icon(
+                                          Icons.arrow_forward_rounded,
+                                          size: 14,
+                                          color: Colors.white,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                )
+                              else
+                                GestureDetector(
+                                  onTap: onDetails,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.high,
+                                      borderRadius: BorderRadius.circular(
+                                          AppRadius.medium),
+                                      border:
+                                          Border.all(color: AppColors.border),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          'Detalhes',
+                                          style:
+                                              AppTypography.label(11).copyWith(
+                                            color: AppColors.text,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        const Icon(
+                                          Icons.arrow_forward_rounded,
+                                          size: 13,
+                                          color: AppColors.secondary,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                         ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+
+                  const Spacer(),
+
+                  // 5. Barra única de reprodução do trailer (estilo Obsidian Kinetic com timestamps)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: metrics.gapSm),
+                    child: _TrailerBottomSeekBar(trailerState: trailerState),
+                  ),
+                ],
               ),
-            );
-          },
-        ),
-      );
+            ),
+          );
+        },
+      ),
+    );
   }
+}
 
 class _Actions extends StatelessWidget {
   const _Actions({
@@ -606,272 +838,382 @@ class _Actions extends StatelessWidget {
     final isLiked = controller.liked.contains(item.game.id);
     final isSaved = controller.saved.contains(item.game.id);
     final isPlayed = controller.played.contains(item.game.id);
+    final realLikes = controller.realLikeCount(item.game);
+    final realComments = controller.realCommentCount(item.game);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 5,
-      ),
-      decoration: BoxDecoration(
-        color: AppColors.surface.withValues(alpha: 0.85),
-        borderRadius: BorderRadius.circular(AppRadius.large),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          return Center(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Row(
+    return Row(
+      children: [
+        // 1. Curtir
+        Expanded(
+          child: _ActionButton(
+            icon: isLiked ? Icons.favorite : Icons.favorite_border,
+            iconColor: isLiked ? const Color(0xFFFF2A55) : AppColors.text,
+            activeColor: const Color(0xFFFF2A55),
+            label: 'Curtir',
+            count: realLikes > 0 ? _formatCompact(realLikes) : null,
+            tooltip: isLiked ? 'Descurtir' : 'Curtir',
+            semanticsLabel: 'Curtir',
+            isActive: isLiked,
+            onTap: () => onProtected(
+              () => controller.toggleLike(item.game.id, item.game),
+            ),
+          ),
+        ),
+
+        // 2. Quero jogar (Ação principal com destaque e glow)
+        Expanded(
+          child: _ActionButton(
+            icon: isSaved
+                ? Icons.bookmark_rounded
+                : Icons.bookmark_border_rounded,
+            iconColor: isSaved ? Colors.white : AppColors.text,
+            activeColor: AppColors.primary,
+            label: 'Quero jogar',
+            tooltip:
+                isSaved ? 'Remover de Quero jogar' : 'Adicionar a Quero jogar',
+            semanticsLabel: 'Quero jogar',
+            isActive: isSaved,
+            isPrimaryGlow: isSaved,
+            onTap: () => onProtected(
+              () => controller.toggleSave(item.game.id, item.game),
+            ),
+          ),
+        ),
+
+        // 3. Já joguei
+        Expanded(
+          child: _ActionButton(
+            icon: isPlayed
+                ? Icons.check_circle_rounded
+                : Icons.check_circle_outline_rounded,
+            iconColor: isPlayed ? const Color(0xFF10B981) : AppColors.text,
+            activeColor: const Color(0xFF10B981),
+            label: 'Já joguei',
+            tooltip: isPlayed ? 'Jogado' : 'Marcar como já joguei',
+            semanticsLabel: 'Já joguei',
+            isActive: isPlayed,
+            onTap: () => onProtected(
+              () => controller.markPlayed(item.game.id, item.game),
+            ),
+          ),
+        ),
+
+        // 4. Comentar
+        Expanded(
+          child: _ActionButton(
+            icon: Icons.chat_bubble_outline_rounded,
+            iconColor: AppColors.text,
+            label: 'Comentar',
+            count: realComments > 0 ? _formatCompact(realComments) : null,
+            tooltip: 'Comentar',
+            semanticsLabel: 'Comentar',
+            isActive: false,
+            onTap: onComments,
+          ),
+        ),
+
+        // 5. Compartilhar
+        Expanded(
+          child: _ActionButton(
+            icon: Icons.share_outlined,
+            iconColor: AppColors.text,
+            label: 'Compartilhar',
+            tooltip: 'Compartilhar',
+            semanticsLabel: 'Compartilhar',
+            isActive: false,
+            onTap: () {
+              final text = item.game.hasStoreUrl
+                  ? item.game.steamStoreUrl!
+                  : item.game.title;
+              Clipboard.setData(ClipboardData(text: text));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Link copiado para compartilhar.'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  const _ActionButton({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
+    required this.tooltip,
+    required this.semanticsLabel,
+    required this.isActive,
+    required this.onTap,
+    this.count,
+    this.activeColor,
+    this.isPrimaryGlow = false,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+  final String tooltip;
+  final String semanticsLabel;
+  final bool isActive;
+  final String? count;
+  final Color? activeColor;
+  final bool isPrimaryGlow;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: semanticsLabel,
+      child: Tooltip(
+        message: tooltip,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(AppRadius.base),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+              child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // 1. Curtir
-                  Semantics(
-                    button: true,
-                    label: 'Curtir',
-                    child: Tooltip(
-                      message: isLiked ? 'Descurtir' : 'Curtir',
-                      child: InkWell(
-                        onTap: () => onProtected(
-                            () => controller.toggleLike(item.game.id, item.game)),
-                        borderRadius: BorderRadius.circular(AppRadius.base),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 4),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                isLiked
-                                    ? Icons.favorite
-                                    : Icons.favorite_border,
-                                size: 16,
-                                color: isLiked
-                                    ? const Color(0xFFFF2A55)
-                                    : AppColors.text,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Curtir',
-                                style: AppTypography.label(9.5).copyWith(
-                                  color: isLiked
-                                      ? const Color(0xFFFF2A55)
-                                      : AppColors.text,
-                                  fontWeight: isLiked
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-
-                  // 2. Quero jogar (Destaque Principal)
-                  Semantics(
-                    button: true,
-                    label: 'Quero jogar',
-                    child: Tooltip(
-                      message: isSaved
-                          ? 'Remover de Quero jogar'
-                          : 'Adicionar a Quero jogar',
-                      child: InkWell(
-                        onTap: () => onProtected(
-                            () => controller.toggleSave(item.game.id, item.game)),
-                        borderRadius: BorderRadius.circular(AppRadius.large),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 9,
-                            vertical: 5,
-                          ),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: isSaved
-                                  ? [
-                                      AppColors.surface,
-                                      AppColors.high,
-                                    ]
-                                  : [
-                                      const Color(0xFF9D4EDD),
-                                      AppColors.primary,
-                                    ],
-                            ),
-                            borderRadius:
-                                BorderRadius.circular(AppRadius.large),
-                            border: Border.all(
-                              color: isSaved
-                                  ? AppColors.primary
-                                  : Colors.transparent,
-                            ),
-                            boxShadow: isSaved
-                                ? null
-                                : [
-                                    BoxShadow(
-                                      color: AppColors.primary
-                                          .withValues(alpha: 0.35),
-                                      blurRadius: 6,
-                                      offset: const Offset(0, 2),
-                                    ),
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: isPrimaryGlow
+                              ? const LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    Color(0xFF9333EA),
+                                    Color(0xFF7C3AED)
                                   ],
+                                )
+                              : null,
+                          color: isPrimaryGlow
+                              ? null
+                              : (isActive && activeColor != null)
+                                  ? activeColor!.withValues(alpha: 0.15)
+                                  : AppColors.high.withValues(alpha: 0.6),
+                          border: Border.all(
+                            color: isPrimaryGlow
+                                ? Colors.white.withValues(alpha: 0.3)
+                                : (isActive && activeColor != null)
+                                    ? activeColor!.withValues(alpha: 0.5)
+                                    : AppColors.border,
+                            width: 1.0,
                           ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                isSaved
-                                    ? Icons.bookmark
-                                    : Icons.bookmark_border,
-                                size: 14,
-                                color:
-                                    isSaved ? AppColors.primary : Colors.white,
-                              ),
-                              const SizedBox(width: 3),
-                              Text(
-                                isSaved ? '✓ Quero jogar' : '+ Quero jogar',
-                                style: AppTypography.label(9.5).copyWith(
-                                  color: isSaved
-                                      ? AppColors.primary
-                                      : Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
-                          ),
+                          boxShadow: isPrimaryGlow
+                              ? [
+                                  BoxShadow(
+                                    color: AppColors.primary
+                                        .withValues(alpha: 0.4),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ]
+                              : null,
+                        ),
+                        child: Icon(
+                          icon,
+                          size: 20,
+                          color: iconColor,
                         ),
                       ),
-                    ),
+                      if (count != null && count!.isNotEmpty && count != '0')
+                        Positioned(
+                          top: -2,
+                          right: -4,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                  color: Colors.white38, width: 0.5),
+                            ),
+                            child: Text(
+                              count!,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 8,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                  const SizedBox(width: 4),
-
-                  // 3. Já joguei
-                  Semantics(
-                    button: true,
-                    label: 'Já joguei',
-                    child: Tooltip(
-                      message:
-                          isPlayed ? 'Jogado' : 'Marcar como já joguei',
-                      child: InkWell(
-                        onTap: () => onProtected(
-                            () => controller.markPlayed(item.game.id, item.game)),
-                        borderRadius: BorderRadius.circular(AppRadius.base),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 4),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                isPlayed
-                                    ? Icons.check_circle
-                                    : Icons.check_circle_outline,
-                                size: 16,
-                                color: isPlayed
-                                    ? const Color(0xFF10B981)
-                                    : AppColors.text,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                isPlayed ? 'Jogado' : 'Já joguei',
-                                style: AppTypography.label(9.5).copyWith(
-                                  color: isPlayed
-                                      ? const Color(0xFF10B981)
-                                      : AppColors.text,
-                                  fontWeight: isPlayed
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                  const SizedBox(height: 4),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      label,
+                      style: AppTypography.label(10).copyWith(
+                        color: isActive && activeColor != null
+                            ? (isPrimaryGlow ? AppColors.primary : activeColor)
+                            : AppColors.secondary,
+                        fontWeight:
+                            isActive ? FontWeight.w700 : FontWeight.w500,
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-
-                  // 4. Comentar
-                  Semantics(
-                    button: true,
-                    label: 'Comentar',
-                    child: Tooltip(
-                      message: 'Comentar',
-                      child: InkWell(
-                        onTap: onComments,
-                        borderRadius: BorderRadius.circular(AppRadius.base),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 4),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.chat_bubble_outline,
-                                size: 15,
-                                color: AppColors.text,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Comentar',
-                                style: AppTypography.label(9.5).copyWith(
-                                  color: AppColors.text,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-
-                  // 5. Compartilhar
-                  Semantics(
-                    button: true,
-                    label: 'Compartilhar',
-                    child: Tooltip(
-                      message: 'Compartilhar',
-                      child: InkWell(
-                        onTap: () =>
-                            ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Link copiado para compartilhar.'),
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        ),
-                        borderRadius: BorderRadius.circular(AppRadius.base),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 4),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.share_outlined,
-                                size: 15,
-                                color: AppColors.text,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Compartilhar',
-                                style: AppTypography.label(9.5).copyWith(
-                                  color: AppColors.text,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+                      maxLines: 1,
                     ),
                   ),
                 ],
               ),
             ),
-          );
-        },
+          ),
+        ),
       ),
+    );
+  }
+}
+
+class _TrailerBottomSeekBar extends StatelessWidget {
+  const _TrailerBottomSeekBar({
+    required this.trailerState,
+  });
+
+  final FeedTrailerState? trailerState;
+
+  @override
+  Widget build(BuildContext context) {
+    if (trailerState == null) return const SizedBox(height: 28);
+    final player = trailerState!.player;
+
+    return ListenableBuilder(
+      listenable: player ?? ChangeNotifier(),
+      builder: (context, _) {
+        final playerDur = player?.duration ?? Duration.zero;
+        final playerPos = player?.position ?? Duration.zero;
+        final hasDuration = playerDur > Duration.zero;
+        final currentFraction = trailerState!.dragFraction ??
+            (hasDuration
+                ? (playerPos.inMilliseconds / playerDur.inMilliseconds)
+                    .clamp(0.0, 1.0)
+                : 0.0);
+        final displayPos = trailerState!.dragFraction != null && hasDuration
+            ? Duration(
+                milliseconds:
+                    (trailerState!.dragFraction! * playerDur.inMilliseconds)
+                        .toInt())
+            : playerPos;
+
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final barWidth = constraints.maxWidth;
+            return GestureDetector(
+              key: const Key('feed_trailer_seekbar'),
+              behavior: HitTestBehavior.opaque,
+              onTapDown: (details) {
+                if (barWidth <= 0 || !hasDuration) return;
+                final fraction =
+                    (details.localPosition.dx / barWidth).clamp(0.0, 1.0);
+                trailerState!.handleSeekFraction(fraction);
+              },
+              onHorizontalDragStart: (details) {
+                if (barWidth <= 0) return;
+                final fraction =
+                    (details.localPosition.dx / barWidth).clamp(0.0, 1.0);
+                trailerState!.setDragFraction(fraction);
+              },
+              onHorizontalDragUpdate: (details) {
+                if (barWidth <= 0) return;
+                final fraction =
+                    (details.localPosition.dx / barWidth).clamp(0.0, 1.0);
+                trailerState!.setDragFraction(fraction);
+              },
+              onHorizontalDragEnd: (details) {
+                final fraction = trailerState!.dragFraction;
+                trailerState!.setDragFraction(null);
+                if (fraction != null && hasDuration) {
+                  trailerState!.handleSeekFraction(fraction);
+                }
+              },
+              onHorizontalDragCancel: () {
+                trailerState!.setDragFraction(null);
+              },
+              child: Container(
+                height: 28,
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          trailerState!.formatDuration(displayPos),
+                          style: AppTypography.label(10).copyWith(
+                            color: AppColors.secondary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          hasDuration
+                              ? trailerState!.formatDuration(playerDur)
+                              : '0:00',
+                          style: AppTypography.label(10).copyWith(
+                            color: AppColors.secondary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Stack(
+                      alignment: Alignment.centerLeft,
+                      children: [
+                        Container(
+                          height: 3,
+                          decoration: BoxDecoration(
+                            color: AppColors.high,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                        FractionallySizedBox(
+                          widthFactor: currentFraction,
+                          child: Container(
+                            height: 3,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [
+                                  Color(0xFF8B5CF6),
+                                  Color(0xFF7C3AED),
+                                ],
+                              ),
+                              borderRadius: BorderRadius.circular(2),
+                              boxShadow: [
+                                BoxShadow(
+                                  color:
+                                      AppColors.primary.withValues(alpha: 0.5),
+                                  blurRadius: 4,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
