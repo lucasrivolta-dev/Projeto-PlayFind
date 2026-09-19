@@ -35,12 +35,88 @@ class _AuthScreenState extends State<AuthScreen>
     if (!mounted) return;
     setState(() => busy = false);
     if (ok) {
-      Navigator.pop(context, true);
+      if (create) {
+        await _askPlatforms();
+      }
+      if (mounted) Navigator.pop(context, true);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(widget.controller.errorMessage ??
               'Confira seu e-mail e use pelo menos 6 caracteres na senha.')));
     }
+  }
+
+  Future<void> _askPlatforms() async {
+    final selected = <String>{'pc'};
+    final options = const [
+      ('PC', 'pc'),
+      ('PlayStation', 'playstation'),
+      ('Xbox', 'xbox'),
+      ('Switch', 'switch'),
+      ('Mobile', 'mobile'),
+    ];
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isDismissible: false,
+      enableDrag: false,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.hero)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: const EdgeInsets.all(AppSpacing.margin),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Em quais plataformas você joga?', style: AppTypography.title(18)),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                'Usamos suas preferências para priorizar ofertas e jogos compatíveis no seu feed.',
+                style: AppTypography.body(13).copyWith(color: AppColors.secondary),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Wrap(
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xs,
+                children: options.map((opt) {
+                  final isSel = selected.contains(opt.$2);
+                  return FilterChip(
+                    label: Text(opt.$1),
+                    selected: isSel,
+                    selectedColor: AppColors.primary.withValues(alpha: 0.25),
+                    checkmarkColor: AppColors.primary,
+                    labelStyle: TextStyle(
+                      color: isSel ? AppColors.primary : AppColors.text,
+                      fontWeight: isSel ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                    onSelected: (val) {
+                      setSheetState(() {
+                        if (val) {
+                          selected.add(opt.$2);
+                        } else {
+                          selected.remove(opt.$2);
+                        }
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              FilledButton(
+                onPressed: () async {
+                  await widget.controller.savePlatformPreferences(selected.toList());
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                child: const Text('Continuar'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> provider(String value) async {

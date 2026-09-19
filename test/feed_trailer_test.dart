@@ -749,7 +749,7 @@ void main() {
   );
 
   testWidgets(
-    'direct tap on trailer toggles play and pause with animated feedback overlay',
+    'tap on tap target toggles play/pause showing clean artwork and bottom-right button',
     (tester) async {
       final player = FakeTrailerPlayer()..startsPlaying = true;
       await tester.pumpWidget(
@@ -769,24 +769,23 @@ void main() {
       await tester.tap(find.byKey(const Key('feed_trailer_tap_target')));
       await tester.pump();
       expect(player.playingVideoId, isNull);
-      expect(find.byIcon(Icons.pause), findsOneWidget);
+      expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
 
-      // Overlay fades out after delay
-      await tester.pump(const Duration(milliseconds: 700));
+      // Artwork is visible (opacity 1.0), covering the paused iframe player
       expect(
         tester
             .widget<AnimatedOpacity>(
-              find.byKey(const Key('feed_trailer_feedback_overlay')),
+              find.byKey(const Key('feed_trailer_artwork_opacity')),
             )
             .opacity,
-        0.0,
+        1.0,
       );
 
       // Tap to resume
       await tester.tap(find.byKey(const Key('feed_trailer_tap_target')));
       await tester.pump();
       expect(player.playingVideoId, 'abcdefghijk');
-      expect(find.byIcon(Icons.play_arrow), findsOneWidget);
+      expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     },
   );

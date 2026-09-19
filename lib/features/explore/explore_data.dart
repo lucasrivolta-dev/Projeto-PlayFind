@@ -5,6 +5,95 @@ import 'package:http/http.dart' as http;
 import '../../config/api_config.dart';
 import '../feed/trailer_info.dart';
 
+class StoreOfferInfo {
+  const StoreOfferInfo({
+    required this.store,
+    this.storeUrl,
+    this.originalPriceCents,
+    this.finalPriceCents,
+    this.discountPercent = 0,
+    this.currency = 'BRL',
+    this.isAvailable = true,
+  });
+
+  final String store;
+  final String? storeUrl;
+  final int? originalPriceCents;
+  final int? finalPriceCents;
+  final int discountPercent;
+  final String currency;
+  final bool isAvailable;
+
+  bool get hasDiscount => discountPercent > 0;
+  bool get hasPrice => finalPriceCents != null;
+  String get formattedFinalPrice => finalPriceCents == null
+      ? 'Preço indisponível'
+      : finalPriceCents == 0
+          ? 'Grátis'
+          : 'R\$ ${(finalPriceCents! / 100).toStringAsFixed(2).replaceAll('.', ',')}';
+  String? get formattedOriginalPrice => originalPriceCents == null
+      ? null
+      : 'R\$ ${(originalPriceCents! / 100).toStringAsFixed(2).replaceAll('.', ',')}';
+
+  factory StoreOfferInfo.fromJson(Map<String, dynamic> json) => StoreOfferInfo(
+        store: json['store']?.toString() ?? 'Outra',
+        storeUrl: json['storeUrl'] as String?,
+        originalPriceCents: (json['originalPriceCents'] as num?)?.toInt(),
+        finalPriceCents: (json['finalPriceCents'] as num?)?.toInt(),
+        discountPercent: (json['discountPercent'] as num?)?.toInt() ?? 0,
+        currency: json['currency']?.toString() ?? 'BRL',
+        isAvailable: json['isAvailable'] as bool? ?? true,
+      );
+}
+
+enum CanonicalPlatformFamily {
+  pcSteam,
+  playstation,
+  xbox,
+  nintendo,
+}
+
+extension CanonicalPlatformFamilyExt on CanonicalPlatformFamily {
+  String get label => switch (this) {
+        CanonicalPlatformFamily.pcSteam => 'Steam (PC)',
+        CanonicalPlatformFamily.playstation => 'PlayStation',
+        CanonicalPlatformFamily.xbox => 'Xbox',
+        CanonicalPlatformFamily.nintendo => 'Nintendo Switch',
+      };
+
+  String get shortLabel => switch (this) {
+        CanonicalPlatformFamily.pcSteam => 'Steam',
+        CanonicalPlatformFamily.playstation => 'PS Store',
+        CanonicalPlatformFamily.xbox => 'Xbox Store',
+        CanonicalPlatformFamily.nintendo => 'Nintendo eShop',
+      };
+
+  String get storeKey => switch (this) {
+        CanonicalPlatformFamily.pcSteam => 'STEAM',
+        CanonicalPlatformFamily.playstation => 'PLAYSTATION',
+        CanonicalPlatformFamily.xbox => 'XBOX',
+        CanonicalPlatformFamily.nintendo => 'NINTENDO',
+      };
+}
+
+CanonicalPlatformFamily? matchCanonicalFamily(String input) {
+  final s = input.trim().toLowerCase();
+  if (s.contains('playstation') || s.contains('ps5') || s.contains('ps4') || s == 'ps') {
+    return CanonicalPlatformFamily.playstation;
+  }
+  if (s.contains('steam') || s.contains('pc') || s.contains('windows')) {
+    return CanonicalPlatformFamily.pcSteam;
+  }
+  if (s.contains('xbox')) {
+    return CanonicalPlatformFamily.xbox;
+  }
+  if (s.contains('nintendo') || s.contains('switch')) {
+    return CanonicalPlatformFamily.nintendo;
+  }
+  return null;
+}
+
+
 class DiscoveryGame {
   const DiscoveryGame(
       {required this.id,
@@ -17,6 +106,7 @@ class DiscoveryGame {
       this.tags = const [],
       this.platforms = const [],
       this.stores = const [],
+      this.storeOffers = const [],
       this.collection = 'destaques',
       this.offer = false,
       this.free = false,
@@ -36,6 +126,7 @@ class DiscoveryGame {
       this.commentCount = 0,
       this.steamStoreUrl,
       this.steamPriceCents,
+      this.steamOriginalPriceCents,
       this.steamDiscountPercent,
       this.steamCurrency,
       this.steamAvailable});
@@ -43,11 +134,12 @@ class DiscoveryGame {
   final int likeCount, commentCount;
   final bool isOfficialTrailer;
   final List<String> stores;
+  final List<StoreOfferInfo> storeOffers;
   final TrailerInfo? primaryTrailer;
   final List<TrailerInfo> trailerDetails;
   final String? releaseDate, mode, publisher, slug, coverUrl, heroUrl;
   final String? steamStoreUrl, steamCurrency;
-  final int? steamPriceCents, steamDiscountPercent;
+  final int? steamPriceCents, steamOriginalPriceCents, steamDiscountPercent;
   final bool? steamAvailable;
   /// Identificador interno e estável de Game na API NextPlay.
   final String id;
@@ -64,14 +156,58 @@ class DiscoveryGame {
   bool get hasStudio => studio.trim().isNotEmpty;
   bool get hasGenre => genre.trim().isNotEmpty;
   bool get hasPlatforms => platforms.isNotEmpty;
-  bool get hasStores => stores.isNotEmpty;
+  bool get hasStores => stores.isNotEmpty || storeOffers.isNotEmpty;
   bool get hasDescription => description.trim().isNotEmpty;
   bool get isFree => free;
   bool get hasSteamPrice => steamPriceCents != null;
   bool get hasSteamDiscount => (steamDiscountPercent ?? 0) > 0;
+  bool get hasOriginalPrice =>
+      steamOriginalPriceCents != null &&
+      steamOriginalPriceCents! > (steamPriceCents ?? 0);
+  String? get formattedOriginalPrice => steamOriginalPriceCents == null
+      ? null
+      : 'R\$ ${(steamOriginalPriceCents! / 100).toStringAsFixed(2).replaceAll('.', ',')}';
   bool get hasStoreUrl => steamStoreUrl != null && steamStoreUrl!.trim().isNotEmpty;
   List<String> get genres => tags;
   bool get isSteamAvailable => steamAvailable ?? false;
+
+  bool supportsCanonicalFamily(CanonicalPlatformFamily family) {
+    switch (family) {
+      case CanonicalPlatformFamily.pcSteam:
+        return isSteamAvailable ||
+            hasSteamPrice ||
+            storeOffers.any((o) => o.store == 'STEAM') ||
+            platforms.any((p) => matchCanonicalFamily(p) == CanonicalPlatformFamily.pcSteam);
+      case CanonicalPlatformFamily.playstation:
+        return storeOffers.any((o) => o.store == 'PLAYSTATION') ||
+            platforms.any((p) => matchCanonicalFamily(p) == CanonicalPlatformFamily.playstation);
+      case CanonicalPlatformFamily.xbox:
+        return storeOffers.any((o) => o.store == 'XBOX') ||
+            platforms.any((p) => matchCanonicalFamily(p) == CanonicalPlatformFamily.xbox);
+      case CanonicalPlatformFamily.nintendo:
+        return storeOffers.any((o) => o.store == 'NINTENDO') ||
+            platforms.any((p) => matchCanonicalFamily(p) == CanonicalPlatformFamily.nintendo);
+    }
+  }
+
+  StoreOfferInfo? offerForFamily(CanonicalPlatformFamily family) {
+    final key = family.storeKey;
+    for (final o in storeOffers) {
+      if (o.store == key) return o;
+    }
+    if (family == CanonicalPlatformFamily.pcSteam && (hasSteamPrice || hasStoreUrl)) {
+      return StoreOfferInfo(
+        store: 'STEAM',
+        storeUrl: steamStoreUrl,
+        originalPriceCents: steamOriginalPriceCents,
+        finalPriceCents: steamPriceCents,
+        discountPercent: steamDiscountPercent ?? 0,
+        currency: steamCurrency ?? 'BRL',
+        isAvailable: isSteamAvailable,
+      );
+    }
+    return null;
+  }
 
   factory DiscoveryGame.fromJson(Map<String, dynamic> json) {
     final steamAppId = json['steamAppId'] as int?;
@@ -110,6 +246,15 @@ class DiscoveryGame {
     final offer = (steamDiscountPercent ?? 0) > 0;
     final free = json['isFree'] as bool? ?? false;
 
+    final steamOriginalPriceCents =
+        (steam?['originalPriceCents'] as num?)?.toInt();
+    final rawStoreOffers = json['storeOffers'] as List<dynamic>?;
+    final storeOffers = rawStoreOffers
+            ?.whereType<Map<String, dynamic>>()
+            .map(StoreOfferInfo.fromJson)
+            .toList() ??
+        const [];
+
     return DiscoveryGame(
       id: rawId,
       steamAppId: steamAppId,
@@ -128,6 +273,7 @@ class DiscoveryGame {
       tags: genres,
       platforms: platforms,
       stores: stores,
+      storeOffers: storeOffers,
       collection: offer ? 'ofertas' : 'destaques',
       offer: offer,
       free: free,
@@ -142,6 +288,7 @@ class DiscoveryGame {
       trailerDetails: _parseTrailerDetails(json['trailerDetails']),
       steamStoreUrl: steamStoreUrl,
       steamPriceCents: steamPriceCents,
+      steamOriginalPriceCents: steamOriginalPriceCents,
       steamDiscountPercent: steamDiscountPercent,
       steamCurrency: steamCurrency,
       steamAvailable: steamAvailable,
@@ -320,6 +467,7 @@ class ApiExploreRepository implements ExploreRepository {
     this.timeout = const Duration(seconds: 15),
     this.initialFeedTimeout = const Duration(seconds: 60),
     this.initialFeedRetryDelay = const Duration(milliseconds: 750),
+    this.platformPreferencesProvider,
   }) : baseUrl = baseUrl ?? ApiConfig.baseUrl,
        _client = client ?? http.Client(),
        _ownsClient = client == null;
@@ -331,6 +479,7 @@ class ApiExploreRepository implements ExploreRepository {
   final Duration timeout;
   final Duration initialFeedTimeout;
   final Duration initialFeedRetryDelay;
+  final List<String> Function()? platformPreferencesProvider;
 
   @override
   Future<List<DiscoveryGame>> load() => _load(allowFallback: true);
@@ -338,15 +487,19 @@ class ApiExploreRepository implements ExploreRepository {
   /// The real feed must never silently replace the API catalog with demo games.
   Future<List<DiscoveryGame>> loadFeed({
     List<String>? excludeIds,
+    List<String>? platforms,
     int limit = 20,
   }) async {
     // FeedController sends null only for the initial load, including manual retry.
     final initialLoad = excludeIds == null;
+    final effectivePlatforms =
+        platforms ?? platformPreferencesProvider?.call();
     for (var attempt = 0; ; attempt++) {
       try {
         return await _load(
           allowFallback: false,
           excludeIds: excludeIds,
+          platforms: effectivePlatforms,
           limit: limit,
           requestTimeout: initialLoad ? initialFeedTimeout : timeout,
         );
@@ -364,6 +517,7 @@ class ApiExploreRepository implements ExploreRepository {
   Future<List<DiscoveryGame>> _load({
     required bool allowFallback,
     List<String>? excludeIds,
+    List<String>? platforms,
     int limit = 20,
     Duration? requestTimeout,
   }) async {
@@ -371,6 +525,9 @@ class ApiExploreRepository implements ExploreRepository {
       final queryParams = <String, String>{'limit': '$limit'};
       if (excludeIds != null && excludeIds.isNotEmpty) {
         queryParams['exclude'] = excludeIds.join(',');
+      }
+      if (platforms != null && platforms.isNotEmpty) {
+        queryParams['platforms'] = platforms.join(',');
       }
       final uri = Uri.parse(
         '$baseUrl/feed',

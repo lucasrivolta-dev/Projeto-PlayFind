@@ -30,6 +30,7 @@ export interface SteamAppDetailsDto {
       linux?: boolean;
     };
     price_overview?: {
+      initial?: number;
       final?: number;
       discount_percent?: number;
       currency?: string;

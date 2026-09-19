@@ -141,6 +141,7 @@ class FeedTrailerState extends State<FeedTrailer> with WidgetsBindingObserver {
       !_failed &&
       _playbackStarted &&
       _videoId != null &&
+      !_manualPaused &&
       _player?.displayedVideoId == _videoId;
   bool get hasVideoId => _videoId != null;
   bool get isExhausted =>
@@ -996,8 +997,6 @@ class FeedTrailerControls extends StatelessWidget {
         final player = state.player;
         final isPlaying = state.isPlaying;
         final isMuted = state.isMuted;
-        final showOverlay = state.showOverlay;
-        final overlayIcon = state.overlayIcon;
         final playerDur = player?.duration ?? Duration.zero;
         final hasDuration = playerDur > Duration.zero;
         final isBuffering = player?.isBuffering == true;
@@ -1017,55 +1016,7 @@ class FeedTrailerControls extends StatelessWidget {
                 onVerticalDragCancel: state.cancelPageDrag,
               ),
 
-              // 2. Feedback central animado (Overlay estilo YouTube/TikTok)
-              IgnorePointer(
-                child: Center(
-                  child: AnimatedOpacity(
-                    key: const Key('feed_trailer_feedback_overlay'),
-                    opacity: showOverlay ? 1.0 : 0.0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Container(
-                      padding: const EdgeInsets.all(AppSpacing.md),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.black.withValues(alpha: 0.65),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.2),
-                        ),
-                      ),
-                      child: Icon(
-                        overlayIcon,
-                        size: 40,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-              // 2b. Indicador central de Play visível quando pausado (estilo NextPlay)
-              if (!isPlaying && !showOverlay && !isBuffering)
-                IgnorePointer(
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.all(AppSpacing.sm),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.black.withValues(alpha: 0.6),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.25),
-                        ),
-                      ),
-                      child: const Icon(
-                        Icons.play_arrow_rounded,
-                        size: 38,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-
-              // 2c. Botão de controle play/pause no canto inferior direito (estilo referência)
+              // 2. Botão de controle play/pause no canto inferior direito (estilo referência)
               Positioned(
                 bottom: 8,
                 right: 8,
@@ -1093,8 +1044,8 @@ class FeedTrailerControls extends StatelessWidget {
                 ),
               ),
 
-              // 2d. Spinner central discreto durante buffering
-              if (isBuffering && !showOverlay)
+              // 3. Spinner central discreto durante buffering
+              if (isBuffering && isPlaying)
                 IgnorePointer(
                   child: Center(
                     child: Container(

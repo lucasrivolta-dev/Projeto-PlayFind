@@ -1,5 +1,7 @@
 # NextPlay Backend
 
+Providers multi-store, estado real e comandos de sync: [PRICE_PROVIDERS.md](PRICE_PROVIDERS.md).
+
 API local Node.js/TypeScript com Fastify, Prisma e PostgreSQL. O Flutter consome esta API; não acessa o banco, IGDB ou Steam diretamente.
 
 ## Preparar e executar

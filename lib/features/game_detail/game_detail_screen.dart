@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../design_system/components.dart';
 import '../../design_system/theme.dart';
 import '../explore/explore_data.dart';
@@ -49,7 +50,24 @@ class GameDetailScreen extends StatelessWidget {
     }
   }
 
-  String get storeUrl => 'https://store.steampowered.com/app/${game.id}/';
+  String? get storeUrl {
+    return _storeUri(game.steamStoreUrl) == null ? null : game.steamStoreUrl;
+  }
+
+  Future<void> openStore(BuildContext context, String url) async {
+    final uri = _storeUri(url);
+    if (uri == null) return;
+    try {
+      if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return;
+    } catch (_) {
+      // Report launch failure without changing navigation or feed state.
+    }
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível abrir a loja.')),
+      );
+    }
+  }
   void evaluate(BuildContext context) => showAppSheet(
       context,
       ListenableBuilder(
@@ -85,9 +103,9 @@ class GameDetailScreen extends StatelessWidget {
       appBar: AppBar(
           title: Text('Detalhes do jogo', style: AppTypography.title(17)),
           actions: [
-            IconButton(
+            if (storeUrl != null) IconButton(
                 tooltip: 'Copiar link do jogo',
-                onPressed: () => copy(context, storeUrl),
+                onPressed: () => copy(context, storeUrl!),
                 icon: const Icon(Icons.share_outlined))
           ]),
       body: SafeArea(
@@ -240,44 +258,42 @@ class GameDetailScreen extends StatelessWidget {
                                         style: AppTypography.title(14)),
                                     const SizedBox(height: AppSpacing.xs),
                                     Text(
-                                        'Ainda não há vídeos cadastrados. Consulte os trailers na página do jogo na Steam.',
+                                        'Ainda não há vídeos cadastrados.',
                                         style: AppTypography.body(12)),
-                                    TextButton.icon(
-                                        onPressed: () =>
-                                            copy(context, storeUrl),
-                                        icon: const Icon(Icons.copy_outlined),
-                                        label: const Text(
-                                            'Copiar link da página')),
-                                  ])),
-                              const SectionHeading(
-                                  title: 'Onde jogar e preços',
-                                  icon: Icons.sell_outlined),
-                              SurfaceCard(
-                                  child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                    Row(children: [
-                                      const Icon(Icons.desktop_windows_outlined,
-                                          color: AppColors.secondary),
-                                      const SizedBox(width: AppSpacing.sm),
-                                      Expanded(
-                                          child: Text('Steam',
-                                              style: AppTypography.title(17))),
-                                      GenreChip(game.free ? 'Grátis' : 'PC')
-                                    ]),
-                                    const SizedBox(height: AppSpacing.xs),
-                                    Text(
-                                        game.free
-                                            ? 'Jogo gratuito no catálogo demonstrativo.'
-                                            : 'Preço atualizado ainda não disponível.',
-                                        style: AppTypography.body(12)),
-                                    TextButton(
-                                        onPressed: () =>
-                                            copy(context, storeUrl),
-                                        child:
-                                            const Text('Copiar link da loja')),
-                                  ])),
+                                     if (storeUrl != null) TextButton(
+                                         onPressed: () =>
+                                             openStore(context, storeUrl!),
+                                         child: const Wrap(
+                                           crossAxisAlignment:
+                                               WrapCrossAlignment.center,
+                                           spacing: 6,
+                                           children: [
+                                             Icon(Icons.open_in_new_rounded, size: 16),
+                                              Text('Abrir Steam'),
+                                           ],
+                                         )),
+                                   ])),
+                               const SectionHeading(
+                                   title: 'Plataformas disponíveis',
+                                   icon: Icons.devices_outlined),
+                               Wrap(
+                                 spacing: AppSpacing.xs,
+                                 runSpacing: AppSpacing.xs,
+                                 children: _availablePlatformLabels(game)
+                                     .map(GenreChip.new)
+                                     .toList(),
+                               ),
+                               if (game.hasSteamPrice) ...[
+                                 const SectionHeading(
+                                     title: 'Preço / loja',
+                                     icon: Icons.sell_outlined),
+                                 _SteamOfferCard(
+                                   game: game,
+                                   onOpen: storeUrl == null
+                                       ? null
+                                       : () => openStore(context, storeUrl!),
+                                 ),
+                               ],
                               const SectionHeading(
                                   title: 'Jogos parecidos',
                                   icon: Icons.auto_awesome_outlined),
@@ -501,4 +517,146 @@ class _GameCommunity extends StatelessWidget {
                   label: const Text('Iniciar discussão')),
             ]);
       });
+}
+
+class _SteamOfferCard extends StatelessWidget {
+  const _SteamOfferCard({required this.game, this.onOpen});
+
+  final DiscoveryGame game;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return SurfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Icon(
+                  Icons.desktop_windows_outlined,
+                  color: AppColors.secondary,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: AppSpacing.xs,
+                  runSpacing: 4,
+                  children: [
+                    Text(
+                      'Steam',
+                      style: AppTypography.title(15),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const GenreChip('PC / Steam'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              if (game.hasSteamDiscount)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.positive.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(AppRadius.small),
+                    border: Border.all(
+                      color: AppColors.positive.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Text(
+                    '-${game.steamDiscountPercent}%',
+                    style: AppTypography.label(10).copyWith(
+                      color: AppColors.positive,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              if (game.hasOriginalPrice)
+                Text(
+                  game.formattedOriginalPrice!,
+                  style: AppTypography.body(11).copyWith(
+                    color: AppColors.muted,
+                    decoration: TextDecoration.lineThrough,
+                  ),
+                ),
+              Text(
+                game.steamPriceCents == 0
+                    ? 'Grátis'
+                    : 'R\$ ${(game.steamPriceCents! / 100).toStringAsFixed(2).replaceAll('.', ',')}',
+                style: AppTypography.body(13).copyWith(
+                  color: AppColors.text,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          if (onOpen != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            TextButton(
+              onPressed: onOpen,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+              ),
+              child: const Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 6,
+                children: [
+                  Icon(Icons.open_in_new_rounded, size: 14),
+                  Text('Abrir Steam'),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+List<String> _availablePlatformLabels(DiscoveryGame game) {
+  final labels = <String>{};
+  for (final platform in game.platforms) {
+    final family = matchCanonicalFamily(platform);
+    labels.add(switch (family) {
+      CanonicalPlatformFamily.pcSteam => 'PC / Steam',
+      CanonicalPlatformFamily.playstation => 'PlayStation',
+      CanonicalPlatformFamily.xbox => 'Xbox',
+      CanonicalPlatformFamily.nintendo => 'Nintendo',
+      null => platform,
+    });
+  }
+  if (game.isSteamAvailable || game.hasStoreUrl || game.hasSteamPrice) {
+    labels.add('PC / Steam');
+  }
+  return labels.toList(growable: false);
+}
+
+Uri? _storeUri(String? url) {
+  if (url == null || url.trim().isEmpty) return null;
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null || !uri.hasAuthority || uri.host.isEmpty ||
+      (uri.scheme != 'https' && uri.scheme != 'http')) {
+    return null;
+  }
+  // Search links are not real product pages.
+  if (uri.pathSegments.any((part) => part.toLowerCase() == 'search')) {
+    return null;
+  }
+  return uri;
 }

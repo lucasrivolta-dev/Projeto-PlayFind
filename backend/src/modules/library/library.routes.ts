@@ -79,6 +79,7 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (fa
       service.getUserLibrary(request.userId, filters),
       service.getUserLikedGames(request.userId),
     ]);
+    console.log(`[LibraryRoutes] GET / user=${request.userId} items=${items.length} likes=${likes.length}`);
     return reply.status(200).send({
       data: items,
       likes,
@@ -135,7 +136,9 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (fa
         .send({ statusCode: 400, error: 'Bad Request', message: 'Campos da interação inválidos.' });
     }
     try {
-      return reply.status(200).send(await service.updateInteraction(request.userId, gameId, patch));
+      console.log(`[LibraryRoutes] PATCH /:gameId/interaction user=${request.userId} game=${gameId} patch=${JSON.stringify(patch)}`);
+      const updated = await service.updateInteraction(request.userId, gameId, patch);
+      return reply.status(200).send(updated);
     } catch (error) {
       if (error instanceof Error && error.message === 'GAME_NOT_FOUND') {
         return reply

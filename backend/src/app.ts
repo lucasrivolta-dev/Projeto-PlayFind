@@ -7,6 +7,7 @@ import { GameService } from './modules/games/game.service.js';
 import { gameRoutes } from './modules/games/game.routes.js';
 import { LibraryService } from './modules/library/library.service.js';
 import { libraryRoutes } from './modules/library/library.routes.js';
+import { userPreferencesRoutes } from './modules/user/user-preferences.routes.js';
 import type { PrismaDbClient } from './modules/games/prisma-game.repository.js';
 import type { TokenVerifier } from './auth/firebase-auth.js';
 
@@ -129,6 +130,14 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(libraryRoutes, {
     prefix: '/api/v1/library',
     service: libraryService,
+    allowTestUsers: options.allowTestUsers ?? false,
+    tokenVerifier: options.tokenVerifier,
+  });
+
+  await app.register(userPreferencesRoutes, {
+    prefix: '/api/v1/user/preferences',
+    prisma,
+    libraryService,
     allowTestUsers: options.allowTestUsers ?? false,
     tokenVerifier: options.tokenVerifier,
   });

@@ -356,18 +356,50 @@ export class PrismaGameRepository implements GameRepository {
     }
 
 
-    // 5. Record steam offer if present
+    // 5. Record steam offer and store offer if present
     if (game.steam) {
+      const originalPriceCents = game.steam.originalPriceCents ?? game.steam.priceCents ?? null;
       const offer = {
         gameId,
         storeUrl: game.steam.storeUrl,
         priceCents: game.steam.priceCents ?? null,
+        originalPriceCents,
         discountPercent: game.steam.discountPercent ?? null,
         currency: game.steam.currency ?? null,
         isAvailable: game.steam.isAvailable,
       };
-      const offerExists = await this.client.steamOffer.findFirst({ where: offer });
+      const offerExists = await this.client.steamOffer.findFirst({
+        where: {
+          gameId,
+          storeUrl: offer.storeUrl,
+          priceCents: offer.priceCents,
+          discountPercent: offer.discountPercent,
+        },
+      });
       if (!offerExists) await this.client.steamOffer.create({ data: offer });
+
+      const storeOfferData = {
+        gameId,
+        store: 'STEAM' as const,
+        externalProductId: game.steamAppId ? String(game.steamAppId) : null,
+        storeUrl: game.steam.storeUrl,
+        region: 'BR',
+        currency: game.steam.currency ?? 'BRL',
+        originalPriceCents,
+        finalPriceCents: game.steam.priceCents ?? null,
+        discountPercent: game.steam.discountPercent ?? 0,
+        isAvailable: game.steam.isAvailable,
+        provider: 'STEAM_OFFICIAL',
+      };
+      const storeOfferExists = await this.client.storeOffer.findFirst({
+        where: {
+          gameId,
+          store: 'STEAM',
+          finalPriceCents: storeOfferData.finalPriceCents,
+          discountPercent: storeOfferData.discountPercent,
+        },
+      });
+      if (!storeOfferExists) await this.client.storeOffer.create({ data: storeOfferData });
     }
 
     return game;

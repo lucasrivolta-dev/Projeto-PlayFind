@@ -84,7 +84,11 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (fastify,
   });
 
   fastify.get('/feed', async (request, reply) => {
-    const query = request.query as { limit?: string; exclude?: string | string[] };
+    const query = request.query as {
+      limit?: string;
+      exclude?: string | string[];
+      platforms?: string | string[];
+    };
     const limit = query.limit === undefined ? 20 : Number(query.limit);
     if (!Number.isSafeInteger(limit) || limit < 1) {
       return reply.status(400).send({
@@ -116,7 +120,19 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (fastify,
       ),
     ).slice(0, 500);
 
-    const items = await service.getFeedGames(limit, sanitizedExcludeIds);
+    // Parse preferred platforms parameter
+    const rawPlatforms = query.platforms;
+    const platformList: string[] = [];
+    if (Array.isArray(rawPlatforms)) {
+      for (const item of rawPlatforms) {
+        if (typeof item === 'string') platformList.push(...item.split(','));
+      }
+    } else if (typeof rawPlatforms === 'string') {
+      platformList.push(...rawPlatforms.split(','));
+    }
+    const sanitizedPlatforms = platformList.map((p) => p.trim().toLowerCase()).filter(Boolean);
+
+    const items = await service.getFeedGames(limit, sanitizedExcludeIds, sanitizedPlatforms);
 
     if (process.env.NEXTPLAY_DEV_FIXTURES === 'true') {
       const host = request.headers.host || '127.0.0.1:3333';

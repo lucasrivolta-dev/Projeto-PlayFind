@@ -271,10 +271,10 @@ void main() {
       expect(capturedRequests, hasLength(3));
 
       // Requisição 1: Salvar Quero jogar
-      expect(capturedRequests[0].method, 'PUT');
+      expect(capturedRequests[0].method, 'PATCH');
       expect(
         capturedRequests[0].url.path,
-        '/api/v1/library/a1b2c3d4-0000-0000-0000-000000000055',
+        '/api/v1/library/a1b2c3d4-0000-0000-0000-000000000055/interaction',
       );
       expect(
         jsonDecode(capturedRequests[0].body),
@@ -282,21 +282,25 @@ void main() {
       );
 
       // Requisição 2: Marcar Já joguei
-      expect(capturedRequests[1].method, 'PUT');
+      expect(capturedRequests[1].method, 'PATCH');
       expect(
         capturedRequests[1].url.path,
-        '/api/v1/library/a1b2c3d4-0000-0000-0000-000000000055',
+        '/api/v1/library/a1b2c3d4-0000-0000-0000-000000000055/interaction',
       );
       expect(
         jsonDecode(capturedRequests[1].body),
         {'status': 'PLAYED'},
       );
 
-      // Requisição 3: Curtir (POST sem body para toggle)
-      expect(capturedRequests[2].method, 'POST');
+      // Requisição 3: Curtir (PATCH com estado explícito liked: true)
+      expect(capturedRequests[2].method, 'PATCH');
       expect(
         capturedRequests[2].url.path,
-        '/api/v1/library/a1b2c3d4-0000-0000-0000-000000000055/like',
+        '/api/v1/library/a1b2c3d4-0000-0000-0000-000000000055/interaction',
+      );
+      expect(
+        jsonDecode(capturedRequests[2].body),
+        {'liked': true},
       );
     });
 

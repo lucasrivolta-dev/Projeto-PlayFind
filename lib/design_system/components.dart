@@ -129,9 +129,9 @@ class AppBottomNavigation extends StatelessWidget {
   final ValueChanged<AppDestination> onSelected;
 
   static const List<AppDestination> visualDestinations = [
-    AppDestination.home,
     AppDestination.explore,
     AppDestination.forum,
+    AppDestination.home,
     AppDestination.library,
     AppDestination.profile,
   ];
@@ -172,6 +172,7 @@ class AppBottomNavigation extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: visualDestinations.map((item) {
                       final active = item == selected;
+                      final isHome = item == AppDestination.home;
 
                       return Expanded(
                         child: Semantics(
@@ -198,20 +199,25 @@ class AppBottomNavigation extends StatelessWidget {
                                       shape: BoxShape.circle,
                                       color: active
                                           ? AppColors.primary
-                                          : AppColors.transparent,
+                                          : (isHome ? AppColors.high : AppColors.transparent),
                                       border: active
                                           ? Border.all(
                                               color: Colors.white
                                                   .withValues(alpha: 0.3),
                                               width: 1.0,
                                             )
-                                          : null,
+                                          : (isHome
+                                              ? Border.all(
+                                                  color: AppColors.border,
+                                                  width: 1.0,
+                                                )
+                                              : null),
                                       boxShadow: active
                                           ? [
                                               BoxShadow(
                                                 color: AppColors.primary
-                                                    .withValues(alpha: 0.45),
-                                                blurRadius: 14,
+                                                    .withValues(alpha: isHome ? 0.45 : 0.3),
+                                                blurRadius: isHome ? 14 : 10,
                                                 spreadRadius: 1,
                                                 offset: const Offset(0, 2),
                                               ),

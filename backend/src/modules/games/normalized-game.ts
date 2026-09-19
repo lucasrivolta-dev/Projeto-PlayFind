@@ -90,6 +90,7 @@ export interface NormalizedGame {
   steam?: {
     storeUrl: string;
     priceCents?: number;
+    originalPriceCents?: number;
     discountPercent?: number;
     currency?: string;
     isAvailable: boolean;

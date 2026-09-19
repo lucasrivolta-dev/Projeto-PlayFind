@@ -98,7 +98,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(persistedLike, isTrue);
       expect(feed.liked, contains('game-1145360'));
-      expect(requests.map((request) => request.method), ['GET', 'POST', 'POST']);
+      expect(requests.map((request) => request.method), ['GET', 'PATCH', 'PATCH']);
     });
 
     test('falha HTTP ao descurtir restaura a curtida reidratada', () async {
@@ -260,9 +260,7 @@ void main() {
       final requests = <http.Request>[];
       final mockClient = MockClient((request) async {
         requests.add(request);
-        return http.Response(request.url.path.endsWith('/like')
-            ? jsonEncode({'liked': true})
-            : '{}', 200);
+        return http.Response(jsonEncode({'success': true}), 200);
       });
       final repo = ApiLibraryRepository(client: mockClient);
 
@@ -271,15 +269,19 @@ void main() {
       await repo.rate('game-1145360', 4);
       await repo.removeRating('game-1145360');
 
-      expect(requests[0].method, 'POST');
-      expect(requests[0].url.path, '/api/v1/library/game-1145360/favorite');
+      expect(requests[0].method, 'PATCH');
+      expect(requests[0].url.path, '/api/v1/library/game-1145360/interaction');
       expect(jsonDecode(requests[0].body), {'isFavorite': true});
       expect(requests[0].headers['x-user-id'], 'dev-user');
-      expect(requests[1].url.path, '/api/v1/library/game-1145360/like');
-      expect(requests[2].url.path, '/api/v1/library/game-1145360/rate');
+      expect(requests[1].method, 'PATCH');
+      expect(requests[1].url.path, '/api/v1/library/game-1145360/interaction');
+      expect(jsonDecode(requests[1].body), {'liked': true});
+      expect(requests[2].method, 'PATCH');
+      expect(requests[2].url.path, '/api/v1/library/game-1145360/interaction');
       expect(jsonDecode(requests[2].body), {'rating': 4});
-      expect(requests[3].method, 'DELETE');
-      expect(requests[3].url.path, '/api/v1/library/game-1145360/rate');
+      expect(requests[3].method, 'PATCH');
+      expect(requests[3].url.path, '/api/v1/library/game-1145360/interaction');
+      expect(jsonDecode(requests[3].body), {'rating': null});
     });
 
     test('ações da API lançam erro em resposta HTTP', () async {
@@ -292,12 +294,14 @@ void main() {
       await expectLater(repo.removeRating('game-1'), throwsStateError);
     });
 
-    test('toggleFavorite: envia POST para /favorite', () async {
+    test('toggleFavorite: envia PATCH para /interaction', () async {
       String? capturedPath;
       String? capturedMethod;
+      String? capturedBody;
       final mockClient = MockClient((request) async {
         capturedPath = request.url.path;
         capturedMethod = request.method;
+        capturedBody = request.body;
         return http.Response('{}', 200);
       });
 
@@ -305,13 +309,14 @@ void main() {
         userId: 'test-user',
         client: mockClient,
       );
-      await repo.toggleFavorite('game-1145360');
+      await repo.toggleFavorite('game-1145360', isFavorite: true);
 
-      expect(capturedPath, contains('favorite'));
-      expect(capturedMethod, equals('POST'));
+      expect(capturedPath, contains('interaction'));
+      expect(capturedMethod, equals('PATCH'));
+      expect(jsonDecode(capturedBody!)['isFavorite'], isTrue);
     });
 
-    test('rate: envia POST com rating correto', () async {
+    test('rate: envia PATCH com rating correto', () async {
       String? capturedBody;
       final mockClient = MockClient((request) async {
         capturedBody = request.body;
@@ -343,7 +348,7 @@ void main() {
       final repo = ApiLibraryRepository(
         client: MockClient((request) async {
           requests.add(request);
-          return http.Response(request.url.path.endsWith('/like') ? jsonEncode({'liked': true}) : jsonEncode({'data': [], 'likes': [], 'total': 0}), 200);
+          return http.Response(jsonEncode({'data': [], 'likes': [], 'total': 0}), 200);
         }),
         tokenProvider: () async => 'fake-token',
       );
@@ -352,14 +357,16 @@ void main() {
       await repo.remove('game-1');
       await repo.removeRating('game-1');
       await repo.setStatus('game-1', 'PLAYED');
-      for (final request in requests.take(4)) {
+
+      expect(requests.first.headers['authorization'], 'Bearer fake-token');
+      expect(requests.first.headers.containsKey('x-user-id'), isFalse);
+      expect(requests.first.headers['content-type'], isNull);
+
+      for (final request in requests.skip(1)) {
         expect(request.headers['authorization'], 'Bearer fake-token');
         expect(request.headers.containsKey('x-user-id'), isFalse);
-        expect(request.headers['content-type'], isNull);
+        expect(request.headers['content-type'], 'application/json');
       }
-      expect(requests.last.headers['authorization'], 'Bearer fake-token');
-      expect(requests.last.headers.containsKey('x-user-id'), isFalse);
-      expect(requests.last.headers['content-type'], 'application/json');
     });
 
     test('LibraryStore.loadFromApi: aceita jogo sem IDs externos com ID interno', () {

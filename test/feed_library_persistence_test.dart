@@ -43,12 +43,12 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     expect(requests, hasLength(2));
-    expect(requests[0].method, 'PUT');
-    expect(requests[0].url.path, '/api/v1/library/game-1145360');
+    expect(requests[0].method, 'PATCH');
+    expect(requests[0].url.path, '/api/v1/library/game-1145360/interaction');
     expect(requests[0].headers['x-user-id'], 'dev-user');
     expect(jsonDecode(requests[0].body), {'status': 'WANT_TO_PLAY'});
-    expect(requests[1].method, 'PUT');
-    expect(requests[1].url.path, '/api/v1/library/game-1145360');
+    expect(requests[1].method, 'PATCH');
+    expect(requests[1].url.path, '/api/v1/library/game-1145360/interaction');
     expect(requests[1].headers['x-user-id'], 'dev-user');
     expect(jsonDecode(requests[1].body), {'status': 'PLAYED'});
   });

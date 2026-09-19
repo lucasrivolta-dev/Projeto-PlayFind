@@ -41,6 +41,7 @@ export function enrichWithSteam(
     steam: {
       storeUrl: `https://store.steampowered.com/app/${appId}/`,
       priceCents: data?.price_overview?.final,
+      originalPriceCents: data?.price_overview?.initial ?? data?.price_overview?.final,
       discountPercent: data?.price_overview?.discount_percent,
       currency: data?.price_overview?.currency,
       isAvailable: Boolean(data),

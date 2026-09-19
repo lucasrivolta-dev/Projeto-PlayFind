@@ -10,6 +10,7 @@ import 'feed_comments_sheet.dart';
 import 'feed_trailer.dart';
 import 'feed_pager.dart';
 import 'trailer_player.dart';
+import '../explore/explore_data.dart';
 import '../auth/auth_controller.dart';
 import '../auth/auth_screen.dart';
 
@@ -103,7 +104,9 @@ class _FeedScreenState extends State<FeedScreen> {
   Widget build(BuildContext context) => SafeArea(
       bottom: false,
       child: ListenableBuilder(
-          listenable: widget.controller,
+          listenable: widget.auth != null
+              ? Listenable.merge([widget.controller, widget.auth!])
+              : widget.controller,
           builder: (context, _) {
             if (widget.controller.loading) {
               return const Center(
@@ -149,6 +152,9 @@ class _FeedScreenState extends State<FeedScreen> {
                                 item: widget.controller.items[index],
                                 active: index == widget.controller.current,
                                 controller: widget.controller,
+                                preferredPlatforms:
+                                    widget.auth?.preferredPlatforms ??
+                                        const [],
                                 onProtected: (action) =>
                                     _protected(context, action),
                                 onComments: () => _comments(
@@ -177,6 +183,7 @@ class _FeedPage extends StatelessWidget {
     required this.item,
     required this.active,
     required this.controller,
+    this.preferredPlatforms = const [],
     required this.onComments,
     required this.onDetails,
     required this.onProtected,
@@ -186,6 +193,7 @@ class _FeedPage extends StatelessWidget {
   final FeedItem item;
   final bool active;
   final FeedController controller;
+  final List<String> preferredPlatforms;
   final VoidCallback onComments, onDetails;
   final Future<void> Function(VoidCallback action) onProtected;
   final VoidCallback? onSearch;
@@ -369,7 +377,8 @@ class _FeedPage extends StatelessWidget {
                     onProtected: onProtected,
                   ),
 
-                  SizedBox(height: metrics.gapSm),
+                  // Respiro natural entre ações e detalhes
+                  const Spacer(),
 
                   // 4. Detalhes do Jogo (Apenas dados reais recebidos da API!)
                   InkWell(
@@ -634,88 +643,21 @@ class _FeedPage extends StatelessWidget {
                                         const SizedBox(width: 6),
                                       ],
 
-                                      // Preço real se existir ou Grátis
-                                      if (game.isFree) ...[
-                                        Text(
-                                          'Grátis',
-                                          style: AppTypography.title(16).copyWith(
-                                            color: AppColors.positive,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                      ] else if (game.hasSteamPrice) ...[
-                                        Text(
-                                          'R\$ ${(game.steamPriceCents! / 100).toStringAsFixed(2).replaceAll('.', ',')}',
-                                          style: AppTypography.title(16).copyWith(
-                                            color: AppColors.text,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                      ],
-
-                                      // Plataformas reais em chips
-                                      for (final p in game.platforms.take(2)) ...[
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 6,
-                                            vertical: 2,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: AppColors.surface,
-                                            borderRadius:
-                                                BorderRadius.circular(AppRadius.small),
-                                            border: Border.all(color: AppColors.border),
-                                          ),
-                                          child: Text(
-                                            p,
-                                            style: AppTypography.label(9).copyWith(
-                                              color: AppColors.text,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 4),
-                                      ],
-
-                                      // Lojas reais
-                                      if (game.stores.isNotEmpty ||
-                                          game.isSteamAvailable)
-                                        Text(
-                                          (game.stores.isNotEmpty
-                                                  ? game.stores
-                                                  : [
-                                                      if (game.isSteamAvailable)
-                                                        'Steam'
-                                                    ])
-                                              .map((s) => '• $s')
-                                              .join(' '),
-                                          style: AppTypography.label(10).copyWith(
-                                            color: AppColors.muted,
-                                          ),
-                                          maxLines: 1,
-                                        ),
+                                      // Preço real e plataformas (com preferência do usuário)
+                                      ..._buildPriceAndPlatformWidgets(
+                                        game,
+                                        preferredPlatforms,
+                                      ),
                                     ],
                                   ),
                                 ),
                               ),
                               const SizedBox(width: 8),
 
-                              // Botão CTA: Ver jogo (Link real da loja) ou Detalhes
+                              // Botão CTA: Ver jogo (abre GameDetailScreen interno com dados reais) ou Detalhes
                               if (game.hasStoreUrl)
                                 GestureDetector(
-                                  onTap: () {
-                                    final url = game.steamStoreUrl!;
-                                    Clipboard.setData(ClipboardData(text: url));
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text('Link copiado: $url'),
-                                        behavior: SnackBarBehavior.floating,
-                                        duration: const Duration(seconds: 3),
-                                      ),
-                                    );
-                                  },
+                                  onTap: onDetails,
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 14,
@@ -788,7 +730,7 @@ class _FeedPage extends StatelessWidget {
                                         ),
                                         const SizedBox(width: 4),
                                         const Icon(
-                                          Icons.arrow_forward_rounded,
+                                          Icons.info_outline,
                                           size: 13,
                                           color: AppColors.secondary,
                                         ),
@@ -803,7 +745,7 @@ class _FeedPage extends StatelessWidget {
                     ),
                   ),
 
-                  const Spacer(),
+                  SizedBox(height: metrics.gapSm),
 
                   // 5. Barra única de reprodução do trailer (estilo Obsidian Kinetic com timestamps)
                   Padding(
@@ -1216,4 +1158,125 @@ class _TrailerBottomSeekBar extends StatelessWidget {
       },
     );
   }
+}
+
+List<Widget> _buildPriceAndPlatformWidgets(
+  DiscoveryGame game,
+  List<String> preferredPlatforms,
+) {
+  final userFamilies = preferredPlatforms
+      .map(matchCanonicalFamily)
+      .whereType<CanonicalPlatformFamily>()
+      .toSet()
+      .toList();
+
+  final widgets = <Widget>[];
+
+  if (userFamilies.isNotEmpty) {
+    for (final family in userFamilies.take(2)) {
+      final supports = game.supportsCanonicalFamily(family);
+
+      if (supports) {
+        widgets.add(
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 6,
+              vertical: 2,
+            ),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.small),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Text(
+              family.shortLabel,
+              style: AppTypography.label(9).copyWith(
+                color: AppColors.text,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        );
+        widgets.add(const SizedBox(width: 4));
+
+        widgets.add(const SizedBox(width: 6));
+      }
+    }
+
+    if (game.hasSteamPrice) {
+      _addSteamPrice(widgets, game);
+    }
+  }
+
+  if (widgets.isEmpty) {
+    // Fallback padrão para visitante ou quando jogo não é da plataforma preferida
+    if (game.hasSteamPrice) _addSteamPrice(widgets, game);
+
+    for (final p in game.platforms.take(2)) {
+      widgets.add(
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 6,
+            vertical: 2,
+          ),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.small),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Text(
+            p,
+            style: AppTypography.label(9).copyWith(
+              color: AppColors.text,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      );
+      widgets.add(const SizedBox(width: 4));
+    }
+
+    if (game.isSteamAvailable || game.hasStoreUrl) {
+      widgets.add(
+        Text(
+          '• Steam',
+          style: AppTypography.label(10).copyWith(
+            color: AppColors.muted,
+          ),
+          maxLines: 1,
+        ),
+      );
+    }
+  }
+
+  return widgets;
+}
+
+void _addSteamPrice(List<Widget> widgets, DiscoveryGame game) {
+  if (game.hasOriginalPrice) {
+    widgets.add(
+      Text(
+        game.formattedOriginalPrice!,
+        style: AppTypography.body(11).copyWith(
+          color: AppColors.muted,
+          decoration: TextDecoration.lineThrough,
+        ),
+      ),
+    );
+    widgets.add(const SizedBox(width: 4));
+  }
+  widgets.add(
+    Text(
+      game.steamPriceCents == 0
+          ? 'Grátis'
+          : 'R\$ ${(game.steamPriceCents! / 100).toStringAsFixed(2).replaceAll('.', ',')}',
+      style: AppTypography.title(16).copyWith(
+        color: game.steamPriceCents == 0
+            ? AppColors.positive
+            : AppColors.text,
+        fontWeight: FontWeight.w700,
+      ),
+    ),
+  );
+  widgets.add(const SizedBox(width: 8));
 }

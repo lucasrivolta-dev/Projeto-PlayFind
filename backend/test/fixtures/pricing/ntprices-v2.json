@@ -1,0 +1,24 @@
+{
+  "success": true,
+  "data": [
+    {
+      "PPID": 201,
+      "NSUID": "70010000012345",
+      "ProductName": "Fixture Adventure",
+      "Publisher": "Fixture Studio",
+      "ReleaseDate": "2025-02-04",
+      "IsSwitch": 1,
+      "IsSwitch2": 0,
+      "IsDLC": 0,
+      "IsDemoOrSoundtrack": 0,
+      "BasePrice": 29990,
+      "SalePrice": 29990,
+      "DiscPerc": 0,
+      "IsDelisted": 0,
+      "region": "BR",
+      "eShopURL": "https://ec.nintendo.com/BR/pt/titles/70010000012345"
+    }
+  ],
+  "meta": { "region": "BR", "count": 1 },
+  "error": null
+}

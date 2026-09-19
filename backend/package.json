@@ -15,6 +15,7 @@
     "prisma:status": "prisma migrate status",
     "prisma:deploy": "prisma migrate deploy",
     "sync:games": "tsx src/scripts/sync-games.ts",
+    "sync:prices": "tsx src/scripts/sync-prices.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "seed": "tsx prisma/seed.ts"

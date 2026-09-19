@@ -42,12 +42,29 @@ class LibraryStore extends ChangeNotifier {
   final Set<String> liked = {};
   final Map<String, int> ratings = {};
   final Map<String, DiscoveryGame> gamesById = {};
-  final Set<String> _pendingLikes = {};
+  final Map<String, bool> _desiredLikes = {};
+  final Set<String> _inFlightLikes = {};
+
+  final Map<String, bool> _desiredSaved = {};
+  final Set<String> _inFlightSaved = {};
+
+  final Map<String, bool> _desiredPlayed = {};
+  final Set<String> _inFlightPlayed = {};
+
+  final Map<String, int?> _desiredRatings = {};
+  final Set<String> _inFlightRatings = {};
+
+  final Map<String, bool> _savedPreviousWasPlayed = {};
+  final Map<String, int?> _savedPreviousRating = {};
+
+  final Map<String, bool> _playedPreviousWasSaved = {};
+  final Map<String, int?> _playedPreviousRating = {};
+
+  final Map<String, int?> _ratingPreviousRating = {};
+  final Map<String, bool> _ratingPreviousWasPlayed = {};
+  final Map<String, bool> _ratingPreviousWasSaved = {};
+
   final Set<String> _pendingFavorites = {};
-  final Set<String> _pendingRatings = {};
-  final Set<String> _pendingSaved = {};
-  final Map<String, bool> _queuedSavedActions = {};
-  final Set<String> _pendingPlayed = {};
 
   // Stream de erros para feedback discreto na UI.
   final _errorController = StreamController<String>.broadcast();
@@ -72,68 +89,76 @@ class LibraryStore extends ChangeNotifier {
   void toggleSaved(String id, [DiscoveryGame? game]) {
     if (game != null) gamesById[id] = game;
     _touch(id);
-    final added = saved.add(id);
-    if (!added) saved.remove(id);
-    final wasPlayed = added ? played.remove(id) : false;
-    final previousRating = added ? ratings.remove(id) : null;
+    final targetState = !saved.contains(id);
+    if (targetState) {
+      _savedPreviousWasPlayed.putIfAbsent(id, () => played.contains(id));
+      _savedPreviousRating.putIfAbsent(id, () => ratings[id]);
+      saved.add(id);
+      played.remove(id);
+      ratings.remove(id);
+    } else {
+      saved.remove(id);
+    }
+    _desiredSaved[id] = targetState;
     notifyListeners();
 
-    if (!_pendingSaved.add(id)) {
-      _queuedSavedActions[id] = added;
-      return;
+    if (_inFlightSaved.add(id)) {
+      unawaited(_runSavedSync(id));
     }
-    unawaited(_persistSaved(id, added, wasPlayed, previousRating));
   }
 
-  Future<void> _persistSaved(String id, bool added, bool wasPlayed, int? previousRating) async {
-    try {
-      if (added) {
-        await _repo.setStatus(id, 'WANT_TO_PLAY');
-      } else {
-        await _repo.remove(id);
-      }
-    } catch (_) {
-      if (added) {
-        saved.remove(id);
-        if (wasPlayed) played.add(id);
-        if (previousRating != null) ratings[id] = previousRating;
-      } else {
-        saved.add(id);
-      }
-      notifyListeners();
-      _emitError(added
-          ? 'Não foi possível salvar o jogo. Tente novamente.'
-          : 'Não foi possível remover o jogo. Tente novamente.');
-    } finally {
-      _pendingSaved.remove(id);
-      final queued = _queuedSavedActions.remove(id);
-      if (queued != null) {
-        _pendingSaved.add(id);
-        unawaited(_persistSaved(id, queued, false, null));
+  Future<void> _runSavedSync(String id) async {
+    while (true) {
+      final desired = _desiredSaved[id];
+      if (desired == null) break;
+      try {
+        if (desired) {
+          await _repo.setStatus(id, 'WANT_TO_PLAY');
+        } else {
+          await _repo.remove(id);
+        }
+        if (_desiredSaved[id] == desired) {
+          _desiredSaved.remove(id);
+          _savedPreviousWasPlayed.remove(id);
+          _savedPreviousRating.remove(id);
+          break;
+        }
+      } catch (e) {
+        debugPrint('[LibraryStore] Falha ao persistir status para $id: $e');
+        if (_desiredSaved[id] == desired) {
+          if (desired) {
+            saved.remove(id);
+            final wasPlayed = _savedPreviousWasPlayed.remove(id) ?? false;
+            if (wasPlayed) played.add(id);
+            final previousRating = _savedPreviousRating.remove(id);
+            if (previousRating != null) ratings[id] = previousRating;
+          } else {
+            saved.add(id);
+          }
+          _desiredSaved.remove(id);
+          notifyListeners();
+          _emitError(desired
+              ? 'Não foi possível salvar o jogo. Tente novamente.'
+              : 'Não foi possível remover o jogo. Tente novamente.');
+          break;
+        }
       }
     }
+    _inFlightSaved.remove(id);
   }
 
   void markPlayed(String id, [DiscoveryGame? game]) {
     if (game != null) gamesById[id] = game;
-    if (played.contains(id) || !_pendingPlayed.add(id)) return;
+    if (played.contains(id)) return;
     _touch(id);
-    final wasSaved = saved.remove(id);
+    _playedPreviousWasSaved.putIfAbsent(id, () => saved.contains(id));
+    saved.remove(id);
     played.add(id);
+    _desiredPlayed[id] = true;
     notifyListeners();
-    unawaited(_persistPlayed(id, wasSaved));
-  }
 
-  Future<void> _persistPlayed(String id, bool wasSaved) async {
-    try {
-      await _repo.setStatus(id, 'PLAYED');
-    } catch (_) {
-      played.remove(id);
-      if (wasSaved) saved.add(id);
-      notifyListeners();
-      _emitError('Não foi possível marcar como jogado. Tente novamente.');
-    } finally {
-      _pendingPlayed.remove(id);
+    if (_inFlightPlayed.add(id)) {
+      unawaited(_runPlayedSync(id));
     }
   }
 
@@ -144,34 +169,66 @@ class LibraryStore extends ChangeNotifier {
       return;
     }
     _touch(id);
+    _playedPreviousRating.putIfAbsent(id, () => ratings[id]);
     played.remove(id);
-    final previousRating = ratings.remove(id);
+    ratings.remove(id);
+    _desiredPlayed[id] = false;
     notifyListeners();
-    _repo.remove(id).catchError((_) {
-      played.add(id);
-      if (previousRating != null) ratings[id] = previousRating;
-      notifyListeners();
-      _emitError('Não foi possível remover o jogo. Tente novamente.');
-    });
+
+    if (_inFlightPlayed.add(id)) {
+      unawaited(_runPlayedSync(id));
+    }
+  }
+
+  Future<void> _runPlayedSync(String id) async {
+    while (true) {
+      final desired = _desiredPlayed[id];
+      if (desired == null) break;
+      try {
+        if (desired) {
+          await _repo.setStatus(id, 'PLAYED');
+        } else {
+          await _repo.remove(id);
+        }
+        if (_desiredPlayed[id] == desired) {
+          _desiredPlayed.remove(id);
+          _playedPreviousWasSaved.remove(id);
+          _playedPreviousRating.remove(id);
+          break;
+        }
+      } catch (e) {
+        debugPrint('[LibraryStore] Falha ao persistir status jogado para $id: $e');
+        if (_desiredPlayed[id] == desired) {
+          if (desired) {
+            played.remove(id);
+            final wasSaved = _playedPreviousWasSaved.remove(id) ?? false;
+            if (wasSaved) saved.add(id);
+          } else {
+            played.add(id);
+            final previousRating = _playedPreviousRating.remove(id);
+            if (previousRating != null) ratings[id] = previousRating;
+          }
+          _desiredPlayed.remove(id);
+          notifyListeners();
+          _emitError(desired
+              ? 'Não foi possível marcar como jogado. Tente novamente.'
+              : 'Não foi possível remover o jogo. Tente novamente.');
+          break;
+        }
+      }
+    }
+    _inFlightPlayed.remove(id);
   }
 
   void removeRating(String id) {
-    if (!_pendingRatings.add(id)) return;
     _touch(id);
-    final previous = ratings.remove(id);
+    _ratingPreviousRating.putIfAbsent(id, () => ratings[id]);
+    ratings.remove(id);
+    _desiredRatings[id] = null;
     notifyListeners();
-    unawaited(_persistRatingRemoval(id, previous));
-  }
 
-  Future<void> _persistRatingRemoval(String id, int? previous) async {
-    try {
-      await _repo.removeRating(id);
-    } catch (_) {
-      if (previous != null) ratings[id] = previous;
-      notifyListeners();
-      _emitError('Não foi possível remover a avaliação. Tente novamente.');
-    } finally {
-      _pendingRatings.remove(id);
+    if (_inFlightRatings.add(id)) {
+      unawaited(_runRatingSync(id));
     }
   }
 
@@ -203,69 +260,116 @@ class LibraryStore extends ChangeNotifier {
   void rate(String id, int rating, [DiscoveryGame? game]) {
     if (rating < 1 || rating > 5) return;
     if (game != null) gamesById[id] = game;
-    if (!_pendingRatings.add(id)) return;
     _touch(id);
-    final previous = ratings[id];
-    final wasPlayed = played.contains(id);
-    final wasSaved = saved.contains(id);
+    _ratingPreviousRating.putIfAbsent(id, () => ratings[id]);
+    _ratingPreviousWasPlayed.putIfAbsent(id, () => played.contains(id));
+    _ratingPreviousWasSaved.putIfAbsent(id, () => saved.contains(id));
     ratings[id] = rating;
     played.add(id);
     saved.remove(id);
+    _desiredRatings[id] = rating;
     notifyListeners();
-    unawaited(_persistRating(id, rating, previous, wasPlayed, wasSaved));
+
+    if (_inFlightRatings.add(id)) {
+      unawaited(_runRatingSync(id));
+    }
   }
 
-  Future<void> _persistRating(String id, int rating, int? previous,
-      bool wasPlayed, bool wasSaved) async {
-    try {
-      await _repo.rate(id, rating);
-    } catch (_) {
-      if (previous == null) {
-        ratings.remove(id);
-      } else {
-        ratings[id] = previous;
+  Future<void> _runRatingSync(String id) async {
+    while (true) {
+      final desired = _desiredRatings[id];
+      try {
+        if (desired != null) {
+          await _repo.rate(id, desired);
+        } else {
+          await _repo.removeRating(id);
+        }
+        if (_desiredRatings[id] == desired) {
+          _desiredRatings.remove(id);
+          _ratingPreviousRating.remove(id);
+          _ratingPreviousWasPlayed.remove(id);
+          _ratingPreviousWasSaved.remove(id);
+          break;
+        }
+      } catch (e) {
+        debugPrint('[LibraryStore] Falha ao persistir avaliação ($desired) para $id: $e');
+        if (_desiredRatings[id] == desired) {
+          final previousRating = _ratingPreviousRating.remove(id);
+          final wasPlayed = _ratingPreviousWasPlayed.remove(id) ?? false;
+          final wasSaved = _ratingPreviousWasSaved.remove(id) ?? false;
+          if (desired != null) {
+            if (previousRating == null) {
+              ratings.remove(id);
+            } else {
+              ratings[id] = previousRating;
+            }
+            if (!wasPlayed) played.remove(id);
+            if (wasSaved) saved.add(id);
+          } else {
+            if (previousRating != null) ratings[id] = previousRating;
+          }
+          _desiredRatings.remove(id);
+          notifyListeners();
+          _emitError('Não foi possível atualizar a avaliação. Tente novamente.');
+          break;
+        }
       }
-      if (!wasPlayed) played.remove(id);
-      if (wasSaved) saved.add(id);
-      notifyListeners();
-      _emitError('Não foi possível salvar a avaliação. Tente novamente.');
-    } finally {
-      _pendingRatings.remove(id);
     }
+    _inFlightRatings.remove(id);
   }
 
   void toggleLike(String id, [DiscoveryGame? game]) {
     if (game != null) gamesById[id] = game;
-    if (!_pendingLikes.add(id)) return;
     _touchLike(id);
-    final optimistic = liked.add(id);
-    if (!optimistic) liked.remove(id);
+    final isLikedNow = liked.contains(id);
+    final targetState = !isLikedNow;
+    if (targetState) {
+      liked.add(id);
+    } else {
+      liked.remove(id);
+    }
+    _desiredLikes[id] = targetState;
     notifyListeners();
-    unawaited(_persistLike(id, optimistic));
+
+    if (_inFlightLikes.add(id)) {
+      unawaited(_runLikeSync(id));
+    }
   }
 
-  Future<void> _persistLike(String id, bool optimistic) async {
-    try {
-      final persisted = await _repo.toggleLike(id);
-      if (persisted != null && persisted != optimistic) {
-        if (persisted) {
-          liked.add(id);
-        } else {
-          liked.remove(id);
+  Future<void> _runLikeSync(String id) async {
+    while (true) {
+      final desired = _desiredLikes[id];
+      if (desired == null) break;
+      try {
+        final persisted = await _repo.setLiked(id, desired);
+        if (_desiredLikes[id] == desired) {
+          if (persisted != desired) {
+            if (persisted) {
+              liked.add(id);
+            } else {
+              liked.remove(id);
+            }
+            notifyListeners();
+          }
+          _desiredLikes.remove(id);
+          break;
         }
-        notifyListeners();
+      } catch (e) {
+        debugPrint('[LibraryStore] Falha ao persistir curtida ($desired) para $id: $e');
+        if (_desiredLikes[id] == desired) {
+          if (desired) {
+            liked.remove(id);
+          } else {
+            liked.add(id);
+          }
+          _desiredLikes.remove(id);
+          notifyListeners();
+          _emitError('Não foi possível atualizar a curtida. Tente novamente.');
+          break;
+        }
       }
-    } catch (_) {
-      if (optimistic) {
-        liked.remove(id);
-      } else {
-        liked.add(id);
-      }
-      notifyListeners();
-      _emitError('Não foi possível atualizar a curtida. Tente novamente.');
-    } finally {
-      _pendingLikes.remove(id);
     }
+    _inFlightLikes.remove(id);
   }
 
   Set<String> get all => {...saved, ...played, ...liked, ...ratings.keys};
@@ -279,12 +383,22 @@ class LibraryStore extends ChangeNotifier {
     liked.clear();
     ratings.clear();
     gamesById.clear();
-    _pendingLikes.clear();
+    _desiredLikes.clear();
+    _inFlightLikes.clear();
+    _desiredSaved.clear();
+    _inFlightSaved.clear();
+    _desiredPlayed.clear();
+    _inFlightPlayed.clear();
+    _desiredRatings.clear();
+    _inFlightRatings.clear();
+    _savedPreviousWasPlayed.clear();
+    _savedPreviousRating.clear();
+    _playedPreviousWasSaved.clear();
+    _playedPreviousRating.clear();
+    _ratingPreviousRating.clear();
+    _ratingPreviousWasPlayed.clear();
+    _ratingPreviousWasSaved.clear();
     _pendingFavorites.clear();
-    _pendingRatings.clear();
-    _pendingSaved.clear();
-    _queuedSavedActions.clear();
-    _pendingPlayed.clear();
     notifyListeners();
   }
 
@@ -294,12 +408,26 @@ class LibraryStore extends ChangeNotifier {
       {List<Map<String, dynamic>> likedGames = const [],
       Set<String> preserveIds = const {},
       Set<String> preserveLikedIds = const {}}) {
-    final preservedSaved = saved.intersection(preserveIds);
-    final preservedPlayed = played.intersection(preserveIds);
-    final preservedFavorites = favorites.intersection(preserveIds);
-    final preservedLiked = liked.intersection(preserveLikedIds);
+    final effectivePreserveIds = {
+      ...preserveIds,
+      ..._desiredSaved.keys,
+      ..._inFlightSaved,
+      ..._desiredPlayed.keys,
+      ..._inFlightPlayed,
+      ..._desiredRatings.keys,
+      ..._inFlightRatings,
+    };
+    final effectivePreserveLikedIds = {
+      ...preserveLikedIds,
+      ..._desiredLikes.keys,
+      ..._inFlightLikes,
+    };
+    final preservedSaved = saved.intersection(effectivePreserveIds);
+    final preservedPlayed = played.intersection(effectivePreserveIds);
+    final preservedFavorites = favorites.intersection(effectivePreserveIds);
+    final preservedLiked = liked.intersection(effectivePreserveLikedIds);
     final preservedRatings = Map<String, int>.fromEntries(
-        ratings.entries.where((entry) => preserveIds.contains(entry.key)));
+        ratings.entries.where((entry) => effectivePreserveIds.contains(entry.key)));
     saved.clear();
     played.clear();
     favorites.clear();
@@ -312,7 +440,7 @@ class LibraryStore extends ChangeNotifier {
       if (id == null) continue;
       if (game != null) gamesById[id] = DiscoveryGame.fromJson({...game, 'id': id});
 
-      if (!preserveIds.contains(id)) {
+      if (!effectivePreserveIds.contains(id)) {
         final status = item['status'] as String?;
         if (status == 'WANT_TO_PLAY') saved.add(id);
         if (status == 'PLAYED') played.add(id);
@@ -320,14 +448,14 @@ class LibraryStore extends ChangeNotifier {
         final rating = item['rating'] as int?;
         if (rating != null) ratings[id] = rating;
       }
-      if (item['liked'] == true && !preserveLikedIds.contains(id)) {
+      if (item['liked'] == true && !effectivePreserveLikedIds.contains(id)) {
         liked.add(id);
       }
     }
 
     for (final game in likedGames) {
       final id = _internalGameId(game);
-      if (id != null && !preserveLikedIds.contains(id)) liked.add(id);
+      if (id != null && !effectivePreserveLikedIds.contains(id)) liked.add(id);
     }
 
     saved.addAll(preservedSaved);

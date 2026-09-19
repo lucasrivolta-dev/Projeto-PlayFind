@@ -11,6 +11,7 @@ class AuthUser {
 
 abstract interface class AuthRepository {
   Stream<AuthUser?> get authStateChanges;
+  AuthUser? get currentUser;
   Future<AuthUser?> signIn({required String email, required String password});
   Future<AuthUser?> createAccount({required String email, required String password});
   Future<AuthUser?> signInWithGoogle();
@@ -28,6 +29,9 @@ class FirebaseAuthRepository implements AuthRepository {
   AuthUser? _map(User? user) => user == null
       ? null
       : AuthUser(uid: user.uid, email: user.email, displayName: user.displayName, photoUrl: user.photoURL);
+
+  @override
+  AuthUser? get currentUser => _map(_auth.currentUser);
 
   @override
   Stream<AuthUser?> get authStateChanges => _auth.authStateChanges().map(_map);
@@ -81,6 +85,8 @@ class FakeAuthRepository implements AuthRepository {
   final AuthUser user;
   final _changes = StreamController<AuthUser?>.broadcast();
   AuthUser? _current;
+  @override
+  AuthUser? get currentUser => _current;
   @override
   Stream<AuthUser?> get authStateChanges async* { yield _current; yield* _changes.stream; }
   @override

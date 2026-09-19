@@ -38,6 +38,13 @@ class _FakeLibraryRepository implements LibraryRepository {
   }
 
   @override
+  Future<bool> setLiked(String gameId, bool liked) async {
+    likedIds.add(gameId);
+    if (error != null) throw error!;
+    return liked;
+  }
+
+  @override
   Future<bool?> toggleLike(String gameId) async {
     likedIds.add(gameId);
     if (error != null) throw error!;

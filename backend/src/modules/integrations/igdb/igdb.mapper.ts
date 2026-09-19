@@ -12,18 +12,62 @@ function image(url?: string) {
   return url.startsWith('//') ? `https:${url}` : url;
 }
 function platform(name: string): GamePlatform {
-  const value = name.toLowerCase();
+  const value = name.toLowerCase().trim();
+  if (
+    value.includes('switch') ||
+    value.includes('nintendo') ||
+    value.includes('wii') ||
+    value.includes('game boy') ||
+    value.includes('gameboy') ||
+    value.includes('famicom') ||
+    value.includes('nes') ||
+    value.includes('snes') ||
+    value.includes('ds') ||
+    value.includes('3ds') ||
+    value.includes('gamecube') ||
+    value.includes('n64')
+  ) {
+    return 'Switch';
+  }
+  if (
+    value.includes('playstation') ||
+    value.includes('ps5') ||
+    value.includes('ps4') ||
+    value.includes('ps3') ||
+    value.includes('ps2') ||
+    value.includes('ps1') ||
+    value.includes('ps vita') ||
+    value.includes('psvita') ||
+    value.includes('psp')
+  ) {
+    return 'PlayStation';
+  }
+  if (
+    value.includes('xbox') ||
+    value.includes('series x') ||
+    value.includes('series s') ||
+    value.includes('xone')
+  ) {
+    return 'Xbox';
+  }
   if (
     value.includes('pc') ||
     value.includes('windows') ||
     value.includes('linux') ||
-    value.includes('mac')
-  )
+    value.includes('mac') ||
+    value.includes('steam') ||
+    value.includes('dos')
+  ) {
     return 'PC';
-  if (value.includes('playstation')) return 'PlayStation';
-  if (value.includes('xbox')) return 'Xbox';
-  if (value.includes('switch')) return 'Switch';
-  if (value.includes('ios') || value.includes('android')) return 'Mobile';
+  }
+  if (
+    value.includes('ios') ||
+    value.includes('android') ||
+    value.includes('ipad') ||
+    value.includes('iphone')
+  ) {
+    return 'Mobile';
+  }
   return 'Other';
 }
 

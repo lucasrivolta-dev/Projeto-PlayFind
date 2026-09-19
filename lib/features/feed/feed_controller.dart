@@ -76,9 +76,14 @@ class FeedController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  final Map<String, bool> _initialLikes = {};
+
   int realLikeCount(DiscoveryGame game) {
+    final initiallyLiked = _initialLikes[game.id] ?? false;
     final isLikedNow = liked.contains(game.id);
-    return game.likeCount + (isLikedNow ? 1 : 0);
+    final delta = (isLikedNow ? 1 : 0) - (initiallyLiked ? 1 : 0);
+    final count = game.likeCount + delta;
+    return count < 0 ? 0 : count;
   }
 
   int realCommentCount(DiscoveryGame game) {
@@ -96,6 +101,9 @@ class FeedController extends ChangeNotifier {
 
   List<FeedItem> _buildFeedItems(List<DiscoveryGame> games) {
     library.registerGames(games);
+    for (final game in games) {
+      _initialLikes.putIfAbsent(game.id, () => library.liked.contains(game.id));
+    }
     return games.map((game) {
       final comments = [
         FeedComment(

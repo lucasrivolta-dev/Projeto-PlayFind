@@ -1,0 +1,29 @@
+{
+  "success": true,
+  "data": [
+    {
+      "PPID": 101,
+      "PSNID": "UP0001-PPSA12345_00-TESTBASE00000001",
+      "ProductName": "Fixture Adventure",
+      "Publisher": "Fixture Studio",
+      "ReleaseDate": "2025-02-04",
+      "IsPS4": 1,
+      "IsPS5": 1,
+      "IsDLC": 0,
+      "IsDemoOrSoundtrack": 0,
+      "StoreClass": "FULL_GAME",
+      "EditionName": "Standard Edition",
+      "EditionType": "STANDARD",
+      "BasePrice": 29990,
+      "SalePrice": 29990,
+      "PlusPrice": 9990,
+      "DiscPerc": 0,
+      "PriceCurrency": "BRL",
+      "IsDelisted": 0,
+      "region": "BR",
+      "PSStoreURL": "https://store.playstation.com/pt-br/product/UP0001-PPSA12345_00-TESTBASE00000001"
+    }
+  ],
+  "meta": { "region": "BR", "count": 1 },
+  "error": null
+}

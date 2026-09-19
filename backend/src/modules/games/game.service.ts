@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { matchesPlatformPreference } from './platform-preference.js';
 import type { PrismaDbClient } from './prisma-game.repository.js';
 import { describeTrailer, type NormalizedTrailer } from './normalized-game.js';
 import {
@@ -40,9 +41,19 @@ export interface GameSummaryDto {
   likeCount?: number;
   commentCount?: number;
   stores?: Array<{ name: string; url?: string }>;
+  storeOffers?: Array<{
+    store: string;
+    storeUrl?: string;
+    originalPriceCents?: number | null;
+    finalPriceCents?: number | null;
+    discountPercent?: number;
+    currency?: string;
+    isAvailable: boolean;
+  }>;
   steam?: {
     storeUrl: string;
     priceCents?: number;
+    originalPriceCents?: number;
     discountPercent?: number;
     currency?: string;
     isAvailable: boolean;
@@ -253,6 +264,7 @@ export class GameService {
         platforms: { include: { platform: true } },
         media: { orderBy: { sortOrder: 'asc' } },
         steamOffers: { orderBy: { capturedAt: 'desc' }, take: 1 },
+        storeOffers: { orderBy: { observedAt: 'desc' } },
       },
     });
 
@@ -292,18 +304,10 @@ export class GameService {
     if (latestSteam?.storeUrl) {
       stores.push({ name: 'Steam', url: latestSteam.storeUrl });
     }
-    const platformNames = record.platforms.map((p) => p.platform.name.toLowerCase());
-    if (platformNames.some((p) => p.includes('playstation') || p.includes('ps5') || p.includes('ps4'))) {
-      stores.push({ name: 'PS Store' });
-    }
-    if (platformNames.some((p) => p.includes('xbox'))) {
-      stores.push({ name: 'Xbox Store' });
-    }
-    if (platformNames.some((p) => p.includes('switch') || p.includes('nintendo'))) {
-      stores.push({ name: 'Nintendo eShop' });
-    }
-    if (platformNames.some((p) => p.includes('pc')) && !stores.some((s) => s.name === 'Epic')) {
-      stores.push({ name: 'Epic' });
+    for (const so of record.storeOffers ?? []) {
+      if (so.store === 'STEAM' && !stores.some((s) => s.name === 'Steam')) {
+        stores.push({ name: 'Steam', url: so.storeUrl });
+      }
     }
 
     return {
@@ -330,10 +334,23 @@ export class GameService {
       trailers,
       trailerDetails,
       primaryTrailer: pickPrimaryTrailer(trailerDetails),
+      storeOffers: (record.storeOffers ?? [])
+        .filter((so) => so.store === 'STEAM')
+        .map((so) => ({
+          store: so.store,
+          storeUrl: so.storeUrl,
+          originalPriceCents: so.originalPriceCents ?? null,
+          finalPriceCents: so.finalPriceCents ?? null,
+          discountPercent: so.discountPercent ?? 0,
+          currency: so.currency ?? 'BRL',
+          isAvailable: so.isAvailable,
+        })),
       steam: latestSteam
         ? {
             storeUrl: latestSteam.storeUrl,
             priceCents: latestSteam.priceCents ?? undefined,
+            originalPriceCents:
+              latestSteam.originalPriceCents ?? latestSteam.priceCents ?? undefined,
             discountPercent: latestSteam.discountPercent ?? undefined,
             currency: latestSteam.currency ?? undefined,
             isAvailable: latestSteam.isAvailable,
@@ -342,7 +359,7 @@ export class GameService {
     };
   }
 
-  async getFeedGames(limit = 20, excludeIds?: string[]) {
+  async getFeedGames(limit = 20, excludeIds?: string[], preferredPlatforms?: string[]) {
     const safeLimit = Math.min(100, Math.max(1, limit));
     const now = new Date();
 
@@ -361,6 +378,7 @@ export class GameService {
         platforms: { include: { platform: true } },
         media: { orderBy: { sortOrder: 'asc' } },
         steamOffers: { orderBy: { capturedAt: 'desc' }, take: 1 },
+        storeOffers: { orderBy: { observedAt: 'desc' } },
       },
     });
 
@@ -448,6 +466,15 @@ export class GameService {
 
       const { score, breakdown } = calculateDiscoveryScore(scoringInput, now);
 
+      // Contextual boost if game matches user's preferred platforms
+      const platformBoost = matchesPlatformPreference(
+        preferredPlatforms ?? [],
+        record.platforms.map((p) => p.platform.name),
+        Boolean(record.steamAppId || latestSteam?.isAvailable ||
+          record.storeOffers?.some((offer) => offer.store === 'STEAM' && offer.isAvailable)),
+      ) ? 15 : 0;
+      const finalScore = score + platformBoost;
+
       const likeCount = likeMap.get(record.id) ?? 0;
       const commentCount = commentMap.get(record.id) ?? 0;
       const ratingCount = record.ratingCount ?? record.totalRatingCount ?? null;
@@ -456,18 +483,10 @@ export class GameService {
       if (latestSteam?.storeUrl) {
         stores.push({ name: 'Steam', url: latestSteam.storeUrl });
       }
-      const platformNames = record.platforms.map((p) => p.platform.name.toLowerCase());
-      if (platformNames.some((p) => p.includes('playstation') || p.includes('ps5') || p.includes('ps4'))) {
-        stores.push({ name: 'PS Store' });
-      }
-      if (platformNames.some((p) => p.includes('xbox'))) {
-        stores.push({ name: 'Xbox Store' });
-      }
-      if (platformNames.some((p) => p.includes('switch') || p.includes('nintendo'))) {
-        stores.push({ name: 'Nintendo eShop' });
-      }
-      if (platformNames.some((p) => p.includes('pc')) && !stores.some((s) => s.name === 'Epic')) {
-        stores.push({ name: 'Epic' });
+      for (const so of record.storeOffers ?? []) {
+        if (so.store === 'STEAM' && !stores.some((s) => s.name === 'Steam')) {
+          stores.push({ name: 'Steam', url: so.storeUrl });
+        }
       }
 
       return {
@@ -482,6 +501,17 @@ export class GameService {
         likeCount,
         commentCount,
         stores,
+        storeOffers: (record.storeOffers ?? [])
+          .filter((so) => so.store === 'STEAM')
+          .map((so) => ({
+            store: so.store,
+            storeUrl: so.storeUrl,
+            originalPriceCents: so.originalPriceCents ?? null,
+            finalPriceCents: so.finalPriceCents ?? null,
+            discountPercent: so.discountPercent ?? 0,
+            currency: so.currency ?? 'BRL',
+            isAvailable: so.isAvailable,
+          })),
         coverUrl: record.coverUrl ?? null,
         heroUrl: record.heroUrl ?? null,
         isFree: record.isFree,
@@ -493,15 +523,17 @@ export class GameService {
         trailers,
         trailerDetails,
         primaryTrailer: primaryTrailer ?? null,
-        matchScore: score,
-        discoveryScore: score,
-        scoreBreakdown: breakdown,
+        matchScore: finalScore,
+        discoveryScore: finalScore,
+        scoreBreakdown: { ...breakdown, platformPreference: platformBoost },
         releaseDate: record.releaseDate,
         createdAt: record.createdAt,
         steam: latestSteam
           ? {
               storeUrl: latestSteam.storeUrl,
               priceCents: latestSteam.priceCents ?? null,
+              originalPriceCents:
+                latestSteam.originalPriceCents ?? latestSteam.priceCents ?? null,
               discountPercent: latestSteam.discountPercent ?? null,
               currency: latestSteam.currency ?? null,
               isAvailable: latestSteam.isAvailable,

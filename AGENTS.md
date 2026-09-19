@@ -20,7 +20,7 @@ Não implemente telas, migrations ou funcionalidades fora do escopo solicitado. 
 
 Estamos desenvolvendo um aplicativo mobile de descoberta de videogames.
 
-O nome atual do projeto pode aparecer como NextPlay ou PlaySweep. Trata-se do mesmo projeto.
+O nome atual do projeto pode aparecer como NextPlay, PlayFind ou PlaySweep. Trata-se do mesmo projeto.
 
 A principal pergunta que o aplicativo resolve é:
 
@@ -409,6 +409,10 @@ Flutter / Dart.
 O aplicativo deve ser mobile-first.
 
 Android e iOS são as plataformas principais.
+
+Durante o desenvolvimento atual, Android físico é a prioridade operacional de validação. O dispositivo real de referência é o Samsung SM-G780G / Galaxy S20 FE, Android 13, device id RQ8T209FPFE.
+
+Regra de validação: testar primeiro no Android físico; Edge/Web vem depois como regressão secundária. Uma tarefa não deve ser considerada concluída apenas porque funciona no Edge se estiver incorreta no Android.
 
 A referência de design utilizada originalmente é aproximadamente:
 
@@ -1170,13 +1174,13 @@ A mudança de foco não deve alterar tamanho/layout do componente.
 
 A navegação inferior é uma característica importante do produto.
 
-Possui cinco opções:
-
-Início
+Possui cinco opções em posições visuais fixas, nesta ordem:
 
 Explorar
 
 Fórum
+
+Início
 
 Biblioteca
 
@@ -1196,13 +1200,15 @@ aproximadamente 22px.
 
 IMPORTANTE:
 
-Atualização solicitada pelo usuário: os itens permanecem sempre em posições fixas,
+A ordem visual obrigatória é:
 
-na ordem Início, Explorar, Fórum, Biblioteca e Perfil.
+Explorar | Fórum | Início | Biblioteca | Perfil
 
-A seleção NÃO reorganiza o rodapé. Manter a animação de seleção e o destaque roxo
+Início fica exatamente no centro, com destaque circular/elevado em Electric Violet.
 
-do item ativo.
+A seleção NÃO reorganiza o rodapé. O item ativo recebe animação, fundo/glow roxo discreto e label correspondente.
+
+A ordem visual não deve depender diretamente de AppDestination.values; usar uma lista explícita quando necessário, preservando o mapeamento lógico/pageIndex correto do shell.
 
 Todos continuam mostrando ícone + label.
 
@@ -1214,7 +1220,7 @@ Inativos:
 
 Text Muted/Text Secondary.
 
-Esse comportamento deve ser tratado posteriormente como componente reutilizável, e não implementado separadamente em cada página.
+Esse comportamento deve ser tratado como componente reutilizável, não implementado separadamente em cada página.
 
 ---
 
@@ -1460,17 +1466,23 @@ As telas abaixo já foram implementadas em Flutter e representam a base visual e
 
 * `lib/features/auth/auth_screen.dart` — login/criação de conta com e-mail, Google, Apple, visitante e animação da marca.
 
-As telas de comentários do For You são um Bottom Sheet sobre o feed. A tela de detalhes é compartilhada por Feed, Explorar e Biblioteca. O estado atual é em memória e será substituído por repositórios ligados à API.
+As telas de comentários do For You são um Bottom Sheet sobre o feed. A tela de detalhes é compartilhada por Feed, Explorar e Biblioteca.
+
+O projeto já possui API real e persistência para catálogo/biblioteca. Feed e Biblioteca compartilham LibraryStore/ApiLibraryRepository. Algumas áreas sociais ainda podem conter partes demonstrativas/em memória; confirmar sempre o código atual antes de assumir.
 
 ---
 
 # 33. NAVEGAÇÃO E RODAPÉ
 
-As cinco posições do rodapé são fixas e permanecem nesta ordem:
+As cinco posições visuais do rodapé são fixas e permanecem nesta ordem:
 
-Início | Explorar | Fórum | Biblioteca | Perfil
+Explorar | Fórum | Início | Biblioteca | Perfil
 
-O item selecionado recebe animação, fundo e texto Electric Violet. A ordem nunca deve ser reorganizada para centralizar o item ativo. Fórum e Biblioteca são áreas reais do app e devem permanecer acessíveis pelo shell principal.
+Início é o item central e recebe destaque circular/elevado quando ativo. A seleção não deve reorganizar o rodapé.
+
+Preservar o mapeamento interno do shell/pageIndex. A ordem visual deve ser controlada explicitamente para não quebrar a navegação lógica.
+
+Fórum e Biblioteca são áreas reais do app e devem permanecer acessíveis pelo shell principal.
 
 ---
 
@@ -1596,7 +1608,9 @@ Tabelas de relação com chaves únicas por usuário e alvo. Seguir uma discuss�
 
 * Já joguei atualiza o mesmo registro para PLAYED.
 
-* Curtir é uma relação/estado separado e idempotente. Favorito não é feature ativa; isFavorite, se ainda existir no schema, é legado até migration futura aprovada. Avaliação continua vinculada ao usuário+jogo.
+* Curtir é um estado independente dentro de UserGameLibrary (liked). Favorito não é feature ativa; isFavorite, se ainda existir no schema, é legado até migration futura aprovada. Avaliação continua vinculada ao usuário+jogo.
+
+* Para novas mutações de Curtir, preferir semântica explícita de estado desejado (liked: true/false) via PATCH /library/:gameId/interaction em vez de depender de toggle remoto. A intenção mais recente do usuário deve vencer; nenhum toque deve ser descartado por haver request pendente.
 
 * Remover uma ação não deve apagar o jogo do catálogo.
 
@@ -1628,7 +1642,31 @@ Widgets não conhecem Prisma, PostgreSQL, Firebase Admin ou regras de consulta. 
 
 # 38. VALIDAÇÃO ATUAL
 
-Os testes em `test/` cobrem Feed, comentários e ações, Explorar e descoberta, Perfil, Biblioteca, Fórum, discussões, detalhes do jogo, estado compartilhado e responsividade em larguras pequenas com escala de texto ampliada. Antes de alterar telas, executar `flutter analyze` e `flutter test` usando o Flutter local do projeto por meio de `flutter.ps1`.
+Os testes em test/ cobrem Feed, comentários e ações, Explorar e descoberta, Perfil, Biblioteca, Fórum, discussões, detalhes do jogo, estado compartilhado e responsividade.
+
+Validação padrão depois de mudanças relevantes:
+
+Backend:
+
+pnpm test
+
+pnpm run typecheck
+
+Flutter:
+
+flutter analyze
+
+flutter test
+
+Também:
+
+git diff --check
+
+git status --short
+
+Problemas de PlatformView, iframe, gestos, autoplay, seek, WebView e interação real não podem ser declarados concluídos apenas por testes automatizados.
+
+Prioridade obrigatória: validar primeiro no Samsung físico RQ8T209FPFE (Android 13). Depois validar Edge/Web como regressão secundária.
 
 ---
 
@@ -1657,6 +1695,12 @@ Princípios de catálogo:
 * Não usar corte universal por ano como regra de produto. Filtros e ranking podem considerar recência, mas jogos antigos relevantes devem continuar no catálogo.
 
 * Primary trailer deve favorecer conteúdo official/launch/gameplay/story/announcement/reveal/teaser e penalizar walkthrough, tutorial, guide, review, how-to, let's play, reaction, interview e BTS/dev diary quando existir trailer melhor.
+
+* Preços Steam devem usar o snapshot real mais recente. Quando price_overview.final estiver disponível, ele representa o preço atual/final exibido; não recalcular desconto visualmente a partir do preço cheio. discountPercent e priceCents devem pertencer ao mesmo snapshot.
+
+* Steam é apenas uma fonte de preço/loja para PC. Jogos Nintendo, PlayStation, Xbox, Epic, GOG etc. só podem exibir preço/loja quando houver fonte real e confiável. Não inferir loja a partir de plataforma e não inventar preço para preencher layout.
+
+* A arquitetura de ofertas deve evoluir de forma multi-store sem chamadas externas por card no Feed. Prefira sincronização/backend e dados persistidos/batch; nunca N+1 ou scraping aleatório.
 
 ---
 
@@ -1772,7 +1816,15 @@ Implementações esperadas: DirectTrailerPlayer e YoutubeTrailerPlayer. Não adi
 
 ## Seekbar NextPlay
 
-A seekbar pertence ao NextPlay e deve consumir a abstração comum do player (position, duration, seekTo). Deve funcionar em playing e paused, suportar tap e drag/scrub, reconciliar com a posição real e não disparar Play/Pause nem swipe vertical acidentalmente.
+A Home/Feed deve ter uma única seekbar visível.
+
+Ela pertence ao NextPlay e deve consumir a abstração comum do player (position, duration, seekTo). Deve funcionar em playing e paused, suportar tap e drag/scrub, reconciliar com a posição real e não disparar Play/Pause nem swipe vertical acidentalmente.
+
+Posição visual obrigatória no Feed:
+
+conteúdo/metadados → preço/lojas/CTA → seekbar real → bottom navigation.
+
+Não manter simultaneamente scrubber antigo dentro/sobre o player e seekbar inferior.
 
 ## Direct player
 
@@ -1823,3 +1875,242 @@ Direção:
 * Evitar duplicatas na fila atual e manter ordenação determinística/paginação segura.
 
 * Essa direção ainda não autoriza implementar catálogo de 500 jogos, feed infinito ou novo algoritmo sem solicitação específica. Ela existe para impedir escolhas arquiteturais que bloqueiem essa evolução.
+
+---
+
+# 43. ESTADO OPERACIONAL ATUAL — 2026-09-18
+
+Infraestrutura ativa:
+
+* Backend público: https://projeto-playfind.onrender.com
+
+* API base: https://projeto-playfind.onrender.com/api/v1
+
+* Health: https://projeto-playfind.onrender.com/health
+
+* Banco: Neon PostgreSQL.
+
+* Render Free pode sofrer cold start.
+
+Tratamento atual de cold start do Feed, conforme implementação validada:
+
+* timeout inicial de aproximadamente 60s;
+
+* timeout de loadMore de aproximadamente 15s;
+
+* no máximo 1 retry automático adicional para timeout/erro de conexão, com pequeno atraso;
+
+* manter loading enquanto ainda houver tentativa válida;
+
+* Feed real não deve cair silenciosamente para catálogo demo.
+
+Catálogo após a higiene já executada:
+
+* total de jogos: 223;
+
+* com trailer jogável/feed-eligible: 221;
+
+* com igdbId: 217;
+
+* com steamAppId: 178;
+
+* 99 registros recentes de baixa confiança foram removidos;
+
+* TCG Card Shop Simulator foi preservado explicitamente.
+
+Não reexecutar a limpeza destrutiva, não reintroduzir os 99 registros removidos e não desfazer catalog hygiene sem análise/solicitação explícita.
+
+---
+
+# 44. HOME / FOR YOU — CONTRATO VISUAL E DE DADOS
+
+A referência visual aprovada funciona como contrato de composição, não como fonte de valores.
+
+Hierarquia desejada:
+
+HEADER
+↓
+TRAILER 16:9
+↓
+AÇÕES
+↓
+respiro visual
+↓
+BADGES / RATING / AFINIDADE
+↓
+TÍTULO / GÊNEROS / METADATA
+↓
+DESCRIÇÃO
+↓
+PREÇO / PLATAFORMAS / LOJAS / CTA
+↓
+SEEK BAR REAL
+↓
+BOTTOM NAV
+
+Header principal:
+
+* busca;
+
+* marca NextPlay;
+
+* controle de áudio único.
+
+Ações principais:
+
+* Curtir;
+
+* Quero jogar;
+
+* Já joguei;
+
+* Comentários;
+
+* Enviar/Compartilhar.
+
+Regra absoluta:
+
+ZERO DADOS FICTÍCIOS NA HOME.
+
+Valores presentes em mockups/screenshots, como números de curtidas, comentários, nota, preço, desconto, plataformas, lojas ou badge de trailer, são somente referência visual.
+
+Quando faltar dado:
+
+procurar/implementar fonte real;
+
+persistir/expor corretamente;
+
+usar estado verdadeiro se a fonte não existir.
+
+Exemplos:
+
+* likeCount = 0 → mostrar 0;
+
+* commentCount = 0 → mostrar 0;
+
+* sem rating → “Sem avaliações”;
+
+* sem desconto → não mostrar desconto inventado;
+
+* sem preço confiável → “Preço indisponível”;
+
+* trailer real sem prova de oficialidade → “TRAILER”;
+
+* “TRAILER OFICIAL” apenas com evidência rastreável.
+
+Plataforma e loja são conceitos diferentes. Nintendo Switch não implica automaticamente uma URL/preço da Nintendo eShop; PlayStation não implica PS Store; PC não implica Steam.
+
+Evitar N+1 no /feed. Agregados como likeCount, commentCount, rating e lojas devem ser resolvidos por queries/batches/includes adequados no backend.
+
+---
+
+# 45. PLAYER DO FEED — REGRAS VISUAIS ATUAIS
+
+O player passou por correções delicadas e está estabilizado no Samsung físico. Alterações visuais não autorizam reescrever o playback.
+
+Preservar:
+
+* controller reutilizado;
+* lifecycle;
+* WebView/YouTube;
+* fallback de candidatos;
+* startup timeout;
+* visual guard;
+* artwork;
+* fade de aproximadamente 200ms;
+* swipe vertical;
+* seek engine;
+* mute;
+* play/pause.
+
+Na Home:
+
+* o controle principal de play/pause é o botão pequeno no canto inferior direito do trailer;
+* não exibir um grande botão customizado central ao pausar;
+* o controle de áudio principal deve aparecer uma única vez no header;
+* a seekbar visível é única e fica abaixo do conteúdo/CTA, imediatamente acima da bottom nav.
+
+---
+
+# 46. PROBLEMAS CONHECIDOS EM TESTE MANUAL — PENDENTES
+
+Os itens abaixo foram observados no Samsung físico e não devem ser descritos como concluídos até nova validação:
+
+Curtir pode exigir múltiplos toques.
+LibraryStore.toggleLike atualmente pode descartar novos toques enquanto o mesmo gameId está em _pendingLikes. A correção deve manter Optimistic UI, registrar a última intenção e preferir persistência explícita liked: true/false via interaction PATCH. Regra: last user intent wins.
+
+Bloco de metadata da Home está alto demais.
+Rating/afinidade/gênero/título e detalhes estão visualmente colados à linha de ações. Deve haver mais respiro após as ações, aproximando o bloco de metadata/CTA/seekbar sem causar overflow.
+
+Alguns preços Steam promocionais aparecem incorretos.
+Alguns jogos em promoção mostram preço final correto; outros exibem preço original. Auditar snapshot, atualização/sync e escolha de SteamOffer mais recente. Não corrigir com cálculo fake no Flutter.
+
+Jogos de Nintendo e outras lojas podem ficar sem preço.
+Exemplos observados: Xenoblade, Zelda e Bayonetta 3. Não inventar preço. O problema requer fonte/estrutura multi-store real quando disponível.
+
+Alguns jogos aparecem sem plataforma.
+Auditar IGDB → mapper → GamePlatform → API → Flutter. Não usar fallback fake PC.
+
+Overlay grande central de play aparece ao pausar.
+Deve ser removido visualmente; manter somente o controle pequeno no canto inferior direito e preservar a engine do player.
+
+Bottom navigation ainda pode estar na ordem antiga em implementações locais.
+A ordem correta e obrigatória é: Explorar | Fórum | Início | Biblioteca | Perfil, com Início no centro.
+
+Ao corrigir esses itens, validar Android físico primeiro e só então Edge/Web.
+
+---
+
+# 47. REGRAS DE GIT E CONTINUIDADE
+
+Antes de qualquer alteração:
+
+git status --short
+
+git diff
+
+Não executar automaticamente:
+
+* reset;
+* restore;
+* checkout;
+* stash;
+* clean;
+* commit;
+* push;
+* deploy.
+
+Preservar alterações não commitadas.
+
+Ao receber uma tarefa, comparar sempre:
+
+AGENTS.md;
+
+código atual;
+
+git diff;
+
+screenshots/referências fornecidas;
+
+comportamento observado no Android físico.
+
+Não assumir que uma implementação descrita em sessão anterior continua igual ao código real.
+---
+
+# 48. PROVIDERS DE PREÇO — 2026-09-19
+
+Steam mantém integração real existente. PlatPrices v2 (PlayStation) e NTPrices v2 (Nintendo) possuem clientes HTTP reais e sync explícito `pnpm.cmd --dir backend run sync:prices`, usando `X-API-Key` e região BR verificada. As variáveis são `PLATPRICES_API_KEY` e `NTPRICES_API_KEY`. Sem chave: INTEGRAÇÃO PRONTA — FALTA API KEY; não criar ofertas. Implementação testada com fixtures não equivale a fonte ativa: consumo autenticado e persistência real dessas lojas continuam pendentes das chaves.
+
+Xbox permanece SEM PROVIDER ATIVO. `PSPRICES_API_KEY` está reservado para futuro adaptador PSPrices B2B; não há endpoint presumido nem ativação fictícia. `StorePriceProvider` continua desacoplado.
+
+Matching rejeita ambiguidade, DLC/demo/bundle e edição incompatível. Sem ID conhecido, exige nome, publisher e lançamento compatíveis. Preços vêm da resposta real; não usar preço de assinatura como preço geral. Sync grava StoreOffer existente, atualiza observedAt quando igual e preserva snapshots nas mudanças. Não chamar API externa durante render do feed. Não aplicar migration para esse fluxo.
+
+Estado, limitações, endpoints e comandos estão em `backend/PRICE_PROVIDERS.md`. Preservar as validações físicas anteriores de feed, interações e player.
+
+---
+
+# 49. PREÇOS ATIVOS — DECISÃO ATUAL
+
+Por enquanto, somente preços reais da Steam estão ativos no produto. PlayStation, Xbox e Nintendo continuam como plataformas disponíveis e preferências de recomendação, mas suas ofertas e providers não devem ser ativados nem apresentados na UI. A Home só exibe preço quando há `SteamOffer` real. A tela de detalhes separa plataformas disponíveis de preço/loja e mostra somente Steam, com preço atual, preço original em promoção, desconto e ação `Abrir Steam`.
+
+Preservar `StoreOffer`, `UserPlatformPreference`, PlatPrices, NTPrices e a arquitetura multi-store para uma decisão futura. Não inventar preços nem exibir `Preço indisponível` para consoles como se suas integrações estivessem ativas.

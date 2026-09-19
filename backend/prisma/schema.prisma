@@ -25,30 +25,39 @@ enum MediaProvider {
   OTHER
 }
 
+enum StoreName {
+  STEAM
+  PLAYSTATION
+  XBOX
+  NINTENDO
+  OTHER
+}
+
 model User {
-  id            String                @id @default(uuid()) @db.Uuid
-  firebaseUid   String                @unique
-  email         String?               @unique
-  name          String
-  username      String                @unique
-  avatarUrl     String?
-  bio           String?
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
-  library       UserGameLibrary[]
-  comments      Comment[]
-  topics        ForumTopic[]
-  replies       ForumReply[]
-  events        RecommendationEvent[]
-  guestSessions GuestSession[]
-  deletedAt     DateTime?
-  commentLikes  CommentLike[]
-  topicLikes    ForumTopicLike[]
-  replyLikes    ForumReplyLike[]
-  topicFollows  ForumTopicFollow[]
-  following     UserFollow[]          @relation("Following")
-  followers     UserFollow[]          @relation("Followers")
-  searches      SearchQuery[]
+  id                  String                   @id @default(uuid()) @db.Uuid
+  firebaseUid         String                   @unique
+  email               String?                  @unique
+  name                String
+  username            String                   @unique
+  avatarUrl           String?
+  bio                 String?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  library             UserGameLibrary[]
+  comments            Comment[]
+  topics              ForumTopic[]
+  replies             ForumReply[]
+  events              RecommendationEvent[]
+  guestSessions       GuestSession[]
+  deletedAt           DateTime?
+  commentLikes        CommentLike[]
+  topicLikes          ForumTopicLike[]
+  replyLikes          ForumReplyLike[]
+  topicFollows        ForumTopicFollow[]
+  following           UserFollow[]             @relation("Following")
+  followers           UserFollow[]             @relation("Followers")
+  searches            SearchQuery[]
+  platformPreferences UserPlatformPreference[]
 }
 
 model GuestSession {
@@ -97,8 +106,9 @@ model Game {
   topics         ForumTopic[]
   events         RecommendationEvent[]
   genres         GameGenre[]
-  platforms      GamePlatform[]
-  steamOffers    SteamOffer[]
+  platforms           GamePlatform[]
+  steamOffers         SteamOffer[]
+  storeOffers         StoreOffer[]
 
   @@unique([source, sourceId])
 }
@@ -111,10 +121,11 @@ model Genre {
 }
 
 model Platform {
-  id    String         @id @default(uuid()) @db.Uuid
-  name  String
-  slug  String         @unique
-  games GamePlatform[]
+  id              String                   @id @default(uuid()) @db.Uuid
+  name            String
+  slug            String                   @unique
+  games           GamePlatform[]
+  userPreferences UserPlatformPreference[]
 }
 
 model GameGenre {
@@ -154,17 +165,50 @@ model GameMedia {
 }
 
 model SteamOffer {
-  id              String   @id @default(uuid()) @db.Uuid
-  gameId          String   @db.Uuid
-  currency        String?
-  priceCents      Int?
-  discountPercent Int?
-  storeUrl        String
-  isAvailable     Boolean  @default(true)
-  capturedAt      DateTime @default(now())
-  game            Game     @relation(fields: [gameId], references: [id])
+  id                 String   @id @default(uuid()) @db.Uuid
+  gameId             String   @db.Uuid
+  currency           String?
+  priceCents         Int?
+  originalPriceCents Int?
+  discountPercent    Int?
+  storeUrl           String
+  isAvailable        Boolean  @default(true)
+  capturedAt         DateTime @default(now())
+  game               Game     @relation(fields: [gameId], references: [id])
 
   @@index([gameId, capturedAt])
+}
+
+model StoreOffer {
+  id                 String    @id @default(uuid()) @db.Uuid
+  gameId             String    @db.Uuid
+  store              StoreName
+  externalProductId  String?
+  edition            String?
+  storeUrl           String
+  region             String    @default("BR")
+  currency           String?   @default("BRL")
+  originalPriceCents Int?
+  finalPriceCents    Int?
+  discountPercent    Int?      @default(0)
+  isAvailable        Boolean   @default(true)
+  observedAt         DateTime  @default(now())
+  provider           String    @default("MANUAL")
+  game               Game      @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@index([gameId, store, observedAt])
+}
+
+model UserPlatformPreference {
+  userId     String   @db.Uuid
+  platformId String   @db.Uuid
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform   Platform @relation(fields: [platformId], references: [id], onDelete: Cascade)
+
+  @@id([userId, platformId])
+  @@index([userId])
+  @@index([platformId])
 }
 
 model UserGameLibrary {

@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 
 import 'features/game_detail/game_detail_screen.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'design_system/theme.dart';
 import 'design_system/components.dart';
@@ -53,7 +54,10 @@ class _NextPlayAppState extends State<NextPlayApp> {
     auth.addListener(_onAuthChanged);
     _libraryRepo = ApiLibraryRepository(tokenProvider: auth.getIdToken);
     library = LibraryStore(repo: widget.libraryRepository ?? _libraryRepo);
-    _repo = widget.exploreRepository ?? ApiExploreRepository();
+    _repo = widget.exploreRepository ??
+        ApiExploreRepository(
+          platformPreferencesProvider: () => auth.preferredPlatforms,
+        );
     controller = ProfileController(DemoProfileRepository())..load();
     explore = ExploreController(_repo, library: library)..load();
     final repo = _repo;
@@ -62,7 +66,11 @@ class _NextPlayAppState extends State<NextPlayApp> {
       apiRepo != null ? apiRepo.loadFeed : repo.load,
       feedLoader: apiRepo != null
           ? ({excludeIds, limit = 20}) =>
-              apiRepo.loadFeed(excludeIds: excludeIds, limit: limit)
+              apiRepo.loadFeed(
+                excludeIds: excludeIds,
+                platforms: auth.preferredPlatforms,
+                limit: limit,
+              )
           : null,
       library: library,
     )..load();
@@ -73,6 +81,8 @@ class _NextPlayAppState extends State<NextPlayApp> {
     if (auth.isAuthenticated) _onAuthChanged();
   }
 
+  List<String> _lastPlatforms = const [];
+
   void _onAuthChanged() {
     if (auth.isAuthenticated) {
       unawaited((widget.libraryRepository ?? _libraryRepo)
@@ -80,6 +90,12 @@ class _NextPlayAppState extends State<NextPlayApp> {
           .catchError((Object error) {
         debugPrint('Falha ao carregar biblioteca autenticada: $error');
       }));
+      if (!listEquals(_lastPlatforms, auth.preferredPlatforms)) {
+        _lastPlatforms = List.from(auth.preferredPlatforms);
+        if (_lastPlatforms.isNotEmpty) {
+          unawaited(feed.load());
+        }
+      }
     } else {
       library.clearPrivateState();
     }
