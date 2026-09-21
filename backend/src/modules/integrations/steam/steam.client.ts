@@ -1,21 +1,133 @@
 import type { SteamAppDetailsDto } from './steam.types.js';
 import { isEligibleForCatalog } from '../../games/game-eligibility.js';
 
+export const STEAM_REQUEST_MIN_INTERVAL_MS = 250;
+export const STEAM_DEFAULT_MAX_RETRIES = 3;
+export const STEAM_DEFAULT_RETRY_AFTER_MS = 2000;
+
+export interface SteamClientOptions {
+  apiKey?: string;
+  fetcher?: typeof fetch;
+  minIntervalMs?: number;
+  maxRetries?: number;
+  defaultRetryAfterMs?: number;
+  sleeper?: (ms: number) => Promise<void>;
+  now?: () => number;
+}
+
 export class SteamClient {
   private appIndex: Map<string, number[]> | null = null;
   private appIndexPromise: Promise<Map<string, number[]> | null> | null = null;
   private appListFailed = false;
 
+  private readonly apiKey: string;
+  private readonly fetcher: typeof fetch;
+  private readonly minIntervalMs: number;
+  private readonly maxRetries: number;
+  private readonly defaultRetryAfterMs: number;
+  private readonly sleeper: (ms: number) => Promise<void>;
+  private readonly now: () => number;
+
+  private lastRequestEndTime = 0;
+  private requestQueue: Promise<void> = Promise.resolve();
+
   constructor(
-    private readonly apiKey = '',
-    private readonly fetcher: typeof fetch = fetch,
-  ) {}
+    apiKeyOrOptions: string | SteamClientOptions = '',
+    fetcher?: typeof fetch,
+    options?: Partial<SteamClientOptions>,
+  ) {
+    if (typeof apiKeyOrOptions === 'object' && apiKeyOrOptions !== null) {
+      this.apiKey = apiKeyOrOptions.apiKey ?? '';
+      this.fetcher = apiKeyOrOptions.fetcher ?? fetch;
+      this.minIntervalMs = apiKeyOrOptions.minIntervalMs ?? STEAM_REQUEST_MIN_INTERVAL_MS;
+      this.maxRetries = apiKeyOrOptions.maxRetries ?? STEAM_DEFAULT_MAX_RETRIES;
+      this.defaultRetryAfterMs =
+        apiKeyOrOptions.defaultRetryAfterMs ?? STEAM_DEFAULT_RETRY_AFTER_MS;
+      this.sleeper = apiKeyOrOptions.sleeper ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+      this.now = apiKeyOrOptions.now ?? (() => Date.now());
+    } else {
+      this.apiKey = apiKeyOrOptions ?? '';
+      this.fetcher = fetcher ?? options?.fetcher ?? fetch;
+      this.minIntervalMs = options?.minIntervalMs ?? STEAM_REQUEST_MIN_INTERVAL_MS;
+      this.maxRetries = options?.maxRetries ?? STEAM_DEFAULT_MAX_RETRIES;
+      this.defaultRetryAfterMs =
+        options?.defaultRetryAfterMs ?? STEAM_DEFAULT_RETRY_AFTER_MS;
+      this.sleeper = options?.sleeper ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+      this.now = options?.now ?? (() => Date.now());
+    }
+  }
+
+  private enqueueRequest<T>(operation: () => Promise<T>): Promise<T> {
+    const run = async (): Promise<T> => {
+      const now = this.now();
+      const elapsed = now - this.lastRequestEndTime;
+      if (this.lastRequestEndTime > 0 && elapsed < this.minIntervalMs) {
+        const waitMs = this.minIntervalMs - elapsed;
+        await this.sleeper(waitMs);
+      }
+      try {
+        return await operation();
+      } finally {
+        this.lastRequestEndTime = this.now();
+      }
+    };
+
+    const next = this.requestQueue.then(run, run);
+    this.requestQueue = next.then(
+      () => {},
+      () => {},
+    );
+    return next;
+  }
+
+  private getHeader(response: Response, name: string): string | null {
+    if (typeof response.headers?.get === 'function') {
+      return response.headers.get(name);
+    }
+    if (response.headers && typeof response.headers === 'object') {
+      const record = response.headers as unknown as Record<string, string>;
+      return record[name] ?? record[name.toLowerCase()] ?? null;
+    }
+    return null;
+  }
+
+  private async fetchWithRetry(url: string): Promise<Response> {
+    let attempt = 0;
+    while (true) {
+      const response = await this.fetcher(url);
+      if (response.status !== 429) {
+        return response;
+      }
+
+      attempt++;
+      if (attempt > this.maxRetries) {
+        throw new Error(`Steam rate limit exceeded (429) after ${this.maxRetries} retries`);
+      }
+
+      const retryAfterHeader = this.getHeader(response, 'retry-after');
+      let delayMs = this.defaultRetryAfterMs;
+
+      if (retryAfterHeader) {
+        const seconds = Number(retryAfterHeader);
+        if (Number.isFinite(seconds) && seconds > 0) {
+          delayMs = seconds * 1000;
+        } else {
+          const parsedDate = Date.parse(retryAfterHeader);
+          if (!Number.isNaN(parsedDate)) {
+            const diff = parsedDate - this.now();
+            if (diff > 0) delayMs = diff;
+          }
+        }
+      }
+
+      await this.sleeper(delayMs);
+    }
+  }
 
   async details(appId: number): Promise<SteamAppDetailsDto | undefined> {
     if (!Number.isSafeInteger(appId) || appId <= 0) return undefined;
-    const response = await this.fetcher(
-      `https://store.steampowered.com/api/appdetails?appids=${appId}&cc=br&l=english`,
-    );
+    const url = `https://store.steampowered.com/api/appdetails?appids=${appId}&cc=br&l=english`;
+    const response = await this.enqueueRequest(() => this.fetchWithRetry(url));
     if (response.status === 404) return undefined;
     if (!response.ok) throw new Error(`Steam request failed (${response.status})`);
     const body = (await response.json()) as Record<string, SteamAppDetailsDto>;
@@ -40,7 +152,7 @@ export class SteamClient {
         url.searchParams.set('last_appid', String(lastAppId));
       }
 
-      const response = await this.fetcher(url.toString());
+      const response = await this.enqueueRequest(() => this.fetchWithRetry(url.toString()));
       if (!response.ok) {
         throw new Error(`Steam app list failed (${response.status})`);
       }
