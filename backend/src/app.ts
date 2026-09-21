@@ -8,6 +8,8 @@ import { gameRoutes } from './modules/games/game.routes.js';
 import { LibraryService } from './modules/library/library.service.js';
 import { libraryRoutes } from './modules/library/library.routes.js';
 import { userPreferencesRoutes } from './modules/user/user-preferences.routes.js';
+import { RecommendationService } from './modules/recommendation/recommendation.service.js';
+import { recommendationRoutes } from './modules/recommendation/recommendation.routes.js';
 import type { PrismaDbClient } from './modules/games/prisma-game.repository.js';
 import type { TokenVerifier } from './auth/firebase-auth.js';
 
@@ -43,7 +45,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
 
   const prisma = options.prisma ?? new PrismaClient();
-  const gameService = new GameService(prisma);
+  const recommendationService = new RecommendationService(prisma);
+  const gameService = new GameService(prisma, recommendationService);
   const libraryService = new LibraryService(prisma);
 
   app.get('/health', async () => ({
@@ -125,6 +128,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(gameRoutes, {
     prefix: '/api/v1',
     service: gameService,
+    libraryService,
+    allowTestUsers: options.allowTestUsers ?? false,
+    tokenVerifier: options.tokenVerifier,
   });
 
   await app.register(libraryRoutes, {
@@ -137,6 +143,14 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(userPreferencesRoutes, {
     prefix: '/api/v1/user/preferences',
     prisma,
+    libraryService,
+    allowTestUsers: options.allowTestUsers ?? false,
+    tokenVerifier: options.tokenVerifier,
+  });
+
+  await app.register(recommendationRoutes, {
+    prefix: '/api/v1/recommendations',
+    recommendationService,
     libraryService,
     allowTestUsers: options.allowTestUsers ?? false,
     tokenVerifier: options.tokenVerifier,

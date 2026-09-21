@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { PrismaDbClient } from '../games/prisma-game.repository.js';
 import type { LibraryService } from '../library/library.service.js';
 import type { TokenVerifier } from '../../auth/firebase-auth.js';
+import { GenrePreferencesService, GenrePreferenceValidationError } from './genre-preferences.service.js';
 
 export interface UserPreferencesRoutesOptions {
   prisma: PrismaDbClient;
@@ -15,6 +16,7 @@ export const userPreferencesRoutes: FastifyPluginAsync<UserPreferencesRoutesOpti
   opts,
 ) => {
   const { prisma, libraryService, allowTestUsers, tokenVerifier } = opts;
+  const genrePreferences = new GenrePreferencesService(prisma);
 
   fastify.addHook('preHandler', async (request, reply) => {
     const rawUser = request.headers['x-user-id'];
@@ -52,6 +54,19 @@ export const userPreferencesRoutes: FastifyPluginAsync<UserPreferencesRoutesOpti
         error: 'Unauthorized',
         message: 'Falha ao identificar usuário.',
       });
+    }
+  });
+
+  fastify.get('/genres', async (request) => ({ data: await genrePreferences.get(request.userId) }));
+
+  fastify.put('/genres', async (request, reply) => {
+    const body = request.body as { genreKeys?: unknown } | undefined;
+    try {
+      return { data: await genrePreferences.save(request.userId, body?.genreKeys) };
+    } catch (error) {
+      if (error instanceof GenrePreferenceValidationError)
+        return reply.status(400).send({ statusCode: 400, error: 'Bad Request', message: error.message });
+      throw error;
     }
   });
 

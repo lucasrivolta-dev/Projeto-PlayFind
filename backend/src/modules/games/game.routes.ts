@@ -1,9 +1,14 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { GameService } from './game.service.js';
+import type { LibraryService } from '../library/library.service.js';
+import type { TokenVerifier } from '../../auth/firebase-auth.js';
 import { createDevDirectGame } from '../../dev/dev-fixtures.js';
 
 export interface GameRoutesOptions {
   service: GameService;
+  libraryService?: LibraryService;
+  allowTestUsers?: boolean;
+  tokenVerifier?: TokenVerifier;
 }
 
 export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (fastify, opts) => {
@@ -83,6 +88,33 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (fastify,
     });
   });
 
+  fastify.post('/feed/:id/seen', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    let userId: string | undefined;
+    const authorization = request.headers.authorization;
+    const rawUser = request.headers['x-user-id'];
+
+    if (authorization?.startsWith('Bearer ') && opts.tokenVerifier && opts.libraryService) {
+      try {
+        const decoded = await opts.tokenVerifier.verify(authorization.slice(7).trim());
+        if (decoded?.uid) {
+          userId = await opts.libraryService.ensureUser(decoded.uid);
+        }
+      } catch {}
+    } else if (opts.allowTestUsers && rawUser === 'dev-user' && opts.libraryService) {
+      try {
+        userId = await opts.libraryService.ensureUser('dev-user');
+      } catch {}
+    }
+
+    if (!userId) {
+      return reply.status(200).send({ success: true, guest: true });
+    }
+
+    await service.markFeedSeen(userId, id);
+    return reply.status(200).send({ success: true });
+  });
+
   fastify.get('/feed', async (request, reply) => {
     const query = request.query as {
       limit?: string;
@@ -132,7 +164,36 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (fastify,
     }
     const sanitizedPlatforms = platformList.map((p) => p.trim().toLowerCase()).filter(Boolean);
 
-    const items = await service.getFeedGames(limit, sanitizedExcludeIds, sanitizedPlatforms);
+    // Resolve optional authenticated user identity safely (Guest remains unauthenticated)
+    let userId: string | undefined;
+    const authorization = request.headers.authorization;
+    const rawUser = request.headers['x-user-id'];
+
+    if (authorization?.startsWith('Bearer ') && opts.tokenVerifier && opts.libraryService) {
+      try {
+        const decoded = await opts.tokenVerifier.verify(authorization.slice(7).trim());
+        if (decoded?.uid) {
+          userId = await opts.libraryService.ensureUser(decoded.uid);
+        }
+      } catch (err) {
+        // Invalid or expired token: gracefully proceed as guest without error
+        request.log.warn(
+          {
+            event: 'feed_auth_failed',
+            message: err instanceof Error ? err.message : 'Token verification failed',
+          },
+          'Failed to verify Bearer token for /feed, degrading to guest'
+        );
+      }
+    } else if (opts.allowTestUsers && rawUser === 'dev-user' && opts.libraryService) {
+      try {
+        userId = await opts.libraryService.ensureUser('dev-user');
+      } catch {
+        // Proceed as guest
+      }
+    }
+
+    const items = await service.getFeedGames(limit, sanitizedExcludeIds, sanitizedPlatforms, userId);
 
     if (process.env.NEXTPLAY_DEV_FIXTURES === 'true') {
       const host = request.headers.host || '127.0.0.1:3333';

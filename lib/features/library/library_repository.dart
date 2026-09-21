@@ -31,6 +31,9 @@ abstract interface class LibraryRepository {
 
   /// Remove a avaliacao do jogo.
   Future<void> removeRating(String gameId);
+
+  /// Marca um jogo como visto no feed de forma persistente.
+  Future<void> markFeedSeen(String gameId);
 }
 
 /// Implementacao sem persistencia, usada apenas em testes e prototipos isolados.
@@ -60,6 +63,9 @@ class NoopLibraryRepository implements LibraryRepository {
 
   @override
   Future<void> removeRating(String gameId) async {}
+
+  @override
+  Future<void> markFeedSeen(String gameId) async {}
 }
 
 /// Repositorio HTTP que persiste a biblioteca no backend REST.
@@ -251,6 +257,18 @@ class ApiLibraryRepository implements LibraryRepository {
   Future<bool?> toggleLike(String gameId) async {
     // Compatibilidade: chama setLiked explicitamente
     return setLiked(gameId, true);
+  }
+
+  @override
+  Future<void> markFeedSeen(String gameId) async {
+    final uri = Uri.parse('$baseUrl/feed/${_id(gameId)}/seen');
+    try {
+      await _client
+          .post(uri, headers: await _headers(hasBody: false))
+          .timeout(writeTimeout);
+    } catch (e) {
+      debugPrint('[ApiLibraryRepo] markFeedSeen failed for $gameId: $e');
+    }
   }
 
   void dispose() {

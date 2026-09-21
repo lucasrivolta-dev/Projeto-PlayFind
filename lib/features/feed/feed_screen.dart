@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+import '../../config/api_config.dart';
 import '../game_detail/game_detail_screen.dart';
 import '../../design_system/components.dart';
 import '../../design_system/theme.dart';
@@ -22,12 +25,16 @@ class FeedScreen extends StatefulWidget {
     this.active = true,
     this.playerFactory,
     this.onSearch,
+    this.clock,
+    this.onEventRecorded,
   });
   final FeedController controller;
   final AuthController? auth;
   final bool active;
   final TrailerPlayerFactory? playerFactory;
   final VoidCallback? onSearch;
+  final DateTime Function()? clock;
+  final void Function(String eventType, Map<String, dynamic>? metadata)? onEventRecorded;
 
   @override
   State<FeedScreen> createState() => _FeedScreenState();
@@ -35,11 +42,21 @@ class FeedScreen extends StatefulWidget {
 
 class _FeedScreenState extends State<FeedScreen> {
   final _pageController = PageController(keepPage: false);
+  final _trailerKey = GlobalKey<FeedTrailerState>();
   StreamSubscription<String>? _errorSub;
+  late DateTime _cardEnterTime;
+  int _lastReportedIndex = 0;
+
+  TrailerPlayer? _attachedPlayer;
+  DateTime? _playbackSegmentStart;
+  int _accumulatedPlaybackMs = 0;
+
+  DateTime _now() => widget.clock?.call() ?? DateTime.now();
 
   @override
   void initState() {
     super.initState();
+    _cardEnterTime = _now();
     _subscribeErrors();
   }
 
@@ -50,6 +67,7 @@ class _FeedScreenState extends State<FeedScreen> {
       _errorSub?.cancel();
       _subscribeErrors();
     }
+    _syncPlayerListener();
   }
 
   void _subscribeErrors() {
@@ -65,9 +83,164 @@ class _FeedScreenState extends State<FeedScreen> {
 
   @override
   void dispose() {
+    _attachedPlayer?.removeListener(_onPlayerStateChanged);
+    _attachedPlayer = null;
+    _playbackSegmentStart = null;
+    _accumulatedPlaybackMs = 0;
     _errorSub?.cancel();
     _pageController.dispose();
     super.dispose();
+  }
+
+  bool _isTrailerPlaying() {
+    final trailerState = _trailerKey.currentState;
+    if (trailerState != null) {
+      if (trailerState.isPlaying) return true;
+      final p = trailerState.player ?? _attachedPlayer;
+      if (p != null && p.isPlaying && trailerState.hasVideoId && p.playingVideoId == null) {
+        return true;
+      }
+      return false;
+    }
+    return _attachedPlayer?.isPlaying ?? false;
+  }
+
+  void _syncPlayerListener() {
+    final player = _trailerKey.currentState?.player;
+    if (player != _attachedPlayer) {
+      _attachedPlayer?.removeListener(_onPlayerStateChanged);
+      _attachedPlayer = player;
+      _attachedPlayer?.addListener(_onPlayerStateChanged);
+    }
+    _updatePlaybackTracking();
+  }
+
+  void _onPlayerStateChanged() {
+    _updatePlaybackTracking();
+  }
+
+  void _updatePlaybackTracking() {
+    final isPlaying = _isTrailerPlaying();
+    final now = _now();
+    if (isPlaying) {
+      _playbackSegmentStart ??= now;
+    } else {
+      if (_playbackSegmentStart != null) {
+        _accumulatedPlaybackMs += now.difference(_playbackSegmentStart!).inMilliseconds;
+        _playbackSegmentStart = null;
+      }
+    }
+  }
+
+  int _finalizePlaybackAndReset() {
+    final now = _now();
+    int total = _accumulatedPlaybackMs;
+    if (_playbackSegmentStart != null) {
+      if (_isTrailerPlaying()) {
+        total += now.difference(_playbackSegmentStart!).inMilliseconds;
+      }
+    }
+    _accumulatedPlaybackMs = 0;
+    _playbackSegmentStart = null;
+    return total;
+  }
+
+  void _recordEvent({
+    required String gameId,
+    required String eventType,
+    int? watchDurationMs,
+    int? position,
+    Map<String, dynamic>? metadata,
+  }) {
+    widget.onEventRecorded?.call(eventType, metadata);
+    if (widget.auth == null || !widget.auth!.isAuthenticated) return;
+    unawaited(() async {
+      try {
+        final token = await widget.auth!.getIdToken();
+        if (token == null || token.isEmpty) return;
+        final uri = Uri.parse('${ApiConfig.baseUrl}/recommendations/events');
+        final headers = {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        };
+        final body = jsonEncode({
+          'gameId': gameId,
+          'eventType': eventType,
+          if (watchDurationMs != null) 'watchDurationMs': watchDurationMs,
+          if (position != null) 'position': position,
+          if (metadata != null) 'metadata': metadata,
+        });
+        await http.post(uri, headers: headers, body: body).timeout(const Duration(seconds: 5));
+      } catch (e) {
+        // Engagement signals are fire-and-forget; never disrupt UI or video playback
+      }
+    }());
+  }
+
+  void _handlePageChanged(int newIndex) {
+    _syncPlayerListener();
+
+    final now = _now();
+    final stayMs = now.difference(_cardEnterTime).inMilliseconds;
+    final watchedMs = _finalizePlaybackAndReset();
+
+    final player = _trailerKey.currentState?.player;
+    final pos = player?.position ?? Duration.zero;
+    final dur = player?.duration ?? Duration.zero;
+    final watchedSec = double.parse((watchedMs / 1000.0).toStringAsFixed(1));
+    final durSec = double.parse((dur.inMilliseconds / 1000.0).toStringAsFixed(1));
+    final dwellSec = double.parse((stayMs / 1000.0).toStringAsFixed(1));
+    final watchRatio = durSec > 0 ? double.parse((watchedSec / durSec).clamp(0.0, 1.0).toStringAsFixed(3)) : null;
+    final lastPosSec = player != null ? double.parse((pos.inMilliseconds / 1000.0).toStringAsFixed(1)) : null;
+
+    final items = widget.controller.items;
+    if (_lastReportedIndex >= 0 && _lastReportedIndex < items.length) {
+      final prevGame = items[_lastReportedIndex].game;
+
+      final metadata = <String, dynamic>{
+        'watchedSeconds': watchedSec,
+        'durationSeconds': durSec,
+        'cardDwellSeconds': dwellSec,
+        if (watchRatio != null) 'watchRatio': watchRatio,
+        if (lastPosSec != null) 'lastPositionSeconds': lastPosSec,
+      };
+
+      if (watchedSec >= 15.0 || (watchRatio != null && watchRatio >= 0.70)) {
+        // High watch: real playback >= 15s or >= 70% of trailer
+        _recordEvent(
+          gameId: prevGame.id,
+          eventType: 'WATCH',
+          watchDurationMs: watchedMs,
+          position: _lastReportedIndex,
+          metadata: metadata,
+        );
+      } else if (watchedSec >= 6.0 || (watchRatio != null && watchRatio >= 0.35)) {
+        // Moderate watch: real playback >= 6s or >= 35% of trailer
+        _recordEvent(
+          gameId: prevGame.id,
+          eventType: 'WATCH',
+          watchDurationMs: watchedMs,
+          position: _lastReportedIndex,
+          metadata: metadata,
+        );
+      } else if (stayMs <= 2000 && watchedSec < 2.0) {
+        // Early skip: fast swipe <= 2s and minimal playback < 2s
+        _recordEvent(
+          gameId: prevGame.id,
+          eventType: 'EARLY_SKIP',
+          watchDurationMs: watchedMs,
+          position: _lastReportedIndex,
+          metadata: metadata,
+        );
+      }
+      // Dwell where user paused (e.g. stayed 20s but watchedSec was 1.5s) is neutral:
+      // not a WATCH (not watched enough) and not an EARLY_SKIP (stayed > 2s).
+    }
+
+    _cardEnterTime = now;
+    _lastReportedIndex = newIndex;
+    widget.controller.setCurrent(newIndex);
+    _syncPlayerListener();
   }
 
   Future<void> _protected(BuildContext context, VoidCallback action) async {
@@ -94,11 +267,20 @@ class _FeedScreenState extends State<FeedScreen> {
             onProtected: _protected));
   }
 
-  void _details(BuildContext context, FeedItem item) => openGameDetails(
+  void _details(BuildContext context, FeedItem item) {
+    _recordEvent(
+      gameId: item.game.id,
+      eventType: 'DETAIL_VIEW',
+      position: widget.controller.current,
+      metadata: {'source': 'feed_card'},
+    );
+    openGameDetails(
       context,
       item.game,
       widget.controller.library,
-      widget.controller.items.map((item) => item.game).toList());
+      widget.controller.items.map((item) => item.game).toList(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) => SafeArea(
@@ -123,6 +305,10 @@ class _FeedScreenState extends State<FeedScreen> {
                     child: const Text('Tentar novamente'))
               ]));
             }
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              _syncPlayerListener();
+            });
             return LayoutBuilder(builder: (context, constraints) {
               // Keep the editorial feed in a phone-sized column on wide browser screens.
               final width =
@@ -136,6 +322,7 @@ class _FeedScreenState extends State<FeedScreen> {
                               active: widget.active,
                               pageController: _pageController,
                               frameBuilder: (pages) => FeedTrailer(
+                                key: _trailerKey,
                                 game: widget.controller
                                     .items[widget.controller.current].game,
                                 active: widget.active &&
@@ -147,7 +334,7 @@ class _FeedScreenState extends State<FeedScreen> {
                                 child: pages,
                               ),
                               itemCount: widget.controller.items.length,
-                              onPageChanged: widget.controller.setCurrent,
+                              onPageChanged: _handlePageChanged,
                               itemBuilder: (context, index) => _FeedPage(
                                 item: widget.controller.items[index],
                                 active: index == widget.controller.current,
@@ -614,41 +801,10 @@ class _FeedPage extends StatelessWidget {
                                     mainAxisSize: MainAxisSize.min,
                                     crossAxisAlignment:
                                         CrossAxisAlignment.center,
-                                    children: [
-                                      // Desconto real se existir
-                                      if (game.hasSteamDiscount) ...[
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 6,
-                                            vertical: 3,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: AppColors.positive
-                                                .withValues(alpha: 0.2),
-                                            borderRadius: BorderRadius.circular(
-                                                AppRadius.small),
-                                            border: Border.all(
-                                              color: AppColors.positive
-                                                  .withValues(alpha: 0.5),
-                                            ),
-                                          ),
-                                          child: Text(
-                                            '-${game.steamDiscountPercent}%',
-                                            style: AppTypography.label(11).copyWith(
-                                              color: AppColors.positive,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 6),
-                                      ],
-
-                                      // Preço real e plataformas (com preferência do usuário)
-                                      ..._buildPriceAndPlatformWidgets(
-                                        game,
-                                        preferredPlatforms,
-                                      ),
-                                    ],
+                                    children: _buildPriceAndPlatformWidgets(
+                                      game,
+                                      preferredPlatforms,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1164,89 +1320,95 @@ List<Widget> _buildPriceAndPlatformWidgets(
   DiscoveryGame game,
   List<String> preferredPlatforms,
 ) {
+  final widgets = <Widget>[];
+
+  // 1. Preço e Desconto REAL (Exclusivamente Steam conforme regra de produto)
+  if (game.hasSteamPrice) {
+    if (game.hasSteamDiscount) {
+      widgets.add(
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 6,
+            vertical: 3,
+          ),
+          decoration: BoxDecoration(
+            color: AppColors.positive.withValues(alpha: 0.2),
+            borderRadius: BorderRadius.circular(AppRadius.small),
+            border: Border.all(
+              color: AppColors.positive.withValues(alpha: 0.5),
+            ),
+          ),
+          child: Text(
+            '-${game.steamDiscountPercent}%',
+            style: AppTypography.label(11).copyWith(
+              color: AppColors.positive,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      );
+      widgets.add(const SizedBox(width: 6));
+    }
+
+    _addSteamPrice(widgets, game);
+
+    // Identificador claro de que o preço/oferta é exclusivamente da Steam
+    widgets.add(
+      Text(
+        '• Steam',
+        style: AppTypography.label(10).copyWith(
+          color: AppColors.muted,
+        ),
+        maxLines: 1,
+      ),
+    );
+    widgets.add(const SizedBox(width: 8));
+  }
+
+  // 2. Plataformas compatíveis (com base nas preferências do usuário ou gerais)
   final userFamilies = preferredPlatforms
       .map(matchCanonicalFamily)
       .whereType<CanonicalPlatformFamily>()
       .toSet()
       .toList();
 
-  final widgets = <Widget>[];
-
+  final platformsToShow = <String>[];
   if (userFamilies.isNotEmpty) {
     for (final family in userFamilies.take(2)) {
-      final supports = game.supportsCanonicalFamily(family);
-
-      if (supports) {
-        widgets.add(
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 6,
-              vertical: 2,
-            ),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(AppRadius.small),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Text(
-              family.shortLabel,
-              style: AppTypography.label(9).copyWith(
-                color: AppColors.text,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        );
-        widgets.add(const SizedBox(width: 4));
-
-        widgets.add(const SizedBox(width: 6));
+      if (game.supportsCanonicalFamily(family)) {
+        platformsToShow.add(family.shortLabel);
       }
-    }
-
-    if (game.hasSteamPrice) {
-      _addSteamPrice(widgets, game);
     }
   }
 
-  if (widgets.isEmpty) {
-    // Fallback padrão para visitante ou quando jogo não é da plataforma preferida
-    if (game.hasSteamPrice) _addSteamPrice(widgets, game);
-
+  if (platformsToShow.isEmpty) {
     for (final p in game.platforms.take(2)) {
-      widgets.add(
-        Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 6,
-            vertical: 2,
-          ),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(AppRadius.small),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Text(
-            p,
-            style: AppTypography.label(9).copyWith(
-              color: AppColors.text,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      );
-      widgets.add(const SizedBox(width: 4));
+      platformsToShow.add(p);
     }
+  }
 
-    if (game.isSteamAvailable || game.hasStoreUrl) {
-      widgets.add(
-        Text(
-          '• Steam',
-          style: AppTypography.label(10).copyWith(
-            color: AppColors.muted,
-          ),
-          maxLines: 1,
+  for (final platformName in platformsToShow) {
+    widgets.add(
+      Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 6,
+          vertical: 2,
         ),
-      );
-    }
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.small),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Text(
+          platformName,
+          style: AppTypography.label(9).copyWith(
+            color: AppColors.text,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+    widgets.add(const SizedBox(width: 4));
   }
 
   return widgets;

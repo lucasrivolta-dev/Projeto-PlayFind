@@ -70,6 +70,14 @@ class FeedController extends ChangeNotifier {
     _emit();
   }
 
+  final Set<String> _persistedSeen = {};
+
+  void _markAsSeen(String gameId) {
+    if (_persistedSeen.add(gameId)) {
+      library.markFeedSeen(gameId);
+    }
+  }
+
   bool _disposed = false;
 
   void _emit() {
@@ -137,6 +145,7 @@ class FeedController extends ChangeNotifier {
     loadingMore = false;
     error = false;
     _seenGameIds.clear();
+    _persistedSeen.clear();
     hasMore = true;
     _emit();
     try {
@@ -154,7 +163,11 @@ class FeedController extends ChangeNotifier {
       items = _buildFeedItems(games);
       // Loading replaces the PageView; its first page and trailer must agree.
       current = 0;
-    } catch (_) {
+      if (items.isNotEmpty) {
+        _markAsSeen(items[0].game.id);
+      }
+    } catch (e, s) {
+      debugPrint('[FeedController] load error: $e\n$s');
       if (generation != _loadGeneration) return;
       error = true;
     } finally {
@@ -201,6 +214,9 @@ class FeedController extends ChangeNotifier {
   void setCurrent(int index) {
     current = items.isEmpty ? 0 : index.clamp(0, items.length - 1);
     _emit();
+    if (items.isNotEmpty && current >= 0 && current < items.length) {
+      _markAsSeen(items[current].game.id);
+    }
     // Prefetching contínuo ao se aproximar dos últimos itens da lista
     final shouldPrefetch = items.length >= 4
         ? (index >= items.length - 4)

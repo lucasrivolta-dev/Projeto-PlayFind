@@ -1,15 +1,18 @@
 import type { Prisma } from '@prisma/client';
 import { matchesPlatformPreference } from './platform-preference.js';
 import type { PrismaDbClient } from './prisma-game.repository.js';
+import type { RecommendationService, UserTasteProfile } from '../recommendation/recommendation.service.js';
 import { describeTrailer, type NormalizedTrailer } from './normalized-game.js';
 import {
   isEligibleForCatalog,
   areDuplicateEditions,
   calculateDiscoveryScore,
-  applyFeedDiversity,
   isDisqualifiedTrailer,
   type FeedCandidateInput,
 } from './game-eligibility.js';
+import { resolveRatingEvidence } from './game-exposure.js';
+import { balanceFeed, type FeedRankingRow } from './feed-balance.js';
+import { calculateGenreConfidence } from './genre-confidence.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -102,22 +105,21 @@ function orderedTrailerDetails(mediaRows: { url: string; provider: string | null
           ...(described.videoId ? { videoId: described.videoId } : {}),
           ...(m.mimeType ? { mimeType: m.mimeType } : {}),
           ...(m.origin ? { origin: m.origin } : {}),
-          isOfficial,
-          // authorizationRef is NEVER included here
+          ...(isOfficial ? { isOfficial: true } : {}),
         } as NormalizedTrailer;
       }
-      const described = describeTrailer(m.url);
-      return { ...described, isOfficial };
+      return describeTrailer(m.url);
     })
-    .sort((a, b) => providerPriority(a.provider) - providerPriority(b.provider));
+    .sort((a, b) => {
+      const pA = providerPriority(a.provider);
+      const pB = providerPriority(b.provider);
+      return pA - pB;
+    });
 }
 
-/**
- * Selects the primary reproducible trailer.
- * DIRECT or YOUTUBE with a valid videoId are reproducible.
- * STEAM and OTHER are NOT used as primaryTrailer — they return null if no DIRECT/YOUTUBE exists.
- */
-function pickPrimaryTrailer(trailerDetails: NormalizedTrailer[]): NormalizedTrailer | undefined {
+function pickPrimaryTrailer(
+  trailerDetails: NormalizedTrailer[],
+): NormalizedTrailer | undefined {
   for (const t of trailerDetails) {
     if (t.provider === 'DIRECT') return t;
     if (
@@ -133,7 +135,10 @@ function pickPrimaryTrailer(trailerDetails: NormalizedTrailer[]): NormalizedTrai
 }
 
 export class GameService {
-  constructor(private readonly prisma: PrismaDbClient) {}
+  constructor(
+    private readonly prisma: PrismaDbClient,
+    private readonly recommendationService?: Pick<RecommendationService, 'getUserTasteProfile'>,
+  ) {}
 
   async listGames(options: ListGamesOptions = {}) {
     const page = Math.max(1, options.page ?? 1);
@@ -234,8 +239,8 @@ export class GameService {
     };
   }
 
-  async getGameById(idOrSlug: string): Promise<GameDetailDto | null> {
-    const trimmed = idOrSlug.trim();
+  async getGameById(id: string): Promise<GameDetailDto | null> {
+    const trimmed = id.trim();
     let where: Prisma.GameWhereUniqueInput;
 
     if (UUID_REGEX.test(trimmed)) {
@@ -268,28 +273,15 @@ export class GameService {
       },
     });
 
-    if (!record) return null;
-
-    let likeCount = 0;
-    let commentCount = 0;
-    if (this.prisma.userGameLibrary?.count) {
-      try {
-        likeCount = await this.prisma.userGameLibrary.count({
-          where: { gameId: record.id, liked: true },
-        });
-      } catch {}
-    }
-    if (this.prisma.comment?.count) {
-      try {
-        commentCount = await this.prisma.comment.count({
-          where: { gameId: record.id, deletedAt: null },
-        });
-      } catch {}
+    if (!record) {
+      return null;
     }
 
     const latestSteam = record.steamOffers[0];
     const screenshots = record.media.filter((m) => m.type === 'SCREENSHOT').map((m) => m.url);
-    const trailerMediaRows = record.media.filter((m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY');
+    const trailerMediaRows = record.media.filter(
+      (m) => m.type === 'TRAILER' || m.type === 'GAMEPLAY',
+    );
     const trailers = trailerMediaRows.map((m) => m.url);
     const trailerDetails = orderedTrailerDetails(
       trailerMediaRows.map((m) => ({
@@ -299,6 +291,16 @@ export class GameService {
         origin: m.origin,
       })),
     );
+    const primaryTrailer = pickPrimaryTrailer(trailerDetails);
+
+    const [likeCount, commentCount] = await Promise.all([
+      this.prisma.userGameLibrary ? this.prisma.userGameLibrary.count({
+        where: { gameId: record.id, liked: true },
+      }) : 0,
+      this.prisma.comment ? this.prisma.comment.count({
+        where: { gameId: record.id, deletedAt: null },
+      }) : 0,
+    ]);
 
     const stores: Array<{ name: string; url?: string }> = [];
     if (latestSteam?.storeUrl) {
@@ -317,23 +319,11 @@ export class GameService {
       studio: record.studio ?? undefined,
       publisher: record.publisher ?? undefined,
       description: record.description ?? undefined,
-      rating: record.rating ?? undefined,
+      rating: record.rating ? Number(record.rating.toFixed(1)) : undefined,
       ratingCount: record.ratingCount ?? record.totalRatingCount ?? undefined,
-      releaseDate: record.releaseDate ?? undefined,
-      coverUrl: record.coverUrl ?? undefined,
-      heroUrl: record.heroUrl ?? undefined,
-      isFree: record.isFree,
-      steamAppId: record.steamAppId ?? undefined,
-      igdbId: record.igdbId ?? undefined,
-      genres: record.genres.map((g) => g.genre.name),
-      platforms: record.platforms.map((p) => p.platform.name),
       likeCount,
       commentCount,
       stores,
-      screenshots,
-      trailers,
-      trailerDetails,
-      primaryTrailer: pickPrimaryTrailer(trailerDetails),
       storeOffers: (record.storeOffers ?? [])
         .filter((so) => so.store === 'STEAM')
         .map((so) => ({
@@ -345,6 +335,18 @@ export class GameService {
           currency: so.currency ?? 'BRL',
           isAvailable: so.isAvailable,
         })),
+      releaseDate: record.releaseDate ?? undefined,
+      coverUrl: record.coverUrl ?? undefined,
+      heroUrl: record.heroUrl ?? undefined,
+      isFree: record.isFree,
+      steamAppId: record.steamAppId ?? undefined,
+      igdbId: record.igdbId ?? undefined,
+      genres: record.genres.map((g) => g.genre.name),
+      platforms: record.platforms.map((p) => p.platform.name),
+      screenshots,
+      trailers,
+      trailerDetails,
+      primaryTrailer,
       steam: latestSteam
         ? {
             storeUrl: latestSteam.storeUrl,
@@ -359,20 +361,27 @@ export class GameService {
     };
   }
 
-  async getFeedGames(limit = 20, excludeIds?: string[], preferredPlatforms?: string[]) {
+  async getFeedGames(
+    limit = 20,
+    excludeIds?: string[],
+    preferredPlatforms?: string[],
+    userId?: string,
+    diagnostics?: { now?: Date; onRanked?: (rows: FeedRankingRow[]) => void },
+  ) {
     const safeLimit = Math.min(100, Math.max(1, limit));
-    const now = new Date();
+    const now = diagnostics?.now ?? new Date();
 
     const validExcludeIds = (excludeIds ?? []).filter((id) => UUID_REGEX.test(id));
     const where: Prisma.GameWhereInput =
       validExcludeIds.length > 0 ? { id: { notIn: validExcludeIds } } : {};
 
-    // Fetch an expanded candidate pool ordered by quality/recency, excluding already seen games
-    const poolSize = Math.min(200, Math.max(100, safeLimit * 5));
+    // Bounded server-side pool: the 343-game catalog fits before personalization.
+    // Only Top N goes to the client. ID provides a stable boundary for ties.
+    const poolSize = Math.min(1000, Math.max(500, safeLimit * 10));
     const records = await this.prisma.game.findMany({
       where,
       take: poolSize,
-      orderBy: [{ rating: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+      orderBy: [{ totalRating: { sort: 'desc', nulls: 'last' } }, { rating: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
       include: {
         genres: { include: { genre: true } },
         platforms: { include: { platform: true } },
@@ -384,11 +393,13 @@ export class GameService {
 
     // 1. Filter out ineligible games (mods, DLCs, expansions, demos, playtests, tools, etc.)
     const eligibleRecords = records.filter((record) => {
+      if (validExcludeIds.includes(record.id)) return false;
+      const evidence = resolveRatingEvidence(record);
       const eligibility = isEligibleForCatalog({
         title: record.title,
         slug: record.slug,
-        rating: record.rating,
-        ratingCount: record.ratingCount,
+        rating: evidence.rating100,
+        ratingCount: evidence.effectiveVotes,
         totalRating: record.totalRating,
         totalRatingCount: record.totalRatingCount,
         releaseDate: record.releaseDate,
@@ -428,8 +439,37 @@ export class GameService {
       } catch {}
     }
 
-    // 2. Map records and calculate discovery scores
-    const scoredCandidates = eligibleRecords.map((record) => {
+    // Load taste profile for authenticated user in a single batch
+    let tasteProfile: UserTasteProfile | undefined;
+    if (userId && this.recommendationService) {
+      try {
+        tasteProfile = await this.recommendationService.getUserTasteProfile(userId);
+      } catch {}
+    }
+
+    const effectivePlatforms =
+      tasteProfile && tasteProfile.preferredPlatformSlugs.length > 0
+        ? tasteProfile.preferredPlatformSlugs
+        : preferredPlatforms ?? [];
+
+    const seenMap = new Map<string, Date>();
+    if (userId) {
+      try {
+        const seenEvents = await this.prisma.recommendationEvent.findMany({
+          where: { userId, eventType: 'FEED_VIEWED' },
+          select: { gameId: true, createdAt: true },
+        });
+        for (const ev of seenEvents) {
+          if (ev.gameId) seenMap.set(ev.gameId, ev.createdAt);
+        }
+      } catch (e) {
+        console.warn('[FeedSeen] falha ao buscar historico', e);
+      }
+    }
+
+    // Pipeline: eligibility -> playable trailer -> seen exclusion / interaction
+    // state -> paired Bayesian quality -> taste -> platform -> discovery value.
+    const scoredCandidates = eligibleRecords.flatMap((record) => {
       const latestSteam = record.steamOffers[0];
       const screenshots = record.media.filter((m) => m.type === 'SCREENSHOT').map((m) => m.url);
       const trailerMediaRows = record.media.filter(
@@ -445,12 +485,16 @@ export class GameService {
         })),
       );
       const primaryTrailer = pickPrimaryTrailer(trailerDetails);
+      if (!primaryTrailer) return [];
 
       const scoringInput: FeedCandidateInput = {
         id: record.id,
         title: record.title,
         slug: record.slug,
         rating: record.rating,
+        ratingCount: record.ratingCount,
+        totalRating: record.totalRating,
+        totalRatingCount: record.totalRatingCount,
         releaseDate: record.releaseDate,
         coverUrl: record.coverUrl,
         heroUrl: record.heroUrl,
@@ -465,19 +509,35 @@ export class GameService {
       };
 
       const { score, breakdown } = calculateDiscoveryScore(scoringInput, now);
+      const exposure = resolveRatingEvidence(scoringInput);
 
       // Contextual boost if game matches user's preferred platforms
       const platformBoost = matchesPlatformPreference(
-        preferredPlatforms ?? [],
+        effectivePlatforms,
         record.platforms.map((p) => p.platform.name),
-        Boolean(record.steamAppId || latestSteam?.isAvailable ||
-          record.storeOffers?.some((offer) => offer.store === 'STEAM' && offer.isAvailable)),
-      ) ? 15 : 0;
-      const finalScore = score + platformBoost;
+        Boolean(
+          record.steamAppId ||
+            latestSteam?.isAvailable ||
+            record.storeOffers?.some((offer) => offer.store === 'STEAM' && offer.isAvailable),
+        ),
+      )
+        ? 15
+        : 0;
+
+      const tasteEvidence = calculateGenreConfidence(scoringInput.genres ?? [], tasteProfile);
+      const tasteScore = tasteEvidence.score;
+
+      // Interaction penalty: games already liked/marked in library or chosen in onboarding are heavily deprioritized in For You
+      let interactionPenalty = 0;
+      if (tasteProfile && tasteProfile.alreadyInteractedGameIds.has(record.id)) {
+        interactionPenalty = -50;
+      }
+
+      const finalScore = score + platformBoost + tasteScore + interactionPenalty;
 
       const likeCount = likeMap.get(record.id) ?? 0;
       const commentCount = commentMap.get(record.id) ?? 0;
-      const ratingCount = record.ratingCount ?? record.totalRatingCount ?? null;
+      const ratingCount = exposure.source === 'UNKNOWN' ? null : exposure.effectiveVotes;
 
       const stores: Array<{ name: string; url?: string }> = [];
       if (latestSteam?.storeUrl) {
@@ -489,14 +549,14 @@ export class GameService {
         }
       }
 
-      return {
+      return [{
         id: record.id,
         slug: record.slug,
         title: record.title,
         studio: record.studio ?? '',
         publisher: record.publisher ?? '',
         description: record.description ?? '',
-        rating: record.rating ? Number(record.rating.toFixed(1)) : null,
+        rating: exposure.rating100 === null ? null : Number((exposure.rating100 / 10).toFixed(1)),
         ratingCount,
         likeCount,
         commentCount,
@@ -523,9 +583,17 @@ export class GameService {
         trailers,
         trailerDetails,
         primaryTrailer: primaryTrailer ?? null,
-        matchScore: finalScore,
-        discoveryScore: finalScore,
-        scoreBreakdown: { ...breakdown, platformPreference: platformBoost },
+        matchScore: Math.round(Math.max(1, Math.min(100, finalScore))),
+        discoveryScore: Number(finalScore.toFixed(2)),
+        seenBucket: 0,
+        exposure,
+        scoreBreakdown: {
+          ...breakdown,
+          platformPreference: platformBoost,
+          tasteAffinity: tasteScore,
+          tasteEvidence,
+          alreadyInteracted: interactionPenalty,
+        },
         releaseDate: record.releaseDate,
         createdAt: record.createdAt,
         steam: latestSteam
@@ -539,13 +607,24 @@ export class GameService {
               isAvailable: latestSteam.isAvailable,
             }
           : null,
-      };
+      }];
     });
 
+    const nowMs = now.getTime();
+    const getBucket = (seenAt: Date | undefined) => {
+      if (!seenAt) return 0; // Unseen
+      const ageHours = (nowMs - seenAt.getTime()) / (1000 * 60 * 60);
+      if (ageHours > 72) return 1; // Seen long ago (> 72 hours)
+      return 2; // Recently seen
+    };
+
+    for (const candidate of scoredCandidates) {
+      candidate.seenBucket = getBucket(seenMap.get(candidate.id));
+    }
+
     // 3. Filter candidates strictly to those with a playable trailer (DIRECT or YOUTUBE with valid videoId)
-    // Games without playable trailers remain 100% available in catalog (listGames, getGameById, Explore, Search, Library, Forum)
     const feedCandidates = scoredCandidates.filter((c) => c.primaryTrailer !== null);
-    const withoutPlayableTrailer = scoredCandidates.length - feedCandidates.length;
+    const withoutPlayableTrailer = eligibleRecords.length - feedCandidates.length;
 
     // 4. Deterministic sort by discoveryScore DESC, then rating DESC, then createdAt DESC, then id ASC
     feedCandidates.sort((a, b) => {
@@ -593,18 +672,43 @@ export class GameService {
       }
     }
 
-    // 6. Light deterministic feed diversity (genre, release year, and studio interleaving)
-    const diverse = applyFeedDiversity(deduplicated, safeLimit);
-
+    // 6. Composition, exploration and diversity are one deterministic final step.
+    const balanced = balanceFeed(deduplicated, safeLimit, Boolean(tasteProfile?.genreAffinity.size));
+    diagnostics?.onRanked?.(balanced.diagnostics);
     console.log(
-      `[Feed] candidatePool=${records.length} catalogEligible=${eligibleRecords.length} withoutPlayableTrailer=${withoutPlayableTrailer} excludedSeen=${validExcludeIds.length} deduplicated=${deduplicated.length} returned=${Math.min(diverse.length, safeLimit)}`,
+      `[FeedBalance] candidates=${records.length} eligible=${eligibleRecords.length} withoutTrailer=${withoutPlayableTrailer} excluded=${validExcludeIds.length} returned=${balanced.selected.length} bands=${JSON.stringify(balanced.counts)}`,
     );
 
-    // 7. Return standard DTOs
-    return diverse.slice(0, safeLimit).map((item) => {
-      const { discoveryScore, scoreBreakdown, createdAt, ...dto } = item;
+    // Preserve the public DTO: ranking diagnostics stay server-side.
+    return balanced.selected.map((item) => {
+      const { discoveryScore, scoreBreakdown, createdAt, exposure, ...dto } = item;
       return dto;
     });
+  }
+  async markFeedSeen(userId: string, gameId: string) {
+    if (!UUID_REGEX.test(gameId)) return;
+    try {
+      const existing = await this.prisma.recommendationEvent.findFirst({
+        where: { userId, gameId, eventType: 'FEED_VIEWED' },
+        select: { id: true },
+      });
+      if (existing) {
+        await this.prisma.recommendationEvent.update({
+          where: { id: existing.id },
+          data: { createdAt: new Date() },
+        });
+      } else {
+        await this.prisma.recommendationEvent.create({
+          data: {
+            userId,
+            gameId,
+            eventType: 'FEED_VIEWED',
+          },
+        });
+      }
+    } catch (e) {
+      console.warn('[FeedSeen] falha ao registrar', e);
+    }
   }
 
   async getGameComments(gameId: string) {
