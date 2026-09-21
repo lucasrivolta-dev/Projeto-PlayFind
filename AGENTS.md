@@ -1682,17 +1682,53 @@ Credenciais devem existir apenas em `.env` local, com nomes documentados em `bac
 
 Princípios de catálogo:
 
-* IGDB é a fonte de verdade principal; Steam é enriquecimento complementar.
+* IGDB é a fonte de verdade principal para metadata de jogo. Steam complementa identidade PC, loja, preço, reviews e sinais de exposição/qualidade quando existir versão Steam confiável.
 
-* `Game.id` UUID interno é a identidade canônica. IDs Steam/IGDB são metadata e nunca substituem o UUID interno.
+* `Game.id` UUID interno continua sendo a identidade canônica. IDs Steam/IGDB são metadata e nunca substituem o UUID interno.
 
-* Um jogo antigo não é ruim por ser antigo. Clássicos, AA/AAA famosos, jogos cult, hidden gems e indies podem aparecer se houver evidência suficiente de relevância/qualidade.
+* Um jogo antigo não é ruim por ser antigo. Clássicos, AA/AAA, jogos cult, hidden gems e indies podem aparecer se houver evidência suficiente de relevância e qualidade.
 
-* Fama não é penalidade. O objetivo é ajudar o usuário a encontrar o próximo jogo para jogar, inclusive redescobrir algo que ele já conhece.
+* Fama NÃO é motivo de inelegibilidade. Jogos mainstream continuam válidos e podem aparecer no catálogo e no Feed.
 
-* Evitar desconhecidos sem evidência quase nenhuma no For You principal; não inventar contagem de jogadores. Usar sinais reais disponíveis como `rating_count`, `total_rating_count`, avaliações, comunidade e metadata confiável.
+* Porém, exposição/popularidade é um sinal de ranking. Depois que os candidatos passam pelos gates mínimos de qualidade, o planejamento de aquisição deve priorizar valor de descoberta, dando mais espaço a hidden gems, indies e jogos mid-tail de qualidade sem excluir completamente títulos famosos.
 
-* Não usar corte universal por ano como regra de produto. Filtros e ranking podem considerar recência, mas jogos antigos relevantes devem continuar no catálogo.
+* O objetivo do discovery é favorecer a experiência:
+  "jogo que eu não conhecia, mas parece muito bom"
+  e evitar:
+  "jogo que quase ninguém conhece porque quase ninguém jogou e não há evidência suficiente de qualidade".
+
+* Não usar obscuridade como substituto de qualidade. Um jogo com pouquíssima exposição não deve superar automaticamente outro muito melhor avaliado apenas por ser menos conhecido.
+
+* Para jogos Steam, o hard gate atual de aquisição automática é:
+  - Steam review count >= 100;
+  - Steam positive percentage >= 80%.
+
+* Os dois requisitos são obrigatórios. Não existe compensação:
+  - 99 reviews / 100% positivas -> não passa;
+  - 100 reviews / 79% positivas -> não passa;
+  - 100 reviews / 80% positivas -> passa este gate.
+
+* A quantidade de reviews Steam representa principalmente evidência de exposição/adoção, não uma nota de qualidade isolada.
+
+* O percentual positivo Steam representa satisfação dos jogadores e participa do gate/ranking, mas não substitui os demais sinais de qualidade do catálogo.
+
+* Ausência de evidência Steam nunca deve ser convertida em zero reviews.
+  - zero é válido apenas quando `total_reviews = 0` veio de uma resposta Steam válida;
+  - campo ausente, erro, timeout, snapshot incompleto ou provider indisponível devem resultar em `STEAM_EVIDENCE_UNAVAILABLE`.
+
+* Jogos que legitimamente não possuem versão Steam recebem tratamento NON_STEAM e não devem ser rejeitados apenas pela ausência da Steam. Eles continuam sujeitos aos gates existentes de IGDB, plataforma, metadata, trailer, elegibilidade e dedupe.
+
+* Quando o IGDB retornar múltiplos Steam App IDs, não assumir que o primeiro ID representa o jogo principal. Demo, Playtest, edição secundária ou listing incorreto devem ser evitados. A implementação atual avalia os IDs disponíveis e usa a edição representativa com maior volume válido de reviews.
+
+* O Steam Quality Gate é defesa em profundidade:
+  - aplicado durante `CatalogAcquisitionService.plan()`;
+  - revalidado antes de escrita em `CatalogAcquisitionService.apply()`.
+
+* Nenhum candidato Steam pode ser inserido automaticamente se o Steam Quality Gate não estiver confirmado como aprovado.
+
+* Evitar desconhecidos sem evidência quase nenhuma no For You principal. Nunca inventar review count, jogadores, popularidade ou metadata para preencher ranking/UI.
+
+* Não usar corte universal por ano como regra de produto. Recência pode influenciar ranking, mas jogos antigos relevantes continuam elegíveis.
 
 * Primary trailer deve favorecer conteúdo official/launch/gameplay/story/announcement/reveal/teaser e penalizar walkthrough, tutorial, guide, review, how-to, let's play, reaction, interview e BTS/dev diary quando existir trailer melhor.
 
@@ -1701,6 +1737,124 @@ Princípios de catálogo:
 * Steam é apenas uma fonte de preço/loja para PC. Jogos Nintendo, PlayStation, Xbox, Epic, GOG etc. só podem exibir preço/loja quando houver fonte real e confiável. Não inferir loja a partir de plataforma e não inventar preço para preencher layout.
 
 * A arquitetura de ofertas deve evoluir de forma multi-store sem chamadas externas por card no Feed. Prefira sincronização/backend e dados persistidos/batch; nunca N+1 ou scraping aleatório.
+
+### Discovery-First Ranking
+
+O planejamento de aquisição utiliza ranking discovery-first depois dos gates obrigatórios.
+
+Para candidatos Steam aprovados, a exposição atual é classificada pelas bandas:
+
+* `HIDDEN_GEM`: 100–999 reviews;
+* `DISCOVERY`: 1.000–9.999 reviews;
+* `ESTABLISHED`: 10.000–49.999 reviews;
+* `MAINSTREAM`: 50.000+ reviews.
+
+Essas bandas são sinais de exposição, não de elegibilidade.
+
+Nenhuma banda possui limite máximo que torne um jogo inelegível.
+
+A implementação atual calcula `discoveryPriority` combinando:
+
+* qualidade IGDB ajustada/Bayesiana;
+* bônus de exposição;
+* satisfação Steam.
+
+Fórmula operacional atual para candidatos Steam:
+
+`discoveryPriority = adjustedIgdbRating + exposureBonus + 0.35 × (steamPositivePercentage - 90)`
+
+Bônus atuais:
+
+* HIDDEN_GEM: +8;
+* DISCOVERY: +5;
+* ESTABLISHED: +2;
+* MAINSTREAM: +0.
+
+Essa fórmula é uma heurística operacional atual, não uma regra imutável de produto. Mudanças futuras exigem nova validação sobre distribuição real e testes determinísticos.
+
+A lógica deve preservar o princípio:
+
+jogo menos conhecido + qualidade forte
+pode superar
+jogo extremamente conhecido + qualidade semelhante.
+
+Mas não preservar o princípio incorreto:
+
+jogo mais obscuro
+sempre supera
+jogo mais conhecido.
+
+Exemplo obrigatório de comportamento:
+
+* 400 reviews / 92% positivas pode receber maior prioridade de descoberta do que 100.000 reviews / 93%, se a qualidade global for semelhante;
+* 110 reviews / 80% não deve automaticamente superar 800–1.000 reviews / 97% apenas por estar na banda HIDDEN_GEM.
+
+Jogos NON_STEAM não recebem banda Steam inventada. Eles continuam ordenados pelos sinais IGDB disponíveis, com tratamento neutro na comparação entre fontes.
+
+A ordenação final deve continuar determinística. O comportamento atual considera, em ordem:
+
+1. `discoveryPriority`;
+2. qualidade ajustada;
+3. menor exposição Steam quando aplicável;
+4. IGDB ID como desempate estável.
+
+O manifest de aquisição pode expor diagnóstico como:
+
+* `steamExposureBand`;
+* `discoveryPriority`;
+* `steamReviewCount`;
+* `steamPositivePercentage`;
+* `steamEvidenceStatus`.
+
+Esses campos de planejamento não precisam ser persistidos no `Game` sem decisão explícita de schema.
+
+### Catalog Acquisition Safety
+
+`CatalogAcquisitionService.plan()` é a etapa de planejamento/auditoria e não deve escrever no catálogo.
+
+A escrita é explícita e controlada via `CatalogAcquisitionService.apply()`.
+
+Regras obrigatórias para aquisição real:
+
+* exigir limite positivo explícito;
+* nunca usar fallback implícito para "todos os READY";
+* revalidar identidade/dedupe imediatamente antes da escrita;
+* não inserir ALREADY_EXISTS;
+* não inserir AMBIGUOUS;
+* não inserir REJECTED;
+* não inserir candidato Steam que falhe no Steam Quality Gate;
+* erro em um candidato não deve autorizar processamento silencioso de outro quando a operação for um canary controlado.
+
+Para operações canary, `--limit 1` sozinho não é suficiente se não houver garantia de identidade do candidato auditado. O CLI deve ser capaz de fixar explicitamente o candidato antes de permitir uma escrita supervisionada.
+
+Não usar SQL manual ou `Prisma.create()` ad hoc para contornar esse fluxo.
+
+O caminho oficial de escrita é:
+
+`CatalogAcquisitionService.apply()`
+→ revalidação
+→ `GameSyncService`
+→ repository
+→ PostgreSQL.
+
+### External API Safety
+
+IGDB discovery deve possuir ordenação explícita e resultado determinístico.
+
+O ranking local deve possuir desempates estáveis.
+
+Steam utiliza fila centralizada de requests com pacing e retry controlado.
+
+A implementação atual:
+
+* limita o ritmo das requests Steam;
+* trata HTTP 429;
+* respeita `Retry-After` quando fornecido;
+* possui número finito de retries;
+* não cria retry infinito;
+* não remove dados IGDB válidos apenas porque um enriquecimento Steam falhou.
+
+Não criar chamadas Steam/IGDB por card durante renderização do Feed.
 
 ---
 
@@ -1878,19 +2032,81 @@ Direção:
 
 ---
 
-# 43. ESTADO OPERACIONAL ATUAL — 2026-09-18
+# 43. ESTADO OPERACIONAL ATUAL — 2026-09-21
 
 Infraestrutura ativa:
 
 * Backend público: https://projeto-playfind.onrender.com
-
 * API base: https://projeto-playfind.onrender.com/api/v1
-
 * Health: https://projeto-playfind.onrender.com/health
-
 * Banco: Neon PostgreSQL.
-
 * Render Free pode sofrer cold start.
+
+O catálogo persistido possuía 343 jogos na última verificação operacional anterior ao primeiro canary de Catalog Acquisition.
+
+Não confundir:
+
+* quantidade de jogos persistidos no banco;
+* quantidade descoberta pelo planning;
+* quantidade READY para possível aquisição.
+
+Na validação read-only mais recente do Catalog Acquisition:
+
+* discovered: 727;
+* already existing: 194;
+* ambiguous: 33;
+* rejected: 87;
+* READY: 413.
+
+Dos 413 READY:
+
+* HIDDEN_GEM: 8;
+* DISCOVERY: 174;
+* ESTABLISHED: 113;
+* MAINSTREAM: 45;
+* NON_STEAM: 73.
+
+Esses números são snapshot de planejamento/auditoria e não significam que 413 jogos já estejam persistidos.
+
+O ranking discovery-first reduziu a dominância de mainstream sem criar exclusão por popularidade.
+
+Na validação:
+
+Top 20:
+* HIDDEN_GEM: 4;
+* DISCOVERY: 5;
+* ESTABLISHED: 1;
+* MAINSTREAM: 2;
+* NON_STEAM: 8.
+
+Top 50:
+* HIDDEN_GEM: 6;
+* DISCOVERY: 27;
+* ESTABLISHED: 2;
+* MAINSTREAM: 4;
+* NON_STEAM: 11.
+
+Top 100:
+* HIDDEN_GEM: 7;
+* DISCOVERY: 62;
+* ESTABLISHED: 8;
+* MAINSTREAM: 6;
+* NON_STEAM: 17.
+
+Não tentar forçar quota de hidden gems quando o pool não possuir candidatos suficientes. Na validação atual existem apenas 8 HIDDEN_GEM entre os 413 READY.
+
+Nunca reduzir o piso de qualidade apenas para atingir composição percentual.
+
+O hard gate Steam atual permanece:
+
+* >= 100 reviews;
+* >= 80% positivas.
+
+O primeiro canary real ainda NÃO foi executado com sucesso. A tentativa anterior foi interrompida antes da escrita porque o CLI não garantia que `--limit 1` processaria exatamente o candidato previamente auditado.
+
+Nenhum jogo foi inserido durante esse canary interrompido.
+
+O próximo canary somente deve ocorrer quando for possível fixar explicitamente a identidade do candidato auditado e garantir que nenhum outro candidato seja processado como fallback.
 
 Tratamento atual de cold start do Feed, conforme implementação validada:
 
@@ -1903,20 +2119,6 @@ Tratamento atual de cold start do Feed, conforme implementação validada:
 * manter loading enquanto ainda houver tentativa válida;
 
 * Feed real não deve cair silenciosamente para catálogo demo.
-
-Catálogo após a higiene já executada:
-
-* total de jogos: 223;
-
-* com trailer jogável/feed-eligible: 221;
-
-* com igdbId: 217;
-
-* com steamAppId: 178;
-
-* 99 registros recentes de baixa confiança foram removidos;
-
-* TCG Card Shop Simulator foi preservado explicitamente.
 
 Não reexecutar a limpeza destrutiva, não reintroduzir os 99 registros removidos e não desfazer catalog hygiene sem análise/solicitação explícita.
 
