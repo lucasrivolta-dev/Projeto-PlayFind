@@ -2042,7 +2042,7 @@ Infraestrutura ativa:
 * Banco: Neon PostgreSQL.
 * Render Free pode sofrer cold start.
 
-O catálogo persistido possuía 343 jogos na última verificação operacional anterior ao primeiro canary de Catalog Acquisition.
+O catálogo persistido possuía **344 jogos** após o primeiro canary real de Catalog Acquisition (343 → 344). Após o primeiro lote supervisionado de cinco inserções individuais, a contagem consultada passou de 344 para **349 jogos**. Essas são contagens de jogos persistidos, distintas dos 413 candidatos READY do snapshot de planejamento abaixo.
 
 Não confundir:
 
@@ -2102,11 +2102,13 @@ O hard gate Steam atual permanece:
 * >= 100 reviews;
 * >= 80% positivas.
 
-O primeiro canary real ainda NÃO foi executado com sucesso. A tentativa anterior foi interrompida antes da escrita porque o CLI não garantia que `--limit 1` processaria exatamente o candidato previamente auditado.
+O primeiro canary real foi concluído com **PASS**. O candidato Pentiment (IGDB ID `204623`, Steam App ID `1205520`, banda DISCOVERY) tinha 9.827 reviews globais Steam e 95,15% positivas. A operação com seleção exata `--apply --limit 1 --igdb-id 204623` processou 1 candidato e inseriu 1 jogo; a contagem passou de 343 para 344. A verificação read-only posterior retornou dedupe `ALREADY_EXISTS`.
 
-Nenhum jogo foi inserido durante esse canary interrompido.
+Nenhum segundo candidato foi processado e nenhum segundo apply foi executado. Não houve SQL manual, migration, alteração manual no banco nem alteração de arquivo de código durante o canary.
 
-O próximo canary somente deve ocorrer quando for possível fixar explicitamente a identidade do candidato auditado e garantir que nenhum outro candidato seja processado como fallback.
+Operações supervisionadas posteriores devem continuar fixando explicitamente o IGDB ID auditado e não podem selecionar outro candidato como fallback.
+
+O primeiro lote supervisionado processou e inseriu exatamente cinco jogos, cada um com `--apply --limit 1 --igdb-id <id>`: Fuga: Melodies of Steel 2 (`212264`), Ghost Trick: Phantom Detective (`236660`), Moss: Book II (`154839`), Minishoot' Adventures (`191761`) e Yoku's Island Express (`27367`). A contagem avançou em uma unidade após cada operação (344 → 345 → 346 → 347 → 348 → 349); o dedupe read-only posterior de cada jogo retornou `ALREADY_EXISTS`. Nenhum candidato de fallback foi processado.
 
 Tratamento atual de cold start do Feed, conforme implementação validada:
 
