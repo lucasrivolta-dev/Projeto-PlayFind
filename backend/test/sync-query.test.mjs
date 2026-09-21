@@ -7,6 +7,8 @@ import {
   EDITORIAL_MIN_RATING,
   EDITORIAL_MIN_RATING_COUNT,
   ensureVideoField,
+  EXPOSURE_BANDS,
+  GENRE_CLUSTERS,
   parseSyncArgs,
   rankDiscoverCandidates,
 } from '../dist/modules/integrations/igdb/igdb-query.js';
@@ -143,5 +145,79 @@ test('Recent mode enforces quality threshold, recency window, and preserved mode
   assert.match(discover, /cover != null/);
   assert.match(discover, /total_rating >= 70/);
   assert.match(discover, /total_rating_count >= 20 & total_rating_count <= 500/);
+  assert.match(discover, /sort total_rating desc/);
   assert.match(discover, /limit 50/);
+});
+
+test('Teste A — Query determinística: queries de discovery incluem sort total_rating desc explícito e chamadas repetidas são idênticas', () => {
+  const fixedNow = new Date('2026-09-21T12:00:00Z');
+  for (const band of EXPOSURE_BANDS) {
+    for (const genre of GENRE_CLUSTERS) {
+      const q1 = buildSyncQuery({ mode: 'discover', band, genre, limit: 20, dryRun: true }, fixedNow);
+      const q2 = buildSyncQuery({ mode: 'discover', band, genre, limit: 20, dryRun: true }, fixedNow);
+      assert.equal(q1, q2);
+      assert.match(q1, /sort total_rating desc;/);
+      assert.match(q1, /game_type = \(0, 8, 9\)/);
+    }
+  }
+
+  // Legacy discover sem banda específica
+  const legacy1 = buildSyncQuery({ mode: 'discover', limit: 20, dryRun: true }, fixedNow);
+  const legacy2 = buildSyncQuery({ mode: 'discover', limit: 20, dryRun: true }, fixedNow);
+  assert.equal(legacy1, legacy2);
+  assert.match(legacy1, /sort total_rating desc;/);
+});
+
+test('Teste B — Ranking determinístico: empates produzem ordenação estável idêntica independente da ordem de entrada', () => {
+  const candidates = [
+    { id: 400, name: 'Tied 4', total_rating: 85, total_rating_count: 50 },
+    { id: 100, name: 'Tied 1', total_rating: 85, total_rating_count: 50 },
+    { id: 300, name: 'Tied 3', total_rating: 85, total_rating_count: 50 },
+    { id: 200, name: 'Tied 2', total_rating: 85, total_rating_count: 50 },
+    { id: 50, name: 'Higher Votes', total_rating: 85, total_rating_count: 60 },
+    { id: 10, name: 'Highest Rating', total_rating: 95, total_rating_count: 30 },
+  ];
+
+  const run1 = rankDiscoverCandidates([...candidates]);
+  const run2 = rankDiscoverCandidates([...candidates].reverse());
+  const run3 = rankDiscoverCandidates([candidates[2], candidates[0], candidates[4], candidates[1], candidates[5], candidates[3]]);
+
+  const ids1 = run1.map((c) => c.id);
+  const ids2 = run2.map((c) => c.id);
+  const ids3 = run3.map((c) => c.id);
+
+  assert.deepEqual(ids1, ids2);
+  assert.deepEqual(ids2, ids3);
+
+  // Desempate estável: maior adjustedRating -> maior volume de votos -> menor ID
+  const tiedIds = run1.filter((c) => c.total_rating === 85 && c.total_rating_count === 50).map((c) => c.id);
+  assert.deepEqual(tiedIds, [100, 200, 300, 400]);
+});
+
+test('Teste C — Semântica preservada: thresholds de bandas de exposição e clusters de gênero permanecem intactos', () => {
+  const fixedNow = new Date('2026-09-21T12:00:00Z');
+
+  // emerging: minRating 80, votes 10..99, 5 anos
+  const qEmerging = buildSyncQuery({ mode: 'discover', band: 'emerging', limit: 20, dryRun: true }, fixedNow);
+  assert.match(qEmerging, /total_rating >= 80/);
+  assert.match(qEmerging, /total_rating_count >= 10 & total_rating_count <= 99/);
+  assert.match(qEmerging, /sort total_rating desc;/);
+
+  // discovery: minRating 75, votes 100..499, 5 anos
+  const qDiscovery = buildSyncQuery({ mode: 'discover', band: 'discovery', limit: 20, dryRun: true }, fixedNow);
+  assert.match(qDiscovery, /total_rating >= 75/);
+  assert.match(qDiscovery, /total_rating_count >= 100 & total_rating_count <= 499/);
+  assert.match(qDiscovery, /sort total_rating desc;/);
+
+  // mid_tail: minRating 75, votes 500..1500, 6 anos
+  const qMidTail = buildSyncQuery({ mode: 'discover', band: 'mid_tail', limit: 20, dryRun: true }, fixedNow);
+  assert.match(qMidTail, /total_rating >= 75/);
+  assert.match(qMidTail, /total_rating_count >= 500 & total_rating_count <= 1500/);
+  assert.match(qMidTail, /sort total_rating desc;/);
+
+  // older_gems: minRating 80, votes 20..1500, janela 6 a 12 anos
+  const qOlderGems = buildSyncQuery({ mode: 'discover', band: 'older_gems', limit: 20, dryRun: true }, fixedNow);
+  assert.match(qOlderGems, /total_rating >= 80/);
+  assert.match(qOlderGems, /total_rating_count >= 20 & total_rating_count <= 1500/);
+  assert.match(qOlderGems, /sort total_rating desc;/);
 });

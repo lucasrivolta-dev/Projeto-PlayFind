@@ -250,13 +250,13 @@ export function buildSyncQuery(options: SyncCliOptions, now = new Date()): strin
         ? Math.floor(now.getTime() / 1000) - config.windowMaxYears * 365 * 24 * 60 * 60
         : Math.floor(now.getTime() / 1000);
 
-      return `${fields} where ${IGDB_GAME_TYPE_FILTER} & version_parent = null & cover != null & first_release_date >= ${minCutoff} & first_release_date <= ${maxCutoff} & total_rating != null & total_rating >= ${config.minRating} & total_rating_count >= ${config.minVotes} & total_rating_count <= ${config.maxVotes}${genreFilter}; limit ${poolLimit};`;
+      return `${fields} where ${IGDB_GAME_TYPE_FILTER} & version_parent = null & cover != null & first_release_date >= ${minCutoff} & first_release_date <= ${maxCutoff} & total_rating != null & total_rating >= ${config.minRating} & total_rating_count >= ${config.minVotes} & total_rating_count <= ${config.maxVotes}${genreFilter}; sort total_rating desc; limit ${poolLimit};`;
     }
 
     // Default legacy discover mode
     const cutoff = Math.floor(now.getTime() / 1000) - RECENT_WINDOW_DAYS * 24 * 60 * 60;
     const current = Math.floor(now.getTime() / 1000);
-    return `${fields} where ${IGDB_GAME_TYPE_FILTER} & version_parent = null & cover != null & first_release_date >= ${cutoff} & first_release_date <= ${current} & total_rating != null & total_rating >= 70 & total_rating_count >= 20 & total_rating_count <= 500${genreFilter}; limit ${poolLimit};`;
+    return `${fields} where ${IGDB_GAME_TYPE_FILTER} & version_parent = null & cover != null & first_release_date >= ${cutoff} & first_release_date <= ${current} & total_rating != null & total_rating >= 70 & total_rating_count >= 20 & total_rating_count <= 500${genreFilter}; sort total_rating desc; limit ${poolLimit};`;
   }
 
   // Modo default: catálogo de qualidade — jogos principais, remakes e remasters
