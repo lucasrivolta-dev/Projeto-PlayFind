@@ -1,5 +1,7 @@
-import type { SteamAppDetailsDto } from './steam.types.js';
+import type { SteamAppDetailsDto, SteamReviewSummary } from './steam.types.js';
 import { isEligibleForCatalog } from '../../games/game-eligibility.js';
+
+export type { SteamReviewSummary };
 
 export const STEAM_REQUEST_MIN_INTERVAL_MS = 250;
 export const STEAM_DEFAULT_MAX_RETRIES = 3;
@@ -133,6 +135,36 @@ export class SteamClient {
     const body = (await response.json()) as Record<string, SteamAppDetailsDto>;
     const details = body[String(appId)];
     return details?.success === true ? details : undefined;
+  }
+
+  async reviews(appId: number): Promise<SteamReviewSummary | undefined> {
+    if (!Number.isSafeInteger(appId) || appId <= 0) return undefined;
+    const url = `https://store.steampowered.com/appreviews/${appId}?json=1&language=all&purchase_type=all`;
+    const response = await this.enqueueRequest(() => this.fetchWithRetry(url));
+    if (response.status === 404) return undefined;
+    if (!response.ok) throw new Error(`Steam reviews request failed (${response.status})`);
+    const body = (await response.json()) as {
+      success?: number;
+      query_summary?: {
+        total_reviews?: number;
+        total_positive?: number;
+        total_negative?: number;
+        review_score_desc?: string;
+      };
+    };
+    if (body?.success !== 1 || !body.query_summary) return undefined;
+    const totalReviews = body.query_summary.total_reviews ?? 0;
+    const totalPositive = body.query_summary.total_positive ?? 0;
+    const totalNegative = body.query_summary.total_negative ?? 0;
+    const positivePercentage =
+      totalReviews > 0 ? (totalPositive / totalReviews) * 100 : 0;
+    return {
+      totalReviews,
+      totalPositive,
+      totalNegative,
+      positivePercentage: Number(positivePercentage.toFixed(2)),
+      reviewScoreDesc: body.query_summary.review_score_desc ?? '',
+    };
   }
 
   private async fetchAndIndexAppList(): Promise<Map<string, number[]>> {

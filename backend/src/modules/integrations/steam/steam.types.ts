@@ -38,3 +38,11 @@ export interface SteamAppDetailsDto {
     is_free?: boolean;
   };
 }
+
+export interface SteamReviewSummary {
+  totalReviews: number;
+  totalPositive: number;
+  totalNegative: number;
+  positivePercentage: number;
+  reviewScoreDesc: string;
+}

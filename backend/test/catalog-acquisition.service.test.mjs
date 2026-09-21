@@ -21,6 +21,13 @@ function createRawGame(overrides = {}) {
     external_games: [
       { external_game_source: { name: 'Steam' }, uid: '1234560' },
     ],
+    steamReview: {
+      totalReviews: 500,
+      totalPositive: 450,
+      totalNegative: 50,
+      positivePercentage: 90,
+      reviewScoreDesc: 'Very Positive',
+    },
     videos: [
       { name: 'Official Launch Trailer', video_id: 'dQw4w9WgXcQ' },
     ],

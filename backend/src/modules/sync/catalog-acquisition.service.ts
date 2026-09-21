@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import {
   BAND_CONFIGS,
   GENRE_CLUSTERS,
@@ -24,6 +25,17 @@ import {
 import type { GameSyncService } from './game-sync.service.js';
 import type { NormalizedGame } from '../games/normalized-game.js';
 import { mapIgdbGame } from '../integrations/igdb/igdb.mapper.js';
+import type { SteamReviewSummary } from '../integrations/steam/steam.types.js';
+
+export const STEAM_QUALITY_GATE_CONFIG = {
+  minReviewCount: 100,
+  minPositivePercentage: 80.0,
+} as const;
+
+export type SteamEvidenceStatus =
+  | 'STEAM_VERIFIED'
+  | 'STEAM_EVIDENCE_UNAVAILABLE'
+  | 'NON_STEAM';
 
 export type TrailerStatus = 'PLAYABLE_TRAILER' | 'VIDEO_PRESENT_BUT_DISQUALIFIED' | 'NO_VIDEO';
 export type AcquisitionBucket = 'ALREADY_EXISTS' | 'AMBIGUOUS' | 'REJECTED' | 'READY';
@@ -32,7 +44,10 @@ export type AcquisitionRejectionReason =
   | 'invalidMetadata'
   | 'ineligible'
   | 'insufficientQuality'
-  | 'noTrailer';
+  | 'noTrailer'
+  | 'insufficientSteamReviews'
+  | 'poorSteamRating'
+  | 'steamEvidenceUnavailable';
 
 export interface EvaluatedCandidate {
   igdbId: number;
@@ -61,6 +76,10 @@ export interface EvaluatedCandidate {
   validVideoCount: number;
   steamAppId?: number;
   steamAppIds: number[];
+  steamReviewCount?: number;
+  steamPositivePercentage?: number;
+  steamQualityGatePassed?: boolean;
+  steamEvidenceStatus?: SteamEvidenceStatus;
   dedupeStatus: DedupeStatus;
   dedupeReason?: string;
   passedQualityGate: boolean;
@@ -77,6 +96,9 @@ export interface RejectionReasonCounts {
   ineligible: number;
   insufficientQuality: number;
   noTrailer: number;
+  insufficientSteamReviews: number;
+  poorSteamRating: number;
+  steamEvidenceUnavailable: number;
 }
 
 export interface ClusterFunnelStats {
@@ -117,6 +139,10 @@ export interface CatalogAcquisitionManifest {
     failedQualityGate: number;
     unsupportedPlatform: number;
     invalidMetadata: number;
+    steamQualityGatePassed?: number;
+    steamQualityGateFailed?: number;
+    steamEvidenceUnavailable?: number;
+    nonSteam?: number;
   };
   evaluated: EvaluatedCandidate[];
 }
@@ -150,6 +176,10 @@ export interface CatalogAcquisitionApplyResult {
   results: CandidateApplyResult[];
 }
 
+export type SteamReviewProvider = (
+  appId: number,
+) => Promise<SteamReviewSummary | undefined> | SteamReviewSummary | undefined;
+
 export interface CatalogAcquisitionApplyOptions {
   limit: number;
   existingCatalog?: Identity[];
@@ -157,10 +187,14 @@ export interface CatalogAcquisitionApplyOptions {
   gameSyncService?: GameSyncService;
   steamEnricher?: (game: NormalizedGame) => Promise<NormalizedGame | undefined>;
   candidates?: EvaluatedCandidate[];
+  steamReviews?: Map<number, SteamReviewSummary> | Record<number, SteamReviewSummary>;
+  steamReviewProvider?: SteamReviewProvider;
 }
 
 export interface CatalogAcquisitionDependencies {
   igdbClient?: IgdbSearchClient;
+  steamClient?: { reviews(appId: number): Promise<SteamReviewSummary | undefined> };
+  steamReviewProvider?: SteamReviewProvider;
   loadExistingCatalog?: () => Promise<Identity[]>;
   gameSyncService?: GameSyncService;
   steamEnricher?: (game: NormalizedGame) => Promise<NormalizedGame | undefined>;
@@ -180,6 +214,9 @@ export interface CatalogAcquisitionPlanOptions {
   throttleMs?: number;
   clusters?: GenreCluster[];
   bands?: ExposureBand[];
+  steamReviews?: Map<number, SteamReviewSummary> | Record<number, SteamReviewSummary>;
+  steamReviewProvider?: SteamReviewProvider;
+  steamReviewsCachePath?: string;
 }
 
 /**
@@ -256,7 +293,44 @@ export class CatalogAcquisitionService {
     // 2. Resolve raw pool
     const rawPool = await this.resolveRawPool(options, referenceTime);
 
-    // 3. Evaluate each unique candidate
+    // 3. Resolve Steam review lookup map
+    let steamReviewMap = new Map<number, SteamReviewSummary>();
+    if (options.steamReviews instanceof Map) {
+      steamReviewMap = options.steamReviews;
+    } else if (options.steamReviews && typeof options.steamReviews === 'object') {
+      for (const [k, v] of Object.entries(options.steamReviews)) {
+        steamReviewMap.set(Number(k), v as SteamReviewSummary);
+      }
+    } else {
+      const candidateCachePaths: string[] = [];
+      if (options.steamReviewsCachePath) {
+        candidateCachePaths.push(options.steamReviewsCachePath);
+      }
+      if (options.snapshotPath) {
+        const dir = path.dirname(options.snapshotPath);
+        candidateCachePaths.push(path.resolve(dir, 'steam-reviews-cache.json'));
+        candidateCachePaths.push(
+          path.resolve(process.cwd(), 'reports/catalog-acquisition-v1/steam-reviews-cache.json'),
+        );
+        candidateCachePaths.push(
+          path.resolve(process.cwd(), 'backend/reports/catalog-acquisition-v1/steam-reviews-cache.json'),
+        );
+      }
+      for (const p of candidateCachePaths) {
+        try {
+          const content = await readFile(p, 'utf8');
+          const parsed = JSON.parse(content);
+          for (const [k, v] of Object.entries(parsed)) {
+            steamReviewMap.set(Number(k), v as SteamReviewSummary);
+          }
+          break;
+        } catch {
+          // Continue to next potential cache location
+        }
+      }
+    }
+
+    // 4. Evaluate each unique candidate
     const evaluatedList: EvaluatedCandidate[] = [];
     const buckets: CatalogAcquisitionManifest['buckets'] = {
       alreadyExists: [],
@@ -270,15 +344,82 @@ export class CatalogAcquisitionService {
       ineligible: 0,
       insufficientQuality: 0,
       noTrailer: 0,
+      insufficientSteamReviews: 0,
+      poorSteamRating: 0,
+      steamEvidenceUnavailable: 0,
     };
 
     for (const [, { raw, foundClusters, foundBands }] of rawPool) {
+      const { steamAppId, steamAppIds } = steamIdentity(raw.external_games);
+      const allAppIds = [
+        ...new Set([
+          ...(steamAppId ? [steamAppId] : []),
+          ...(steamAppIds ?? []),
+        ]),
+      ];
+      const hasSteam = allAppIds.length > 0;
+
+      let steamReview: SteamReviewSummary | undefined =
+        raw.steamReview ?? raw.steam_review;
+      let resolvedSteamAppId: number | undefined = steamAppId;
+
+      if (!steamReview && hasSteam) {
+        const candidateReviews: Array<{ appId: number; review: SteamReviewSummary }> = [];
+
+        for (const appId of allAppIds) {
+          let rev: SteamReviewSummary | undefined;
+          if (steamReviewMap.has(appId)) {
+            rev = steamReviewMap.get(appId);
+          } else if (options.steamReviewProvider) {
+            try {
+              rev = await options.steamReviewProvider(appId);
+            } catch {
+              rev = undefined;
+            }
+          } else if (this.dependencies.steamReviewProvider) {
+            try {
+              rev = await this.dependencies.steamReviewProvider(appId);
+            } catch {
+              rev = undefined;
+            }
+          } else if (this.dependencies.steamClient?.reviews) {
+            try {
+              rev = await this.dependencies.steamClient.reviews(appId);
+            } catch {
+              rev = undefined;
+            }
+          }
+
+          if (
+            rev &&
+            typeof rev.totalReviews === 'number' &&
+            Number.isFinite(rev.totalReviews) &&
+            rev.totalReviews >= 0
+          ) {
+            candidateReviews.push({ appId, review: rev });
+          }
+        }
+
+        if (candidateReviews.length > 0) {
+          candidateReviews.sort((a, b) => b.review.totalReviews - a.review.totalReviews);
+          steamReview = candidateReviews[0].review;
+          resolvedSteamAppId = candidateReviews[0].appId;
+        } else {
+          steamReview = undefined;
+          resolvedSteamAppId = allAppIds[0];
+        }
+      } else if (steamReview && !resolvedSteamAppId && allAppIds.length > 0) {
+        resolvedSteamAppId = allAppIds[0];
+      }
+
       const candidate = this.evaluateCandidate(
         raw,
         foundClusters,
         foundBands,
         existingCatalog,
         referenceTime,
+        steamReview,
+        resolvedSteamAppId,
       );
       evaluatedList.push(candidate);
 
@@ -396,6 +537,10 @@ export class CatalogAcquisitionService {
       failedQualityGate: evaluatedList.filter((c) => !c.passedQualityGate).length,
       unsupportedPlatform: evaluatedList.filter((c) => c.platformStatus === 'UNSUPPORTED_PLATFORM').length,
       invalidMetadata: evaluatedList.filter((c) => c.metadataStatus === 'INVALID_METADATA').length,
+      steamQualityGatePassed: evaluatedList.filter((c) => c.steamQualityGatePassed === true).length,
+      steamQualityGateFailed: evaluatedList.filter((c) => c.steamQualityGatePassed === false).length,
+      steamEvidenceUnavailable: evaluatedList.filter((c) => c.steamEvidenceStatus === 'STEAM_EVIDENCE_UNAVAILABLE').length,
+      nonSteam: evaluatedList.filter((c) => c.steamEvidenceStatus === 'NON_STEAM').length,
     };
 
     return {
@@ -530,6 +675,91 @@ export class CatalogAcquisitionService {
           reason: dedupeReason,
         });
         continue;
+      }
+
+      // Candidate is confirmed NEW: check defense-in-depth Steam quality gate
+      const isSteam = Boolean(
+        candidate.steamAppId || (candidate.steamAppIds && candidate.steamAppIds.length > 0),
+      );
+      if (isSteam) {
+        let reviewCount = candidate.steamReviewCount;
+        let positivePercentage = candidate.steamPositivePercentage;
+        let qualityPassed = candidate.steamQualityGatePassed;
+
+        if (qualityPassed === undefined) {
+          const allAppIds = [
+            ...new Set([
+              ...(candidate.steamAppId ? [candidate.steamAppId] : []),
+              ...(candidate.steamAppIds ?? []),
+            ]),
+          ];
+          let bestReview: SteamReviewSummary | undefined;
+          for (const appId of allAppIds) {
+            let rev: SteamReviewSummary | undefined;
+            if (options.steamReviews instanceof Map) {
+              rev = options.steamReviews.get(appId);
+            } else if (options.steamReviews && typeof options.steamReviews === 'object') {
+              rev = options.steamReviews[appId];
+            } else if (options.steamReviewProvider) {
+              try {
+                rev = await options.steamReviewProvider(appId);
+              } catch {
+                rev = undefined;
+              }
+            } else if (this.dependencies.steamReviewProvider) {
+              try {
+                rev = await this.dependencies.steamReviewProvider(appId);
+              } catch {
+                rev = undefined;
+              }
+            } else if (this.dependencies.steamClient?.reviews) {
+              try {
+                rev = await this.dependencies.steamClient.reviews(appId);
+              } catch {
+                rev = undefined;
+              }
+            }
+            if (
+              rev &&
+              typeof rev.totalReviews === 'number' &&
+              Number.isFinite(rev.totalReviews) &&
+              rev.totalReviews >= 0
+            ) {
+              if (!bestReview || rev.totalReviews > bestReview.totalReviews) {
+                bestReview = rev;
+              }
+            }
+          }
+          if (bestReview) {
+            reviewCount = bestReview.totalReviews;
+            positivePercentage = bestReview.positivePercentage;
+            qualityPassed =
+              reviewCount >= STEAM_QUALITY_GATE_CONFIG.minReviewCount &&
+              positivePercentage >= STEAM_QUALITY_GATE_CONFIG.minPositivePercentage;
+          } else {
+            qualityPassed = false;
+          }
+        }
+
+        const failsSteamGate =
+          qualityPassed !== true ||
+          candidate.steamEvidenceStatus === 'STEAM_EVIDENCE_UNAVAILABLE' ||
+          reviewCount === undefined ||
+          reviewCount < STEAM_QUALITY_GATE_CONFIG.minReviewCount ||
+          positivePercentage === undefined ||
+          positivePercentage < STEAM_QUALITY_GATE_CONFIG.minPositivePercentage;
+
+        if (failsSteamGate) {
+          failed++;
+          results.push({
+            igdbId: candidate.igdbId,
+            name: candidate.name,
+            slug: candidate.slug,
+            status: 'FAILED',
+            error: `Candidate "${candidate.name}" failed Steam quality gate (reviews: ${reviewCount ?? 'N/A'}, positive: ${positivePercentage ?? 'N/A'}%). Ingestion blocked.`,
+          });
+          continue;
+        }
       }
 
       // Candidate is confirmed NEW: delegate persistence to GameSyncService
@@ -729,6 +959,8 @@ export class CatalogAcquisitionService {
     foundBands: Set<ExposureBand>,
     existingCatalog: Identity[],
     referenceTime: Date,
+    steamReview?: SteamReviewSummary,
+    resolvedSteamAppId?: number,
   ): EvaluatedCandidate {
     const name: string = raw.name ?? '';
     const slug: string = raw.slug ?? '';
@@ -851,6 +1083,8 @@ export class CatalogAcquisitionService {
 
     // Steam identities from external_games
     const { steamAppId, steamAppIds } = steamIdentity(raw.external_games);
+    const effectiveSteamAppId = steamAppId ?? resolvedSteamAppId ?? (steamAppIds?.length ? steamAppIds[0] : undefined);
+    const hasSteam = Boolean(effectiveSteamAppId || (steamAppIds && steamAppIds.length > 0));
 
     // Video & trailer evaluation
     const rawVideos = (raw.videos ?? []) as Array<{ video_id?: string; name?: string }>;
@@ -881,16 +1115,58 @@ export class CatalogAcquisitionService {
 
     // Deduplication check
     const { dedupeStatus, dedupeReason } = dedupeCandidate(
-      { igdbId, steamAppId, steamAppIds, name, slug },
+      { igdbId, steamAppId: effectiveSteamAppId, steamAppIds, name, slug },
       existingCatalog,
     );
+
+    // Steam Quality Gate evaluation
+    let steamEvidenceStatus: SteamEvidenceStatus;
+    let steamReviewCount: number | undefined;
+    let steamPositivePercentage: number | undefined;
+    let steamQualityGatePassed: boolean | undefined;
+
+    if (!hasSteam) {
+      steamEvidenceStatus = 'NON_STEAM';
+      steamReviewCount = undefined;
+      steamPositivePercentage = undefined;
+      steamQualityGatePassed = undefined;
+    } else if (
+      !steamReview ||
+      typeof steamReview.totalReviews !== 'number' ||
+      !Number.isFinite(steamReview.totalReviews) ||
+      steamReview.totalReviews < 0
+    ) {
+      // Missing value or unpopulated review MUST NOT be coerced to 0!
+      steamEvidenceStatus = 'STEAM_EVIDENCE_UNAVAILABLE';
+      steamQualityGatePassed = false;
+      steamReviewCount = undefined;
+      steamPositivePercentage = undefined;
+    } else {
+      steamReviewCount = steamReview.totalReviews;
+      steamPositivePercentage =
+        typeof steamReview.positivePercentage === 'number' && Number.isFinite(steamReview.positivePercentage)
+          ? steamReview.positivePercentage
+          : 0;
+
+      if (steamReview.totalReviews < STEAM_QUALITY_GATE_CONFIG.minReviewCount) {
+        steamEvidenceStatus = 'STEAM_VERIFIED';
+        steamQualityGatePassed = false;
+      } else if (steamPositivePercentage < STEAM_QUALITY_GATE_CONFIG.minPositivePercentage) {
+        steamEvidenceStatus = 'STEAM_VERIFIED';
+        steamQualityGatePassed = false;
+      } else {
+        steamEvidenceStatus = 'STEAM_VERIFIED';
+        steamQualityGatePassed = true;
+      }
+    }
 
     const finalEligible =
       passedQualityGate &&
       metadataStatus === 'VALID' &&
       platformStatus === 'SUPPORTED' &&
       dedupeStatus === 'NEW' &&
-      trailerStatus === 'PLAYABLE_TRAILER';
+      trailerStatus === 'PLAYABLE_TRAILER' &&
+      (!hasSteam || steamQualityGatePassed === true);
 
     // Disjoint bucket classification
     let bucket: AcquisitionBucket;
@@ -913,9 +1189,24 @@ export class CatalogAcquisitionService {
         rejectionReason = 'ineligible';
       } else if (!passedQualityGate) {
         rejectionReason = 'insufficientQuality';
-      } else {
+      } else if (trailerStatus !== 'PLAYABLE_TRAILER') {
         rejectionReason = 'noTrailer';
+      } else if (hasSteam) {
+        if (steamEvidenceStatus === 'STEAM_EVIDENCE_UNAVAILABLE') {
+          rejectionReason = 'steamEvidenceUnavailable';
+        } else if (
+          steamReviewCount !== undefined &&
+          steamReviewCount < STEAM_QUALITY_GATE_CONFIG.minReviewCount
+        ) {
+          rejectionReason = 'insufficientSteamReviews';
+        } else if (
+          steamPositivePercentage !== undefined &&
+          steamPositivePercentage < STEAM_QUALITY_GATE_CONFIG.minPositivePercentage
+        ) {
+          rejectionReason = 'poorSteamRating';
+        }
       }
+      rejectionReason = rejectionReason ?? 'insufficientQuality';
     }
 
     const clusterList = Array.from(foundClusters);
@@ -948,8 +1239,12 @@ export class CatalogAcquisitionService {
         : undefined,
       disqualifiedVideoCount,
       validVideoCount,
-      steamAppId,
+      steamAppId: effectiveSteamAppId,
       steamAppIds,
+      steamReviewCount,
+      steamPositivePercentage,
+      steamQualityGatePassed,
+      steamEvidenceStatus,
       dedupeStatus,
       dedupeReason,
       passedQualityGate,
