@@ -21,6 +21,9 @@ import {
   type DedupeStatus,
   type MetadataStatus,
 } from './catalog-hygiene.service.js';
+import type { GameSyncService } from './game-sync.service.js';
+import type { NormalizedGame } from '../games/normalized-game.js';
+import { mapIgdbGame } from '../integrations/igdb/igdb.mapper.js';
 
 export type TrailerStatus = 'PLAYABLE_TRAILER' | 'VIDEO_PRESENT_BUT_DISQUALIFIED' | 'NO_VIDEO';
 export type AcquisitionBucket = 'ALREADY_EXISTS' | 'AMBIGUOUS' | 'REJECTED' | 'READY';
@@ -65,6 +68,7 @@ export interface EvaluatedCandidate {
   finalEligible: boolean;
   bucket: AcquisitionBucket;
   rejectionReason?: AcquisitionRejectionReason;
+  raw?: any;
 }
 
 export interface RejectionReasonCounts {
@@ -121,9 +125,45 @@ export interface IgdbSearchClient {
   search(query: string): Promise<any[]>;
 }
 
+export type CandidateApplyStatus =
+  | 'INSERTED'
+  | 'SKIPPED_ALREADY_EXISTS'
+  | 'SKIPPED_AMBIGUOUS'
+  | 'FAILED';
+
+export interface CandidateApplyResult {
+  igdbId: number;
+  name: string;
+  slug: string;
+  status: CandidateApplyStatus;
+  reason?: string;
+  error?: string;
+}
+
+export interface CatalogAcquisitionApplyResult {
+  requested: number;
+  processed: number;
+  inserted: number;
+  skippedAlreadyExists: number;
+  skippedAmbiguous: number;
+  failed: number;
+  results: CandidateApplyResult[];
+}
+
+export interface CatalogAcquisitionApplyOptions {
+  limit: number;
+  existingCatalog?: Identity[];
+  loadExistingCatalog?: () => Promise<Identity[]>;
+  gameSyncService?: GameSyncService;
+  steamEnricher?: (game: NormalizedGame) => Promise<NormalizedGame | undefined>;
+  candidates?: EvaluatedCandidate[];
+}
+
 export interface CatalogAcquisitionDependencies {
   igdbClient?: IgdbSearchClient;
   loadExistingCatalog?: () => Promise<Identity[]>;
+  gameSyncService?: GameSyncService;
+  steamEnricher?: (game: NormalizedGame) => Promise<NormalizedGame | undefined>;
   log?: (message: string) => void;
 }
 
@@ -140,6 +180,56 @@ export interface CatalogAcquisitionPlanOptions {
   throttleMs?: number;
   clusters?: GenreCluster[];
   bands?: ExposureBand[];
+}
+
+/**
+ * Maps an EvaluatedCandidate to a NormalizedGame suitable for GameSyncService.
+ * Uses raw IGDB data if available, or constructs a typed normalized representation.
+ */
+export function candidateToNormalizedGame(candidate: EvaluatedCandidate): NormalizedGame {
+  if (candidate.raw) {
+    return mapIgdbGame(candidate.raw);
+  }
+
+  const trailerDetails = candidate.primaryVideoId
+    ? [
+        {
+          provider: 'YOUTUBE' as const,
+          videoId: candidate.primaryVideoId,
+          url:
+            candidate.primaryTrailerUrl ??
+            `https://www.youtube.com/watch?v=${encodeURIComponent(candidate.primaryVideoId)}`,
+          isOfficial: true,
+        },
+      ]
+    : [];
+
+  return {
+    title: candidate.name,
+    slug: candidate.slug,
+    description: candidate.name,
+    rating:
+      candidate.effectiveRating > 10
+        ? candidate.effectiveRating / 10
+        : candidate.effectiveRating,
+    ratingCount: candidate.effectiveVotes,
+    totalRating:
+      candidate.effectiveRating > 10
+        ? candidate.effectiveRating / 10
+        : candidate.effectiveRating,
+    totalRatingCount: candidate.effectiveVotes,
+    igdbId: candidate.igdbId,
+    steamAppId: candidate.steamAppId,
+    ...(candidate.steamAppIds?.length ? { steamAppIds: candidate.steamAppIds } : {}),
+    screenshots: [],
+    trailers: trailerDetails.map((t) => t.url),
+    trailerDetails,
+    genres: candidate.genres,
+    platforms: candidate.platforms as any,
+    releaseDate: candidate.releaseDate ?? undefined,
+    developer: candidate.studio ?? undefined,
+    publisher: candidate.publisher ?? undefined,
+  };
 }
 
 export class CatalogAcquisitionService {
@@ -325,6 +415,182 @@ export class CatalogAcquisitionService {
       trailerSummary,
       gateSummary,
       evaluated: evaluatedList,
+    };
+  }
+
+  /**
+   * Applies controlled ingestion of READY candidates:
+   * 1. Requires explicit positive integer limit (fails closed if omitted or invalid)
+   * 2. Accepts exclusively candidates from READY bucket
+   * 3. Revalidates each candidate against the latest catalog before writing
+   * 4. Skips already existing or ambiguous candidates safely
+   * 5. Delegates persistence to GameSyncService
+   * 6. Isolates single-candidate failures without corrupting other batch candidates
+   * 7. Preserves deterministic order and guarantees idempotency
+   */
+  async apply(
+    manifest: CatalogAcquisitionManifest,
+    options: CatalogAcquisitionApplyOptions,
+  ): Promise<CatalogAcquisitionApplyResult> {
+    if (
+      !options ||
+      typeof options.limit !== 'number' ||
+      !Number.isSafeInteger(options.limit) ||
+      options.limit <= 0
+    ) {
+      throw new Error(
+        'CatalogAcquisitionService.apply: an explicit positive integer "limit" is required.',
+      );
+    }
+
+    // Candidate selection: accept strictly READY candidates
+    let candidatesToProcess: EvaluatedCandidate[];
+    if (options.candidates) {
+      for (const c of options.candidates) {
+        if (c.bucket !== 'READY' || !c.finalEligible) {
+          throw new Error(
+            `CatalogAcquisitionService.apply: candidate "${c.name}" (igdbId: ${c.igdbId}) is not in READY bucket (bucket: ${c.bucket}). Only READY candidates can be ingested.`,
+          );
+        }
+      }
+      candidatesToProcess = options.candidates.slice(0, options.limit);
+    } else {
+      for (const c of manifest.candidates) {
+        if (c.bucket !== 'READY' || !c.finalEligible) {
+          throw new Error(
+            `CatalogAcquisitionService.apply: candidate "${c.name}" is not in READY bucket. Only READY candidates can be ingested.`,
+          );
+        }
+      }
+      candidatesToProcess = manifest.candidates.slice(0, options.limit);
+    }
+
+    const gameSyncService = options.gameSyncService ?? this.dependencies.gameSyncService;
+    if (!gameSyncService) {
+      throw new Error(
+        'CatalogAcquisitionService.apply: GameSyncService must be provided in dependencies or options.',
+      );
+    }
+    const steamEnricher = options.steamEnricher ?? this.dependencies.steamEnricher;
+
+    const loadCatalog = options.loadExistingCatalog ?? this.dependencies.loadExistingCatalog;
+    let workingCatalog: Identity[] = options.existingCatalog
+      ? [...options.existingCatalog]
+      : loadCatalog
+        ? await loadCatalog()
+        : [];
+
+    const results: CandidateApplyResult[] = [];
+    let inserted = 0;
+    let skippedAlreadyExists = 0;
+    let skippedAmbiguous = 0;
+    let failed = 0;
+
+    for (const candidate of candidatesToProcess) {
+      // Refresh catalog dynamically if a loader function is supplied and no static catalog was passed
+      if (loadCatalog && !options.existingCatalog) {
+        try {
+          workingCatalog = await loadCatalog();
+        } catch {
+          // Keep current in-memory workingCatalog if dynamic load fails
+        }
+      }
+
+      // Revalidation against current catalog immediately before write
+      const { dedupeStatus, dedupeReason } = dedupeCandidate(
+        {
+          igdbId: candidate.igdbId,
+          steamAppId: candidate.steamAppId,
+          steamAppIds: candidate.steamAppIds,
+          name: candidate.name,
+          slug: candidate.slug,
+        },
+        workingCatalog,
+      );
+
+      if (dedupeStatus === 'ALREADY_EXISTS') {
+        skippedAlreadyExists++;
+        results.push({
+          igdbId: candidate.igdbId,
+          name: candidate.name,
+          slug: candidate.slug,
+          status: 'SKIPPED_ALREADY_EXISTS',
+          reason: dedupeReason,
+        });
+        continue;
+      }
+
+      if (dedupeStatus === 'AMBIGUOUS') {
+        skippedAmbiguous++;
+        results.push({
+          igdbId: candidate.igdbId,
+          name: candidate.name,
+          slug: candidate.slug,
+          status: 'SKIPPED_AMBIGUOUS',
+          reason: dedupeReason,
+        });
+        continue;
+      }
+
+      // Candidate is confirmed NEW: delegate persistence to GameSyncService
+      const normalized = candidateToNormalizedGame(candidate);
+
+      try {
+        const syncResult = await gameSyncService.sync([normalized], steamEnricher);
+        if (syncResult.rejected && syncResult.rejected > 0) {
+          failed++;
+          results.push({
+            igdbId: candidate.igdbId,
+            name: candidate.name,
+            slug: candidate.slug,
+            status: 'FAILED',
+            error: `GameSync rejected: ${JSON.stringify(syncResult.rejections)}`,
+          });
+        } else {
+          inserted++;
+          results.push({
+            igdbId: candidate.igdbId,
+            name: candidate.name,
+            slug: candidate.slug,
+            status: 'INSERTED',
+          });
+          // Update working catalog so subsequent items in the batch see the newly added game
+          workingCatalog.push({
+            igdbId: candidate.igdbId,
+            steamAppId: candidate.steamAppId,
+            steamAppIds: candidate.steamAppIds,
+            title: candidate.name,
+            name: candidate.name,
+            slug: candidate.slug,
+          });
+        }
+      } catch (err: any) {
+        failed++;
+        results.push({
+          igdbId: candidate.igdbId,
+          name: candidate.name,
+          slug: candidate.slug,
+          status: 'FAILED',
+          error: err.message,
+        });
+      }
+    }
+
+    const totalProcessed = results.length;
+    assert.equal(
+      inserted + skippedAlreadyExists + skippedAmbiguous + failed,
+      totalProcessed,
+      'Sum of apply statuses must equal processed candidate count',
+    );
+
+    return {
+      requested: options.limit,
+      processed: totalProcessed,
+      inserted,
+      skippedAlreadyExists,
+      skippedAmbiguous,
+      failed,
+      results,
     };
   }
 
@@ -691,6 +957,7 @@ export class CatalogAcquisitionService {
       finalEligible,
       bucket,
       rejectionReason,
+      raw,
     };
   }
 }
