@@ -1,4 +1,5 @@
 import type { NormalizedTrailer } from './normalized-game.js';
+import { resolveRatingEvidence } from './game-exposure.js';
 
 export type RejectionReason =
   | 'MOD'
@@ -89,26 +90,14 @@ export const DISCOVERY_SCORING_CONFIG = {
     minFreshnessConfidenceFactor: 0.7,
   },
   discovery: {
-    /** Minimum Bayesian rating to be considered for hidden gem bonus */
-    minRatingForGem: 80,
-    /** Minimum review evidence required before hidden gem ramp begins */
-    minReviewsForGemRamp: 30,
-    /** Review count at which maximum hidden gem bonus is reached */
-    fullReviewsForGem: 100,
-    /** Upper bound for hidden gem category */
-    maxReviewsForGem: 1200,
-    /** Maximum bonus points for hidden gem (calibrated from 15 to 12) */
-    gemMaxBonus: 12,
-    /** Baseline bonus when entering hidden gem ramp */
-    gemMinBonus: 5,
-    /** Threshold for mainstream games */
-    mainstreamReviewThreshold: 5000,
-    /** Moderate stability bonus for mainstream hits */
-    mainstreamBonus: 6,
-    /** Intermediate bonus for established popular games (1200-5000) */
-    moderatePopularityBonus: 8,
-    /** Base discovery bonus for unproven / low-sample titles (< 30 reviews) */
-    unprovenBonus: 4,
+    minAdjustedRating: 78,
+    emergingMinAdjustedRating: 80,
+    emergingMinRating: 80,
+    minRating: 75,
+    emergingMaxBonus: 8,
+    discoveryBonus: 12,
+    midTailBonus: 10,
+    headBonus: 4,
   },
   metadata: {
     /** DIRECT trailer verified and reproducible */
@@ -394,25 +383,9 @@ export function calculateDiscoveryScore(
   // 1. Bayesian Rating Calculation. Prefer the IGDB aggregate pair when both
   // values are valid, then the user-rating pair. A rating without a real count
   // has unknown confidence (v=0); it must not be presented as invented votes.
-  const validPair = (rating: number | null | undefined, count: number | null | undefined) =>
-    rating !== undefined &&
-    rating !== null &&
-    Number.isFinite(rating) &&
-    count !== undefined &&
-    count !== null &&
-    Number.isSafeInteger(count) &&
-    count >= 0;
-  const selectedRating = validPair(candidate.totalRating, candidate.totalRatingCount)
-    ? { rating: candidate.totalRating!, count: candidate.totalRatingCount! }
-    : validPair(candidate.rating, candidate.ratingCount)
-      ? { rating: candidate.rating!, count: candidate.ratingCount! }
-      : null;
-  const rawRating = selectedRating
-    ? selectedRating.rating > 10
-      ? selectedRating.rating
-      : selectedRating.rating * 10
-    : bayesian.defaultRatingIfMissing;
-  const v = selectedRating?.count ?? 0;
+  const evidence = resolveRatingEvidence(candidate);
+  const rawRating = evidence.rating100 ?? bayesian.defaultRatingIfMissing;
+  const v = evidence.effectiveVotes;
 
   const m = bayesian.confidenceThreshold;
   const C = bayesian.baselineRating;
@@ -468,28 +441,16 @@ export function calculateDiscoveryScore(
   );
   const freshnessPoints = rawFreshnessPoints * freshnessConfidenceFactor;
 
-  // 3. Discovery & Hidden Gem Bonus (0–15)
-  let discoveryPoints: number = discovery.unprovenBonus;
-  if (adjustedRating >= discovery.minRatingForGem) {
-    if (v < discovery.minReviewsForGemRamp) {
-      // Very low reviews (< 30): unproven, modest baseline
-      discoveryPoints = discovery.unprovenBonus;
-    } else if (v <= discovery.fullReviewsForGem) {
-      // Smooth linear ramp between 30 and 100 reviews (5 to 12 points)
-      const progress =
-        (v - discovery.minReviewsForGemRamp) /
-        (discovery.fullReviewsForGem - discovery.minReviewsForGemRamp);
-      discoveryPoints =
-        discovery.gemMinBonus + progress * (discovery.gemMaxBonus - discovery.gemMinBonus);
-    } else if (v <= discovery.maxReviewsForGem) {
-      // Verified sweet spot for legitimate hidden gems (100–1200 reviews)
-      discoveryPoints = discovery.gemMaxBonus;
-    } else if (v <= discovery.mainstreamReviewThreshold) {
-      // Well-known quality title (1200–5000 reviews)
-      discoveryPoints = discovery.moderatePopularityBonus;
-    } else {
-      // Hyper-popular AAA (> 5000 reviews)
-      discoveryPoints = discovery.mainstreamBonus;
+  // 3. The ONLY discovery-value term. Few votes alone never earn a bonus.
+  let discoveryPoints = 0;
+  const emerging = evidence.exposureBand === 'EMERGING';
+  if (v >= 10 && rawRating >= (emerging ? discovery.emergingMinRating : discovery.minRating) &&
+      adjustedRating >= (emerging ? discovery.emergingMinAdjustedRating : discovery.minAdjustedRating)) {
+    switch (evidence.exposureBand) {
+      case 'EMERGING': discoveryPoints = discovery.emergingMaxBonus * v / 100; break;
+      case 'DISCOVERY': discoveryPoints = discovery.discoveryBonus; break;
+      case 'MID_TAIL': discoveryPoints = discovery.midTailBonus; break;
+      case 'HEAD': discoveryPoints = discovery.headBonus; break;
     }
   }
 

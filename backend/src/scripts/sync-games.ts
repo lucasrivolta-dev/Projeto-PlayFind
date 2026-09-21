@@ -31,17 +31,30 @@ const query = hasExplicitCli
   : ensureVideoField(process.env.IGDB_SYNC_QUERY ?? buildSyncQuery(cliOptions));
 
 console.log(
-  `Modo: ${cliOptions.mode}${cliOptions.igdbId !== undefined ? `\nIGDB ID: ${cliOptions.igdbId}` : `\nLimite: ${cliOptions.limit}`}`,
+  `Modo: ${cliOptions.mode}${cliOptions.igdbId !== undefined ? `\nIGDB ID: ${cliOptions.igdbId}` : `\nLimite: ${cliOptions.limit}`}${cliOptions.band ? `\nFaixa: ${cliOptions.band}` : ''}${cliOptions.genre ? `\nCluster Gênero: ${cliOptions.genre}` : ''}`,
 );
 console.log('Query IGDB preparada.');
 
-const client = new IgdbClient(required('IGDB_CLIENT_ID'), required('IGDB_CLIENT_SECRET'));
-const rawGames = (await client.search(query)) as IgdbGameDto[];
+const clientId = required('IGDB_CLIENT_ID');
+const clientSecret = required('IGDB_CLIENT_SECRET');
 
-const selectedRawGames =
-  cliOptions.mode === 'discover'
-    ? rankDiscoverCandidates(rawGames as any[]).slice(0, cliOptions.limit)
-    : rawGames;
+const client = new IgdbClient(clientId, clientSecret);
+let rawGames: IgdbGameDto[] = [];
+try {
+  rawGames = (await client.search(query)) as IgdbGameDto[];
+} catch (err: any) {
+  if (cliOptions.dryRun) {
+    console.warn(`[AVISO] Falha na autenticação IGDB: ${err.message}`);
+    console.warn('Verifique se IGDB_CLIENT_SECRET no backend/.env está atualizado na Twitch Developer.');
+    process.exit(1);
+  }
+  throw err;
+}
+
+const isDiscover = cliOptions.mode === 'discover' || cliOptions.band !== undefined;
+const selectedRawGames = isDiscover
+  ? rankDiscoverCandidates(rawGames as any[], cliOptions.band).slice(0, cliOptions.limit)
+  : rawGames;
 
 if (cliOptions.dryRun) {
   const candidates = selectedRawGames.slice(0, cliOptions.limit);
@@ -59,6 +72,8 @@ if (cliOptions.dryRun) {
           igdbId: game.id,
           name: game.name,
           mode: cliOptions.mode,
+          band: cliOptions.band ?? null,
+          genreCluster: cliOptions.genre ?? null,
           releaseDate: game.first_release_date
             ? new Date(game.first_release_date * 1000).toISOString()
             : null,
