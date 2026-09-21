@@ -37,6 +37,23 @@ export type SteamEvidenceStatus =
   | 'STEAM_EVIDENCE_UNAVAILABLE'
   | 'NON_STEAM';
 
+export type SteamExposureBand = 'HIDDEN_GEM' | 'DISCOVERY' | 'ESTABLISHED' | 'MAINSTREAM';
+
+const STEAM_EXPOSURE_BONUS: Record<SteamExposureBand, number> = {
+  HIDDEN_GEM: 8,
+  DISCOVERY: 5,
+  ESTABLISHED: 2,
+  MAINSTREAM: 0,
+};
+
+function steamExposureBandFor(reviewCount: number): SteamExposureBand | undefined {
+  if (reviewCount < STEAM_QUALITY_GATE_CONFIG.minReviewCount) return undefined;
+  if (reviewCount < 1_000) return 'HIDDEN_GEM';
+  if (reviewCount < 10_000) return 'DISCOVERY';
+  if (reviewCount < 50_000) return 'ESTABLISHED';
+  return 'MAINSTREAM';
+}
+
 export type TrailerStatus = 'PLAYABLE_TRAILER' | 'VIDEO_PRESENT_BUT_DISQUALIFIED' | 'NO_VIDEO';
 export type AcquisitionBucket = 'ALREADY_EXISTS' | 'AMBIGUOUS' | 'REJECTED' | 'READY';
 export type AcquisitionRejectionReason =
@@ -78,6 +95,8 @@ export interface EvaluatedCandidate {
   steamAppIds: number[];
   steamReviewCount?: number;
   steamPositivePercentage?: number;
+  steamExposureBand?: SteamExposureBand;
+  discoveryPriority: number;
   steamQualityGatePassed?: boolean;
   steamEvidenceStatus?: SteamEvidenceStatus;
   dedupeStatus: DedupeStatus;
@@ -463,11 +482,13 @@ export class CatalogAcquisitionService {
       `Sum of rejection reason counts (${totalRejectionCount}) must equal total rejected candidates (${buckets.rejected.length})`,
     );
 
-    // Deterministic ranking of READY candidates
+    // Quality remains relevant after the gate; Steam volume represents exposure, not quality.
     const readyCandidates = [...buckets.ready].sort(
       (a, b) =>
+        b.discoveryPriority - a.discoveryPriority ||
         b.adjustedRating - a.adjustedRating ||
-        b.effectiveVotes - a.effectiveVotes ||
+        (a.steamReviewCount ?? Number.MAX_SAFE_INTEGER) -
+          (b.steamReviewCount ?? Number.MAX_SAFE_INTEGER) ||
         a.igdbId - b.igdbId,
     );
 
@@ -1160,6 +1181,25 @@ export class CatalogAcquisitionService {
       }
     }
 
+    const steamExposureBand =
+      steamEvidenceStatus === 'STEAM_VERIFIED' && steamReviewCount !== undefined
+        ? steamExposureBandFor(steamReviewCount)
+        : undefined;
+    const roundedAdjustedRating = Number(adjustedRating.toFixed(2));
+    // A neutral cross-source allowance keeps NON_STEAM in its IGDB ranking order.
+    // The Steam sentiment term is centered on 90% so review count never becomes a quality proxy.
+    const discoveryPriority = Number(
+      (
+        roundedAdjustedRating +
+        (steamExposureBand
+          ? STEAM_EXPOSURE_BONUS[steamExposureBand] +
+            0.35 * ((steamPositivePercentage ?? 90) - 90)
+          : steamEvidenceStatus === 'NON_STEAM'
+            ? 3
+            : 0)
+      ).toFixed(2),
+    );
+
     const finalEligible =
       passedQualityGate &&
       metadataStatus === 'VALID' &&
@@ -1228,7 +1268,7 @@ export class CatalogAcquisitionService {
       effectiveRating: Number(effectiveRating.toFixed(1)),
       effectiveVotes,
       metricSource,
-      adjustedRating: Number(adjustedRating.toFixed(2)),
+      adjustedRating: roundedAdjustedRating,
       exposureBand,
       clusters: clusterList,
       primaryCluster,
@@ -1243,6 +1283,8 @@ export class CatalogAcquisitionService {
       steamAppIds,
       steamReviewCount,
       steamPositivePercentage,
+      steamExposureBand,
+      discoveryPriority,
       steamQualityGatePassed,
       steamEvidenceStatus,
       dedupeStatus,
