@@ -7,38 +7,14 @@ import { PrismaGameRepository } from '../modules/games/prisma-game.repository.js
 import { GameSyncService } from '../modules/sync/game-sync.service.js';
 import { CatalogAcquisitionService } from '../modules/sync/catalog-acquisition.service.js';
 import type { NormalizedGame } from '../modules/games/normalized-game.js';
+import {
+  formatSelectedCanary,
+  parseCatalogAcquisitionApplyArgs,
+  selectExactCanary,
+} from './catalog-acquisition-apply-selection.js';
 
 async function main() {
-  const args = process.argv.slice(2);
-  const applyFlag = args.includes('--apply');
-  const limitArgIndex = args.indexOf('--limit');
-  const snapshotArgIndex = args.indexOf('--snapshot');
-
-  const snapshotPath = snapshotArgIndex >= 0 ? args[snapshotArgIndex + 1] : undefined;
-  if (snapshotArgIndex >= 0 && !snapshotPath) {
-    console.error('ERRO: --snapshot requer um caminho válido.');
-    process.exit(1);
-  }
-
-  // Mandatory --apply flag
-  if (!applyFlag) {
-    console.error('ERRO: Ingestão requer flag explícita --apply para executar gravações.');
-    console.error('Uso: pnpm tsx src/scripts/catalog-acquisition-apply.ts --apply --limit <N> [--snapshot <path>]');
-    process.exit(1);
-  }
-
-  // Mandatory positive integer --limit flag
-  if (limitArgIndex < 0 || limitArgIndex + 1 >= args.length) {
-    console.error('ERRO: Modo de escrita requer argumento explícito --limit <N>.');
-    process.exit(1);
-  }
-
-  const limitRaw = args[limitArgIndex + 1];
-  const limit = Number(limitRaw);
-  if (!/^\d+$/.test(limitRaw) || !Number.isSafeInteger(limit) || limit <= 0) {
-    console.error(`ERRO: --limit deve ser um número inteiro positivo. Recebido: "${limitRaw}".`);
-    process.exit(1);
-  }
+  const { limit, igdbId, snapshotPath } = parseCatalogAcquisitionApplyArgs(process.argv.slice(2));
 
   console.log('='.repeat(80));
   console.log(`NEXTPLAY — CATALOG ACQUISITION APPLY (LIMIT: ${limit})`);
@@ -97,11 +73,18 @@ async function main() {
 
     console.log('\n[1/3] Planejando pool e identificando candidatos READY...');
     const manifest = await service.plan({ snapshotPath });
-    console.log(`-> Pool descoberto: ${manifest.totals.discovered} | READY: ${manifest.totals.ready}`);
+    console.log(
+      `-> Pool descoberto: ${manifest.totals.discovered} | READY: ${manifest.totals.ready}`,
+    );
+
+    const selectedCandidate =
+      igdbId === undefined ? undefined : selectExactCanary(manifest, igdbId);
+    if (selectedCandidate) console.log(`\n${formatSelectedCanary(selectedCandidate)}\n`);
 
     console.log(`\n[2/3] Aplicando ingestão controlada (limite: ${limit})...`);
     const result = await service.apply(manifest, {
       limit,
+      ...(selectedCandidate ? { candidates: [selectedCandidate] } : {}),
       loadExistingCatalog,
       gameSyncService,
       steamEnricher,
