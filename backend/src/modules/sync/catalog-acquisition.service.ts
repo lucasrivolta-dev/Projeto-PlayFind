@@ -25,6 +25,12 @@ import type { GameSyncService } from './game-sync.service.js';
 import type { NormalizedGame } from '../games/normalized-game.js';
 import { mapIgdbGame, rankedIgdbVideos } from '../integrations/igdb/igdb.mapper.js';
 import type { SteamReviewSummary } from '../integrations/steam/steam.types.js';
+import {
+  type CandidateIdentityInfo,
+  type SteamMatchResult,
+} from './steam-matcher.service.js';
+
+export type { CandidateIdentityInfo, SteamMatchResult };
 
 export const STEAM_QUALITY_GATE_CONFIG = {
   minReviewCount: 100,
@@ -220,12 +226,24 @@ export interface CatalogAcquisitionApplyOptions {
   candidates?: EvaluatedCandidate[];
   steamReviews?: Map<number, SteamReviewSummary> | Record<number, SteamReviewSummary>;
   steamReviewProvider?: SteamReviewProvider;
+  steamAppResolver?: SteamAppResolver;
 }
+
+export type SteamMatchResolution = SteamMatchResult | number | undefined;
+
+export type SteamAppResolver = (
+  candidate: CandidateIdentityInfo | string,
+) => Promise<SteamMatchResolution>;
 
 export interface CatalogAcquisitionDependencies {
   igdbClient?: IgdbSearchClient;
-  steamClient?: { reviews(appId: number): Promise<SteamReviewSummary | undefined> };
+  steamClient?: {
+    reviews?(appId: number): Promise<SteamReviewSummary | undefined>;
+    findByName?(name: string): Promise<number | undefined>;
+    resolveConfidentMatch?(candidate: CandidateIdentityInfo): Promise<SteamMatchResult>;
+  };
   steamReviewProvider?: SteamReviewProvider;
+  steamAppResolver?: SteamAppResolver;
   loadExistingCatalog?: () => Promise<Identity[]>;
   gameSyncService?: GameSyncService;
   steamEnricher?: (game: NormalizedGame) => Promise<NormalizedGame | undefined>;
@@ -248,6 +266,7 @@ export interface CatalogAcquisitionPlanOptions {
   steamReviews?: Map<number, SteamReviewSummary> | Record<number, SteamReviewSummary>;
   steamReviewProvider?: SteamReviewProvider;
   steamReviewsCachePath?: string;
+  steamAppResolver?: SteamAppResolver;
 }
 
 /**
@@ -256,7 +275,16 @@ export interface CatalogAcquisitionPlanOptions {
  */
 export function candidateToNormalizedGame(candidate: EvaluatedCandidate): NormalizedGame {
   if (candidate.raw) {
-    return mapIgdbGame(candidate.raw);
+    const mapped = mapIgdbGame(candidate.raw);
+    const steamAppId = candidate.steamAppId ?? mapped.steamAppId;
+    const steamAppIds = candidate.steamAppIds?.length
+      ? candidate.steamAppIds
+      : mapped.steamAppIds;
+    return {
+      ...mapped,
+      steamAppId,
+      ...(steamAppIds?.length ? { steamAppIds } : {}),
+    };
   }
 
   const trailerDetails = candidate.primaryVideoId
@@ -388,11 +416,58 @@ export class CatalogAcquisitionService {
           ...(steamAppIds ?? []),
         ]),
       ];
-      const hasSteam = allAppIds.length > 0;
+      let hasSteam = allAppIds.length > 0;
+
+      // Steam identity resolution: if candidate has no Steam ID from external_games,
+      // check if an authorized resolver can resolve it BEFORE quality gate evaluation.
+      // Must be fail-closed: only CONFIDENT_MATCH attaches steamAppId.
+      if (!hasSteam) {
+        const resolver: SteamAppResolver | undefined =
+          options.steamAppResolver ??
+          this.dependencies.steamAppResolver ??
+          (this.dependencies.steamClient?.resolveConfidentMatch
+            ? ((c: CandidateIdentityInfo | string) =>
+                typeof c === 'string'
+                  ? this.dependencies.steamClient!.findByName
+                    ? this.dependencies.steamClient!.findByName(c)
+                    : Promise.resolve(undefined)
+                  : this.dependencies.steamClient!.resolveConfidentMatch!(c))
+            : this.dependencies.steamClient?.findByName
+              ? ((c: CandidateIdentityInfo | string) =>
+                  this.dependencies.steamClient!.findByName!(typeof c === 'string' ? c : c.name))
+              : undefined);
+        if (resolver) {
+          try {
+            const releaseDate = raw.first_release_date ? new Date(raw.first_release_date * 1000) : null;
+            const metadata = companyMetadata(raw.involved_companies);
+            const candidateInfo: CandidateIdentityInfo = {
+              name: raw.name ?? '',
+              releaseDate,
+              releaseYear: releaseDate ? releaseDate.getUTCFullYear() : null,
+              developer: metadata.developer,
+              publisher: metadata.publisher,
+              platforms: (raw.platforms ?? []).map((p: any) => p.name),
+            };
+
+            const res = await resolver(candidateInfo);
+            if (typeof res === 'object' && res !== null && 'status' in res) {
+              if (res.status === 'CONFIDENT_MATCH' && res.appId && Number.isSafeInteger(res.appId) && res.appId > 0) {
+                allAppIds.push(res.appId);
+                hasSteam = true;
+              }
+            } else if (typeof res === 'number' && Number.isSafeInteger(res) && res > 0) {
+              allAppIds.push(res);
+              hasSteam = true;
+            }
+          } catch {
+            // Resolver failure: candidate remains without Steam ID
+          }
+        }
+      }
 
       let steamReview: SteamReviewSummary | undefined =
         raw.steamReview ?? raw.steam_review;
-      let resolvedSteamAppId: number | undefined = steamAppId;
+      let resolvedSteamAppId: number | undefined = steamAppId ?? allAppIds[0];
 
       if (!steamReview && hasSteam) {
         const candidateReviews: Array<{ appId: number; review: SteamReviewSummary }> = [];
@@ -451,6 +526,7 @@ export class CatalogAcquisitionService {
         referenceTime,
         steamReview,
         resolvedSteamAppId,
+        allAppIds,
       );
       evaluatedList.push(candidate);
 
@@ -704,23 +780,75 @@ export class CatalogAcquisitionService {
       }
 
       // Candidate is confirmed NEW: check defense-in-depth Steam quality gate
-      const isSteam = Boolean(
-        candidate.steamAppId || (candidate.steamAppIds && candidate.steamAppIds.length > 0),
-      );
-      if (isSteam) {
-        let reviewCount = candidate.steamReviewCount;
-        let positivePercentage = candidate.steamPositivePercentage;
-        let qualityPassed = candidate.steamQualityGatePassed;
+      let candidateSteamAppId = candidate.steamAppId;
+      let candidateSteamAppIds = [
+        ...new Set([
+          ...(candidate.steamAppId ? [candidate.steamAppId] : []),
+          ...(candidate.steamAppIds ?? []),
+        ]),
+      ];
 
-        if (qualityPassed === undefined) {
-          const allAppIds = [
-            ...new Set([
-              ...(candidate.steamAppId ? [candidate.steamAppId] : []),
-              ...(candidate.steamAppIds ?? []),
-            ]),
-          ];
+      // Defense-in-depth: if candidate was marked NON_STEAM, verify if a Steam identity now exists or can be resolved
+      // Fail-closed: only CONFIDENT_MATCH can attach a Steam ID
+      if (candidate.steamEvidenceStatus === 'NON_STEAM') {
+        if (candidateSteamAppIds.length === 0) {
+          const resolver: SteamAppResolver | undefined =
+            options.steamAppResolver ??
+            this.dependencies.steamAppResolver ??
+            (this.dependencies.steamClient?.resolveConfidentMatch
+              ? ((c: CandidateIdentityInfo | string) =>
+                  typeof c === 'string'
+                    ? this.dependencies.steamClient!.findByName
+                      ? this.dependencies.steamClient!.findByName(c)
+                      : Promise.resolve(undefined)
+                    : this.dependencies.steamClient!.resolveConfidentMatch!(c))
+              : this.dependencies.steamClient?.findByName
+                ? ((c: CandidateIdentityInfo | string) =>
+                    this.dependencies.steamClient!.findByName!(typeof c === 'string' ? c : c.name))
+                : undefined);
+          if (resolver) {
+            try {
+              const candidateInfo: CandidateIdentityInfo = {
+                name: candidate.name,
+                releaseDate: candidate.releaseDate,
+                releaseYear: candidate.releaseYear,
+                developer: candidate.studio,
+                publisher: candidate.publisher,
+                platforms: candidate.platforms,
+              };
+              const res = await resolver(candidateInfo);
+              let discovered: number | undefined;
+              if (typeof res === 'object' && res !== null && 'status' in res) {
+                if (res.status === 'CONFIDENT_MATCH' && res.appId && Number.isSafeInteger(res.appId) && res.appId > 0) {
+                  discovered = res.appId;
+                }
+              } else if (typeof res === 'number' && Number.isSafeInteger(res) && res > 0) {
+                discovered = res;
+              }
+
+              if (discovered) {
+                candidateSteamAppId = discovered;
+                candidateSteamAppIds.push(discovered);
+              }
+            } catch {
+              // Resolver failed
+            }
+          }
+        }
+      }
+
+      const isSteam = candidateSteamAppIds.length > 0;
+      if (isSteam) {
+        let reviewCount =
+          candidate.steamEvidenceStatus === 'NON_STEAM' ? undefined : candidate.steamReviewCount;
+        let positivePercentage =
+          candidate.steamEvidenceStatus === 'NON_STEAM' ? undefined : candidate.steamPositivePercentage;
+        let qualityPassed =
+          candidate.steamEvidenceStatus === 'NON_STEAM' ? undefined : candidate.steamQualityGatePassed;
+
+        if (qualityPassed === undefined || reviewCount === undefined || positivePercentage === undefined) {
           let bestReview: SteamReviewSummary | undefined;
-          for (const appId of allAppIds) {
+          for (const appId of candidateSteamAppIds) {
             let rev: SteamReviewSummary | undefined;
             if (options.steamReviews instanceof Map) {
               rev = options.steamReviews.get(appId);
@@ -756,7 +884,7 @@ export class CatalogAcquisitionService {
               }
             }
           }
-          if (bestReview) {
+          if (bestReview && typeof bestReview.totalReviews === 'number' && Number.isFinite(bestReview.totalReviews)) {
             reviewCount = bestReview.totalReviews;
             positivePercentage = bestReview.positivePercentage;
             qualityPassed =
@@ -769,7 +897,6 @@ export class CatalogAcquisitionService {
 
         const failsSteamGate =
           qualityPassed !== true ||
-          candidate.steamEvidenceStatus === 'STEAM_EVIDENCE_UNAVAILABLE' ||
           reviewCount === undefined ||
           reviewCount < STEAM_QUALITY_GATE_CONFIG.minReviewCount ||
           positivePercentage === undefined ||
@@ -782,17 +909,39 @@ export class CatalogAcquisitionService {
             name: candidate.name,
             slug: candidate.slug,
             status: 'FAILED',
-            error: `Candidate "${candidate.name}" failed Steam quality gate (reviews: ${reviewCount ?? 'N/A'}, positive: ${positivePercentage ?? 'N/A'}%). Ingestion blocked.`,
+            error: `Candidate "${candidate.name}" ${
+              candidate.steamEvidenceStatus === 'NON_STEAM'
+                ? 'discovered Steam identity but failed Steam quality gate'
+                : 'failed Steam quality gate'
+            } (reviews: ${reviewCount ?? 'N/A'}, positive: ${positivePercentage ?? 'N/A'}%). Ingestion blocked.`,
           });
           continue;
         }
       }
 
-      // Candidate is confirmed NEW: delegate persistence to GameSyncService
-      const normalized = candidateToNormalizedGame(candidate);
+      // Candidate is confirmed NEW and passed all quality gates: delegate persistence to GameSyncService
+      const candidateToPersist =
+        isSteam && candidateSteamAppId && candidate.steamAppId !== candidateSteamAppId
+          ? {
+              ...candidate,
+              steamAppId: candidateSteamAppId,
+              steamAppIds: candidateSteamAppIds,
+            }
+          : candidate;
+      const normalized = candidateToNormalizedGame(candidateToPersist);
+
+      // Safe enricher wrapper: if candidate is genuinely NON_STEAM, never allow steamEnricher to attach an unverified Steam ID
+      const safeSteamEnricher = steamEnricher
+        ? async (game: NormalizedGame) => {
+            if (!isSteam) {
+              return game;
+            }
+            return steamEnricher(game);
+          }
+        : undefined;
 
       try {
-        const syncResult = await gameSyncService.sync([normalized], steamEnricher);
+        const syncResult = await gameSyncService.sync([normalized], safeSteamEnricher);
         if (syncResult.rejected && syncResult.rejected > 0) {
           failed++;
           results.push({
@@ -812,12 +961,12 @@ export class CatalogAcquisitionService {
           });
           // Update working catalog so subsequent items in the batch see the newly added game
           workingCatalog.push({
-            igdbId: candidate.igdbId,
-            steamAppId: candidate.steamAppId,
-            steamAppIds: candidate.steamAppIds,
-            title: candidate.name,
-            name: candidate.name,
-            slug: candidate.slug,
+            igdbId: candidateToPersist.igdbId,
+            steamAppId: candidateToPersist.steamAppId,
+            steamAppIds: candidateToPersist.steamAppIds,
+            title: candidateToPersist.name,
+            name: candidateToPersist.name,
+            slug: candidateToPersist.slug,
           });
         }
       } catch (err: any) {
@@ -987,6 +1136,7 @@ export class CatalogAcquisitionService {
     referenceTime: Date,
     steamReview?: SteamReviewSummary,
     resolvedSteamAppId?: number,
+    allSteamAppIds?: number[],
   ): EvaluatedCandidate {
     const name: string = raw.name ?? '';
     const slug: string = raw.slug ?? '';
@@ -1107,10 +1257,17 @@ export class CatalogAcquisitionService {
       ? 'SUPPORTED'
       : 'UNSUPPORTED_PLATFORM';
 
-    // Steam identities from external_games
-    const { steamAppId, steamAppIds } = steamIdentity(raw.external_games);
-    const effectiveSteamAppId = steamAppId ?? resolvedSteamAppId ?? (steamAppIds?.length ? steamAppIds[0] : undefined);
-    const hasSteam = Boolean(effectiveSteamAppId || (steamAppIds && steamAppIds.length > 0));
+    // Steam identities from external_games or resolved
+    const { steamAppId: rawSteamAppId, steamAppIds: rawSteamAppIds } = steamIdentity(raw.external_games);
+    const effectiveSteamAppId = rawSteamAppId ?? resolvedSteamAppId ?? (rawSteamAppIds?.length ? rawSteamAppIds[0] : undefined);
+    const steamAppIds = [
+      ...new Set([
+        ...(effectiveSteamAppId ? [effectiveSteamAppId] : []),
+        ...(allSteamAppIds ?? []),
+        ...(rawSteamAppIds ?? []),
+      ]),
+    ];
+    const hasSteam = Boolean(effectiveSteamAppId || steamAppIds.length > 0);
 
     // Video & trailer evaluation
     const rawVideos = (raw.videos ?? []) as Array<{ video_id?: string; name?: string }>;

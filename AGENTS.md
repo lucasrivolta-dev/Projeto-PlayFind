@@ -2058,7 +2058,7 @@ Infraestrutura ativa:
 * Banco: Neon PostgreSQL.
 * Render Free pode sofrer cold start.
 
-O catálogo persistido possui **369 jogos**. O histórico controlado foi: primeiro canary real 343 → 344; primeiro lote supervisionado de cinco jogos 344 → 349; Tukoni: Forest Keepers 349 → 350; retomada supervisionada dos 19 candidatos restantes 350 → 369. Essas são contagens de jogos persistidos, distintas dos candidatos READY do planejamento.
+O catálogo persistido possui **379 jogos**. O histórico controlado foi: primeiro canary real 343 → 344; primeiro lote supervisionado de cinco jogos 344 → 349; Tukoni: Forest Keepers 349 → 350; retomada supervisionada dos 19 candidatos restantes 350 → 369; primeiro batch automático real 369 → 379. Essas são contagens de jogos persistidos, distintas dos candidatos READY do planejamento.
 
 Não confundir:
 
@@ -2066,7 +2066,7 @@ Não confundir:
 * quantidade descoberta pelo planning;
 * quantidade READY para possível aquisição.
 
-Na validação read-only mais recente do Catalog Acquisition, já contra os 369 jogos persistidos:
+Na validação read-only imediatamente anterior ao primeiro batch automático real, contra os 369 jogos então persistidos:
 
 * discovered: 727;
 * already existing: 220;
@@ -2132,7 +2132,16 @@ Após essa correção, os 19 candidatos restantes do lote foram retomados e conc
 
 O Catalog Acquisition agora possui batch automático seguro implementado e testado. Ele cria um `BATCH PLAN` com `sessionId`, contagem inicial, limite solicitado e lista congelada; revalida cada candidato; aplica individualmente; valida contagem, identidade, trailer persistido/API e dedupe; e para na primeira falha sem reposição. O limite máximo inicial é 25. O dry-run `--batch --limit N` executa seleção e revalidação sem writer. O apply exige `--batch --apply --limit N`. O modo manual exato por `--igdb-id` permanece disponível.
 
-Após a inclusão da diversidade pós-ranking, um dry-run real read-only de 25 candidatos foi concluído com **PASS**: 25 selecionados, 25 revalidados, zero writers, zero falhas/skips e catálogo 369 → 369. No mesmo pool, o top 25 base tinha Adventure em 21/25 (84%), sequência máxima de 13, `discoveryPriority` média 87,6516 e mínima 85,53. A seleção diversificada passou para Adventure em 14/25 (56%), sequência máxima de 4, média 87,4436 e mínima 84,51. A distribuição de exposure mudou de `HIDDEN_GEM 1 / DISCOVERY 7 / ESTABLISHED 2 / MAINSTREAM 4 / NON_STEAM 11` para `HIDDEN_GEM 1 / DISCOVERY 5 / ESTABLISHED 2 / MAINSTREAM 4 / NON_STEAM 13`. Os 17 primeiros candidatos do ranking base permaneceram no lote; sete candidatos da cauda do top 25 foram adiados, sem mudança de bucket ou hard rejection. Os gates Steam continuam em 100 reviews e 80% positivas. Nenhum batch real foi executado após essa mudança.
+Após a inclusão da diversidade pós-ranking, um dry-run real read-only de 25 candidatos foi concluído com **PASS**: 25 selecionados, 25 revalidados, zero writers, zero falhas/skips e catálogo 369 → 369. No mesmo pool, o top 25 base tinha Adventure em 21/25 (84%), sequência máxima de 13, `discoveryPriority` média 87,6516 e mínima 85,53. A seleção diversificada passou para Adventure em 14/25 (56%), sequência máxima de 4, média 87,4436 e mínima 84,51. A distribuição de exposure mudou de `HIDDEN_GEM 1 / DISCOVERY 7 / ESTABLISHED 2 / MAINSTREAM 4 / NON_STEAM 11` para `HIDDEN_GEM 1 / DISCOVERY 5 / ESTABLISHED 2 / MAINSTREAM 4 / NON_STEAM 13`. Os 17 primeiros candidatos do ranking base permaneceram no lote; sete candidatos da cauda do top 25 foram adiados, sem mudança de bucket ou hard rejection. Os gates Steam continuam em 100 reviews e 80% positivas.
+
+O primeiro batch automático real foi executado com limite autorizado de 10 e concluído com **PASS**: 10 processados, 10 inseridos, zero skips, zero ambiguidades e zero falhas; contagem 369 → 379. A distribuição por exposure band foi `HIDDEN_GEM 0 / DISCOVERY 0 / ESTABLISHED 1 / MAINSTREAM 1 / NON_STEAM 8`. O mecanismo de stop-on-first-failure permaneceu ativo e não foi acionado. Para todos os 10 candidatos, `planned primary = persisted primary = API primary`, o incremento individual foi exatamente +1 e o dedupe read-only posterior retornou `ALREADY_EXISTS`. Não houve fallback nem segundo apply do mesmo candidato. O estado atual do catálogo é 379 jogos persistidos.
+
+O caso Overwatch (IGDB ID `8173`) revelou que um jogo sem vínculo Steam em `external_games` do IGDB entrava no `plan()` como `NON_STEAM` e, durante a etapa de enriquecimento no sync, recebia um Steam ID (`2357570`) via busca por título, sendo persistido sem ter passado pelo Steam Quality Gate. Como Overwatch 2 possui 423k reviews com 31,75% positivas na Steam, tratou-se de um bypass involuntário. A auditoria e correção estabeleceram as seguintes regras permanentes:
+
+* **Resolução Prévia Obrigatória**: A identidade Steam deve estar resolvida antes da classificação final entre `STEAM_VERIFIED` e `NON_STEAM`. O `plan()` utiliza resolver autorizado (via cache/in-memory index) para verificar a existência de Steam App ID antes de classificar um candidato como `NON_STEAM`.
+* **Proibição de Bypass via NON_STEAM**: Candidatos classificados como `NON_STEAM` não podem contornar o Quality Gate. Se qualquer identidade Steam for descoberta tardiamente (entre plan e apply, na revalidação do batch ou durante o apply), ela obriga a execução imediata do Steam Quality Gate (mínimo de 100 reviews e 80% positivas).
+* **Fail-Closed em Ausência de Evidência**: Caso uma identidade Steam seja descoberta mas suas reviews estejam indisponíveis ou o provider falhe, o candidato é marcado como `STEAM_EVIDENCE_UNAVAILABLE` e rejeitado imediatamente, bloqueando a escrita.
+* **Defesa em Profundidade no Apply e Batch**: O executor `apply()` e o `batch revalidate` verificam se candidatos `NON_STEAM` possuem ou descobriram Steam IDs antes de chamar `gameSyncService`. O `steamEnricher` durante a aquisição é blindado por um wrapper seguro que nunca anexa Steam App IDs arbitrários a jogos genuinamente `NON_STEAM`, e a verificação pós-escrita (`readPersisted`) rejeita registros que apresentem `steamAppId` não-nulo para candidatos adquiridos como `NON_STEAM`.
 
 Tratamento atual de cold start do Feed, conforme implementação validada:
 
@@ -2342,3 +2351,19 @@ Estado, limitações, endpoints e comandos estão em `backend/PRICE_PROVIDERS.md
 Por enquanto, somente preços reais da Steam estão ativos no produto. PlayStation, Xbox e Nintendo continuam como plataformas disponíveis e preferências de recomendação, mas suas ofertas e providers não devem ser ativados nem apresentados na UI. A Home só exibe preço quando há `SteamOffer` real. A tela de detalhes separa plataformas disponíveis de preço/loja e mostra somente Steam, com preço atual, preço original em promoção, desconto e ação `Abrir Steam`.
 
 Preservar `StoreOffer`, `UserPlatformPreference`, PlatPrices, NTPrices e a arquitetura multi-store para uma decisão futura. Não inventar preços nem exibir `Preço indisponível` para consoles como se suas integrações estivessem ativas.
+
+---
+
+# 50. RESOLUÇÃO DE IDENTIDADE STEAM & CONFIDENT MATCHING — 2026-09-22
+
+Resultado de busca na Steam (ex: via nome ou `findByName`) NÃO é identidade confirmada.
+
+O resolver de identidade Steam (`SteamMatcherService` / `steamClient.resolveConfidentMatch`) é estritamente conservador e fail-closed:
+
+* Classificação tripartite: `CONFIDENT_MATCH`, `AMBIGUOUS`, `NO_MATCH`.
+* Sequels, prequels, remakes, remasters, spin-offs, DLCs, demos, soundtracks, bundles e jogos homônimos não podem ser associados apenas por semelhança de nome.
+* Somente `CONFIDENT_MATCH` pode anexar `steamAppId` ao candidato e encaminhá-lo para o Steam Quality Gate.
+* Candidatos classificados como `AMBIGUOUS` ou `NO_MATCH` não recebem `steamAppId`, não recebem reviews externas de outro produto e permanecem tratados de forma neutra como `NON_STEAM` (avaliados puramente pela evidência e qualidade IGDB).
+* O Steam Quality Gate (mínimo de 100 avaliações globais e 80% positivas com `language=all` e `purchase_type=all`) é aplicado exclusivamente após confirmação de identidade Steam (`CONFIDENT_MATCH` ou identidade nativa em `external_games`).
+* Fixture conhecida: IGDB `Overwatch` (ID 8173, lançado em 2016) vs Steam `Overwatch 2` (App ID 2357570, lançado em 2023) é um falso match comprovado (diferença temporal de 7 anos e divergência de produto). A nova regra classifica o par como `NO_MATCH`, bloqueando a associação do App ID 2357570 ao Overwatch original.
+* Novos batches de catálogo permanecem suspensos até que a validação de confiança de identidade seja concluída e auditada.

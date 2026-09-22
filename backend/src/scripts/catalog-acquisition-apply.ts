@@ -7,7 +7,7 @@ import { PrismaGameRepository } from '../modules/games/prisma-game.repository.js
 import { GameService } from '../modules/games/game.service.js';
 import { describeTrailer } from '../modules/games/normalized-game.js';
 import { GameSyncService } from '../modules/sync/game-sync.service.js';
-import { CatalogAcquisitionService } from '../modules/sync/catalog-acquisition.service.js';
+import { CatalogAcquisitionService, type EvaluatedCandidate } from '../modules/sync/catalog-acquisition.service.js';
 import {
   createCatalogAcquisitionBatchPlan,
   formatCatalogAcquisitionBatchPlan,
@@ -62,9 +62,7 @@ async function main() {
           game.steamAppId ??
           (game.steamAppIds?.length
             ? await steamClient.resolvePrimaryApp(game.title, game.steamAppIds)
-            : steamKey
-              ? await steamClient.findByName(game.title)
-              : undefined);
+            : undefined);
         if (!appId) return game;
         const details = await steamClient.details(appId);
         return enrichWithSteam(game, appId, details);
@@ -80,15 +78,27 @@ async function main() {
       return dbGames;
     };
 
+    const steamAppResolver = steamKey
+      ? (c: any) =>
+          typeof c === 'string'
+            ? steamClient.findByName(c)
+            : steamClient.resolveConfidentMatch(c)
+      : undefined;
+
     const service = new CatalogAcquisitionService({
       igdbClient: client,
       loadExistingCatalog,
       gameSyncService,
       steamEnricher,
+      steamClient,
+      steamAppResolver,
     });
 
     console.log('\n[1/3] Planejando pool e identificando candidatos READY...');
-    const manifest = await service.plan({ snapshotPath });
+    const manifest = await service.plan({
+      snapshotPath,
+      steamAppResolver,
+    });
     console.log(
       `-> Pool descoberto: ${manifest.totals.discovered} | READY: ${manifest.totals.ready}`,
     );
@@ -125,6 +135,26 @@ async function main() {
                 ...candidate.steamAppIds,
               ]),
             ];
+
+            // If candidate was marked NON_STEAM, verify if a Steam ID is discoverable with confident matching
+            if (appIds.length === 0 && candidate.steamEvidenceStatus === 'NON_STEAM' && steamKey) {
+              try {
+                const matchResult = await steamClient.resolveConfidentMatch({
+                  name: candidate.name,
+                  releaseDate: candidate.releaseDate,
+                  releaseYear: candidate.releaseYear,
+                  developer: candidate.studio,
+                  publisher: candidate.publisher,
+                  platforms: candidate.platforms,
+                });
+                if (matchResult.status === 'CONFIDENT_MATCH' && matchResult.appId) {
+                  appIds.push(matchResult.appId);
+                }
+              } catch {
+                // Ignore resolution failure; appIds remains empty
+              }
+            }
+
             let steamQualityGatePassed = true;
             let steamReason: string | undefined;
             if (appIds.length > 0) {
@@ -158,20 +188,15 @@ async function main() {
               finalEligible:
                 candidate.bucket === 'READY' &&
                 candidate.finalEligible === true &&
-                candidate.dedupeStatus === 'NEW',
+                steamQualityGatePassed,
               steamQualityGatePassed,
               reason: dedupe.dedupeReason ?? steamReason,
             };
           },
-          applyCandidate: async (item) =>
+          applyCandidate: (item) =>
             service.apply(manifest, {
               limit: 1,
-              candidates: [
-                item.candidate as import('../modules/sync/catalog-acquisition.service.js').EvaluatedCandidate,
-              ],
-              loadExistingCatalog,
-              gameSyncService,
-              steamEnricher,
+              candidates: [item.candidate as EvaluatedCandidate],
             }),
           readPersisted: async (item) => {
             const candidate = item.candidate;
@@ -188,7 +213,9 @@ async function main() {
                 record.igdbId === candidate.igdbId &&
                 record.title === candidate.name &&
                 record.slug === candidate.slug &&
-                (candidate.steamAppId === undefined || record.steamAppId === candidate.steamAppId),
+                (candidate.steamAppId === undefined
+                  ? (candidate.steamEvidenceStatus === 'NON_STEAM' ? record.steamAppId === null : true)
+                  : record.steamAppId === candidate.steamAppId),
               ),
               primaryVideoId: primaryMedia ? describeTrailer(primaryMedia.url).videoId : undefined,
             };

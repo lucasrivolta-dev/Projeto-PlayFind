@@ -1,7 +1,15 @@
 import type { SteamAppDetailsDto, SteamReviewSummary } from './steam.types.js';
 import { isEligibleForCatalog } from '../../games/game-eligibility.js';
+import {
+  matchSteamCandidate,
+  normalizeTitle,
+  stripEditionSuffix,
+  type CandidateIdentityInfo,
+  type SteamAppCandidateInfo,
+  type SteamMatchResult,
+} from '../../sync/steam-matcher.service.js';
 
-export type { SteamReviewSummary };
+export type { SteamReviewSummary, CandidateIdentityInfo, SteamMatchResult };
 
 export const STEAM_REQUEST_MIN_INTERVAL_MS = 250;
 export const STEAM_DEFAULT_MAX_RETRIES = 3;
@@ -281,6 +289,96 @@ export class SteamClient {
     if (exactMatches.length === 1) return exactMatches[0].id;
     if (exactMatches.length > 1) return undefined;
     return usable.length === 1 ? usable[0].id : undefined;
+  }
+
+  async resolveConfidentMatch(
+    candidate: CandidateIdentityInfo,
+  ): Promise<SteamMatchResult> {
+    if (!this.apiKey || this.appListFailed) {
+      return { status: 'NO_MATCH', reasons: ['Steam API indisponível ou sem chave'] };
+    }
+
+    const index = await this.getAppIndex();
+    if (!index) {
+      return { status: 'NO_MATCH', reasons: ['Índice de apps Steam indisponível'] };
+    }
+
+    const norm = normalizeTitle(candidate.name);
+    if (!norm) {
+      return { status: 'NO_MATCH', reasons: ['Nome do candidato vazio ou inválido'] };
+    }
+
+    // Lookup by exact normalized name and by base title without edition
+    const { base: candidateBase } = stripEditionSuffix(norm);
+    const candidateIds = new Set<number>();
+
+    const directMatches = index.get(norm);
+    if (directMatches) {
+      for (const id of directMatches) candidateIds.add(id);
+    }
+    if (candidateBase !== norm) {
+      const baseMatches = index.get(candidateBase);
+      if (baseMatches) {
+        for (const id of baseMatches) candidateIds.add(id);
+      }
+    }
+
+    if (candidateIds.size === 0) {
+      return { status: 'NO_MATCH', reasons: [`Nenhum app Steam encontrado para "${candidate.name}"`] };
+    }
+
+    const validIds = [...candidateIds].filter((id) => Number.isSafeInteger(id) && id > 0);
+    const evaluatedResults: Array<{ appId: number; result: SteamMatchResult }> = [];
+
+    for (const appId of validIds) {
+      try {
+        const detail = await this.details(appId);
+        const data = detail?.data;
+        if (!data) continue;
+
+        const steamCandidate: SteamAppCandidateInfo = {
+          appId,
+          name: data.name ?? '',
+          type: data.type,
+          releaseDateRaw: data.release_date?.date,
+          developers: data.developers,
+          publishers: data.publishers,
+          isFree: data.is_free,
+        };
+
+        const result = matchSteamCandidate(candidate, steamCandidate);
+        evaluatedResults.push({ appId, result });
+      } catch {
+        // Individual detail failure ignored
+      }
+    }
+
+    const confidentMatches = evaluatedResults.filter((r) => r.result.status === 'CONFIDENT_MATCH');
+    if (confidentMatches.length === 1) {
+      return confidentMatches[0].result;
+    }
+    if (confidentMatches.length > 1) {
+      // Multiple confident matches is ambiguous
+      return {
+        status: 'AMBIGUOUS',
+        reasons: [
+          `Múltiplos matches confiáveis encontrados (${confidentMatches.map((m) => m.appId).join(', ')}): ambiguidade`,
+        ],
+      };
+    }
+
+    const ambiguousMatches = evaluatedResults.filter((r) => r.result.status === 'AMBIGUOUS');
+    if (ambiguousMatches.length > 0) {
+      return {
+        status: 'AMBIGUOUS',
+        reasons: ambiguousMatches.flatMap((m) => m.result.reasons),
+      };
+    }
+
+    return {
+      status: 'NO_MATCH',
+      reasons: evaluatedResults.flatMap((r) => r.result.reasons).slice(0, 5),
+    };
   }
 }
 
