@@ -2371,24 +2371,38 @@ O resolver de identidade Steam (`SteamMatcherService` / `steamClient.resolveConf
 
 ---
 
-# 51. INGESTÃO REAL DO BATCH 25 DE CATÁLOGO — 2026-09-22
+# 51. INGESTÃO REAL DOS BATCHES DE CATÁLOGO (PÓS-CONFIDENT MATCHING) — 2026-09-22
 
-O primeiro batch real de 25 títulos após a implementação do Steam Confident Matcher e da remediação de identidade concluiu com sucesso operacional total (`RESULT: PASS`):
+Os batches reais executados após a validação do Steam Confident Matcher e remediação do Overwatch concluíram com sucesso operacional total (`RESULT: PASS`):
 
+### Batch Inicial de 25 Títulos:
 * `CATALOG_COUNT_BEFORE`: 379
-* `CATALOG_COUNT_AFTER`: 404 (+25 novos títulos inseridos, 0 pulados, 0 falhas)
-* `authorized: 25`, `processed: 25`, `inserted: 25`, `failed: 0`, `stoppedAt: N/A`
-* Fail-closed e Stop-on-first-failure: Nenhuma anomalia, colisão ou interrupção durante o processo.
-* Contrato de Trailer: Para todos os 25 candidatos, `planned primary == persisted primary == API primary`.
-* Post-Write Dedupe: Todos os 25 candidatos retornaram `ALREADY_EXISTS` na reavaliação pós-escrita imediata.
-* Confident Matching e Contrato NON_STEAM:
-  * 17 candidatos confirmados na Steam (`CONFIDENT_MATCH`), todos cumprindo com folga o Steam Quality Gate (reviews entre 334 e 517.554; positivas entre 85,93% e 98,44%).
-  * 8 candidatos `NON_STEAM` (consoles Nintendo/Xbox, ex: Super Smash Bros. Ultimate, Xenoblade Chronicles 2, Luigi's Mansion 3, Forza Horizon 2) não receberam `steamAppId` espúrio e persistiram com `steamAppId: null`.
-* Distribuição por banda de exposição:
-  * `NON_STEAM`: 8 títulos (32%)
-  * `DISCOVERY`: 8 títulos (32%)
-  * `ESTABLISHED`: 4 títulos (16%)
-  * `MAINSTREAM`: 4 títulos (16%)
-  * `HIDDEN_GEM`: 1 título (4%)
-* Estado atual persistido do catálogo: 404 jogos.
+* `CATALOG_COUNT_AFTER`: 404 (+25 títulos inseridos, 0 pulados, 0 falhas)
+* `sessionId: 33e9365c-3e45-4fda-8cb4-d71d48c537b0`
+* 17 títulos Steam (`CONFIDENT_MATCH`), 8 `NON_STEAM` (`steamAppId: null`).
+
+### Batch Adicional 1 de 25 Títulos:
+* `CATALOG_COUNT_BEFORE`: 404
+* `CATALOG_COUNT_AFTER`: 429 (+25 títulos inseridos, 0 pulados, 0 falhas)
+* `sessionId: 0a0db8e2-d75f-438a-885e-772e1fb667bf`
+* Distribuição de Bandas: 18 `DISCOVERY`, 3 `NON_STEAM`, 2 `ESTABLISHED`, 2 `MAINSTREAM`, 0 `HIDDEN_GEM`.
+* 22 títulos Steam (`CONFIDENT_MATCH`), 3 `NON_STEAM` (`steamAppId: null`).
+
+### Batch Adicional 2 de 25 Títulos:
+* `CATALOG_COUNT_BEFORE`: 429
+* `CATALOG_COUNT_AFTER`: 454 (+25 títulos inseridos, 0 pulados, 0 falhas)
+* `sessionId: 5b3cee29-9603-4292-bf25-07773dc0d835`
+* Distribuição de Bandas: 18 `DISCOVERY`, 4 `NON_STEAM`, 2 `ESTABLISHED`, 1 `MAINSTREAM`, 1 `HIDDEN_GEM`.
+* 21 títulos Steam (`CONFIDENT_MATCH`), 4 `NON_STEAM` (`steamAppId: null`).
+
+### Resumo Operacional & Contratos:
+* Total de jogos no catálogo persistido: **454 jogos**.
+* Zero mutações não autorizadas, zero SQL manual, zero migrations.
+* Para 100% dos títulos inseridos:
+  * `planned primary == persisted primary == API primary` (contrato de trailer respeitado rigorosamente).
+  * `post-write dedupe == ALREADY_EXISTS`.
+  * Nenhum falso Steam match persistido; títulos `NON_STEAM` mantidos com `steamAppId: null`.
+  * Todos os títulos Steam confirmados cumpriram com folga o Steam Quality Gate (mínimo de 100 reviews globais e 80% positivas).
+* Suite de 350 testes unitários e de integração concluída com 100% PASS.
+
 
