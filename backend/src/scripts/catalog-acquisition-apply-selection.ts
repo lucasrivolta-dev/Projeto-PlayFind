@@ -3,11 +3,18 @@ import {
   type CatalogAcquisitionManifest,
   type EvaluatedCandidate,
 } from '../modules/sync/catalog-acquisition.service.js';
+import {
+  CATALOG_ACQUISITION_BATCH_MAX_LIMIT,
+  validateCatalogAcquisitionBatchLimit,
+} from '../modules/sync/catalog-acquisition-batch.js';
 
 export interface CatalogAcquisitionApplyCliOptions {
   limit: number;
   igdbId?: number;
   snapshotPath?: string;
+  batch: boolean;
+  apply: boolean;
+  dryRun: boolean;
 }
 
 export function parseCatalogAcquisitionApplyArgs(
@@ -19,8 +26,8 @@ export function parseCatalogAcquisitionApplyArgs(
 
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
-    if (arg === '--apply') {
-      if (flags.has(arg)) throw new Error('ERRO: --apply duplicado.');
+    if (arg === '--apply' || arg === '--batch') {
+      if (flags.has(arg)) throw new Error(`ERRO: ${arg} duplicado.`);
       flags.add(arg);
       continue;
     }
@@ -33,12 +40,8 @@ export function parseCatalogAcquisitionApplyArgs(
     values.set(arg, value);
   }
 
-  if (!flags.has('--apply')) {
-    throw new Error('ERRO: Ingestão requer flag explícita --apply para executar gravações.');
-  }
-
   const limitRaw = values.get('--limit');
-  if (!limitRaw) throw new Error('ERRO: Modo de escrita requer argumento explícito --limit <N>.');
+  if (!limitRaw) throw new Error('ERRO: Execução requer argumento explícito --limit <N>.');
   const limit = Number(limitRaw);
   if (!/^\d+$/.test(limitRaw) || !Number.isSafeInteger(limit) || limit <= 0) {
     throw new Error(`ERRO: --limit deve ser um número inteiro positivo. Recebido: "${limitRaw}".`);
@@ -51,10 +54,46 @@ export function parseCatalogAcquisitionApplyArgs(
     if (!/^\d+$/.test(igdbIdRaw) || !Number.isSafeInteger(igdbId) || igdbId <= 0) {
       throw new Error(`ERRO: --igdb-id deve ser um inteiro positivo. Recebido: "${igdbIdRaw}".`);
     }
-    if (limit !== 1) throw new Error('ERRO: --igdb-id exige --limit 1.');
   }
 
-  return { limit, igdbId, snapshotPath: values.get('--snapshot') };
+  const batch = flags.has('--batch');
+  const apply = flags.has('--apply');
+  if (batch) {
+    try {
+      validateCatalogAcquisitionBatchLimit(limit);
+    } catch {
+      throw new Error(
+        `ERRO: --batch exige --limit entre 1 e ${CATALOG_ACQUISITION_BATCH_MAX_LIMIT}.`,
+      );
+    }
+    if (igdbId !== undefined) {
+      throw new Error('ERRO: --batch não pode ser combinado com --igdb-id.');
+    }
+    return {
+      limit,
+      snapshotPath: values.get('--snapshot'),
+      batch: true,
+      apply,
+      dryRun: !apply,
+    };
+  }
+
+  if (!apply) {
+    throw new Error('ERRO: Ingestão manual requer flag explícita --apply.');
+  }
+  if (igdbId === undefined) {
+    throw new Error('ERRO: Modo manual requer seleção explícita --igdb-id <ID>.');
+  }
+  if (limit !== 1) throw new Error('ERRO: --igdb-id exige --limit 1.');
+
+  return {
+    limit,
+    igdbId,
+    snapshotPath: values.get('--snapshot'),
+    batch: false,
+    apply: true,
+    dryRun: false,
+  };
 }
 
 export function selectExactCanary(

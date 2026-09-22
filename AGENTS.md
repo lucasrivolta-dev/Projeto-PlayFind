@@ -1827,6 +1827,20 @@ Regras obrigatórias para aquisição real:
 
 Para operações canary, `--limit 1` sozinho não é suficiente se não houver garantia de identidade do candidato auditado. O CLI deve ser capaz de fixar explicitamente o candidato antes de permitir uma escrita supervisionada.
 
+O modo manual exato continua disponível com `--apply --limit 1 --igdb-id <id>`. O CLI rejeita apply manual com múltiplos candidatos ou sem `--igdb-id`.
+
+O modo batch seguro exige a flag explícita `--batch`, possui limite inicial entre 1 e 25 e congela os candidatos selecionados do manifest antes de qualquer escrita. A seleção preserva estritamente a ordem determinística de `manifest.candidates`; não cria quotas, não muda o ranking e não substitui candidatos durante a execução.
+
+Sintaxes oficiais:
+
+* dry-run batch, sem escrita: `--batch --limit <1-25>`;
+* apply batch: `--batch --apply --limit <1-25>`;
+* seleção manual exata: `--apply --limit 1 --igdb-id <id>`.
+
+Antes de cada write do batch, revalidar identidade, dedupe, `finalEligible` e o Steam Quality Gate global. Depois de cada write, exigir incremento exato de uma unidade na contagem, igualdade entre primary trailer planejado/persistido/API e dedupe read-only `ALREADY_EXISTS`.
+
+O batch é stop-on-first-failure e não possui fallback: se o candidato N falhar ou mudar para ALREADY_EXISTS/AMBIGUOUS, os candidatos posteriores do snapshot congelado não são processados e nenhum candidato fora da seleção entra como substituto.
+
 Não usar SQL manual ou `Prisma.create()` ad hoc para contornar esse fluxo.
 
 O caminho oficial de escrita é:
@@ -2042,7 +2056,7 @@ Infraestrutura ativa:
 * Banco: Neon PostgreSQL.
 * Render Free pode sofrer cold start.
 
-O catálogo persistido possuía **344 jogos** após o primeiro canary real de Catalog Acquisition (343 → 344). Após o primeiro lote supervisionado de cinco inserções individuais, a contagem consultada passou de 344 para **349 jogos**. Essas são contagens de jogos persistidos, distintas dos 413 candidatos READY do snapshot de planejamento abaixo.
+O catálogo persistido possui **369 jogos**. O histórico controlado foi: primeiro canary real 343 → 344; primeiro lote supervisionado de cinco jogos 344 → 349; Tukoni: Forest Keepers 349 → 350; retomada supervisionada dos 19 candidatos restantes 350 → 369. Essas são contagens de jogos persistidos, distintas dos candidatos READY do planejamento.
 
 Não confundir:
 
@@ -2050,27 +2064,27 @@ Não confundir:
 * quantidade descoberta pelo planning;
 * quantidade READY para possível aquisição.
 
-Na validação read-only mais recente do Catalog Acquisition:
+Na validação read-only mais recente do Catalog Acquisition, já contra os 369 jogos persistidos:
 
 * discovered: 727;
-* already existing: 194;
-* ambiguous: 33;
+* already existing: 220;
+* ambiguous: 35;
 * rejected: 87;
-* READY: 413.
+* READY: 385.
 
-Dos 413 READY:
+Dos 385 READY:
 
-* HIDDEN_GEM: 8;
-* DISCOVERY: 174;
+* HIDDEN_GEM: 3;
+* DISCOVERY: 151;
 * ESTABLISHED: 113;
 * MAINSTREAM: 45;
 * NON_STEAM: 73.
 
-Esses números são snapshot de planejamento/auditoria e não significam que 413 jogos já estejam persistidos.
+Esses números são snapshot de planejamento/auditoria e não significam que 385 jogos já estejam persistidos.
 
 O ranking discovery-first reduziu a dominância de mainstream sem criar exclusão por popularidade.
 
-Na validação:
+No snapshot histórico anterior às inserções supervisionadas, a distribuição de topo era:
 
 Top 20:
 * HIDDEN_GEM: 4;
@@ -2093,7 +2107,7 @@ Top 100:
 * MAINSTREAM: 6;
 * NON_STEAM: 17.
 
-Não tentar forçar quota de hidden gems quando o pool não possuir candidatos suficientes. Na validação atual existem apenas 8 HIDDEN_GEM entre os 413 READY.
+Não tentar forçar quota de hidden gems quando o pool não possuir candidatos suficientes. Na validação atual existem apenas 3 HIDDEN_GEM entre os 385 READY.
 
 Nunca reduzir o piso de qualidade apenas para atingir composição percentual.
 
@@ -2109,6 +2123,12 @@ Nenhum segundo candidato foi processado e nenhum segundo apply foi executado. N�
 Operações supervisionadas posteriores devem continuar fixando explicitamente o IGDB ID auditado e não podem selecionar outro candidato como fallback.
 
 O primeiro lote supervisionado processou e inseriu exatamente cinco jogos, cada um com `--apply --limit 1 --igdb-id <id>`: Fuga: Melodies of Steel 2 (`212264`), Ghost Trick: Phantom Detective (`236660`), Moss: Book II (`154839`), Minishoot' Adventures (`191761`) e Yoku's Island Express (`27367`). A contagem avançou em uma unidade após cada operação (344 → 345 → 346 → 347 → 348 → 349); o dedupe read-only posterior de cada jogo retornou `ALREADY_EXISTS`. Nenhum candidato de fallback foi processado.
+
+Tukoni: Forest Keepers (`141273`) foi inserido individualmente e levou a contagem de 349 para 350. A divergência observada entre o primary trailer do plan e o primary persistido/API revelou duas ordenações diferentes de vídeos IGDB. A correção passou a compartilhar `rankedIgdbVideos()` entre planejamento e mapper/normalização e adicionou desempate persistente por `sortOrder ASC, id ASC` nas leituras relevantes.
+
+Após essa correção, os 19 candidatos restantes do lote foram retomados e concluídos com **PASS**: 19 processados, 19 inseridos, zero skips, zero ambiguidades e zero falhas. A contagem avançou de 350 para 369. Em todos os 19, `plan primary = persisted primary = API primary`, o incremento foi exatamente +1 e o dedupe read-only posterior retornou `ALREADY_EXISTS`. Tukoni não foi reprocessado e nenhum fallback foi usado.
+
+O Catalog Acquisition agora possui batch automático seguro implementado e testado. Ele cria um `BATCH PLAN` com `sessionId`, contagem inicial, limite solicitado e lista congelada; revalida cada candidato; aplica individualmente; valida contagem, identidade, trailer persistido/API e dedupe; e para na primeira falha sem reposição. O limite máximo inicial é 25. O dry-run `--batch --limit N` executa seleção e revalidação sem writer. O apply exige `--batch --apply --limit N`. O modo manual exato por `--igdb-id` permanece disponível.
 
 Tratamento atual de cold start do Feed, conforme implementação validada:
 
