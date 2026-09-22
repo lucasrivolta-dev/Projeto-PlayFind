@@ -267,7 +267,7 @@ export class GameService {
       include: {
         genres: { include: { genre: true } },
         platforms: { include: { platform: true } },
-        media: { orderBy: { sortOrder: 'asc' } },
+        media: { orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] },
         steamOffers: { orderBy: { capturedAt: 'desc' }, take: 1 },
         storeOffers: { orderBy: { observedAt: 'desc' } },
       },
@@ -385,7 +385,7 @@ export class GameService {
       include: {
         genres: { include: { genre: true } },
         platforms: { include: { platform: true } },
-        media: { orderBy: { sortOrder: 'asc' } },
+        media: { orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] },
         steamOffers: { orderBy: { capturedAt: 'desc' }, take: 1 },
         storeOffers: { orderBy: { observedAt: 'desc' } },
       },

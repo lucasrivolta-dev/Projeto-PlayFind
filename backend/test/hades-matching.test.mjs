@@ -184,7 +184,7 @@ test('Existing game update persists IGDB YouTube videos and exposes deterministi
   assert.equal(detail.primaryTrailer?.provider, 'YOUTUBE');
   assert.deepEqual(
     detail.trailerDetails.map((item) => item.videoId),
-    ['YZZFlcE0fWE', 'sr__hTXlDZk', '593xCDfumN0', 'Bz8l935Bv0Y'],
+    ['593xCDfumN0', 'Bz8l935Bv0Y', 'sr__hTXlDZk', 'YZZFlcE0fWE'],
   );
   assert.equal(db.records[0].media.length, 4);
 });

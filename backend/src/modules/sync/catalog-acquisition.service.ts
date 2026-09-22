@@ -10,7 +10,6 @@ import {
   type GenreCluster,
 } from '../integrations/igdb/igdb-query.js';
 import {
-  isDisqualifiedTrailer,
   isEligibleForCatalog,
 } from '../games/game-eligibility.js';
 import {
@@ -24,7 +23,7 @@ import {
 } from './catalog-hygiene.service.js';
 import type { GameSyncService } from './game-sync.service.js';
 import type { NormalizedGame } from '../games/normalized-game.js';
-import { mapIgdbGame } from '../integrations/igdb/igdb.mapper.js';
+import { mapIgdbGame, rankedIgdbVideos } from '../integrations/igdb/igdb.mapper.js';
 import type { SteamReviewSummary } from '../integrations/steam/steam.types.js';
 
 export const STEAM_QUALITY_GATE_CONFIG = {
@@ -1113,11 +1112,10 @@ export class CatalogAcquisitionService {
     let disqualifiedVideoCount = 0;
     let primaryVideoId: string | undefined;
 
-    for (const v of rawVideos) {
-      const vid = v.video_id?.trim();
-      if (!vid || !/^[A-Za-z0-9_-]{11}$/.test(vid)) continue;
-      const vname = v.name ?? '';
-      if (isDisqualifiedTrailer(vname)) {
+    for (const video of rankedIgdbVideos(raw.videos)) {
+      const vid = video.videoId;
+      if (!/^[A-Za-z0-9_-]{11}$/.test(vid)) continue;
+      if (video.priority === 99) {
         disqualifiedVideoCount++;
       } else {
         validVideoCount++;
