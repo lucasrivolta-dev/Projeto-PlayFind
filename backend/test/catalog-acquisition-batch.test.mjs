@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  applyCatalogAcquisitionDiversity,
+  CATALOG_ACQUISITION_DIVERSITY_PRIORITY_TOLERANCE,
   createCatalogAcquisitionBatchPlan,
   runCatalogAcquisitionBatch,
 } from '../dist/modules/sync/catalog-acquisition-batch.js';
@@ -322,5 +324,129 @@ test('batch CLI rejects missing/zero limits and accidental manual multi-apply', 
   assert.throws(
     () => parseCatalogAcquisitionApplyArgs(['--apply', '--limit', '20']),
     /seleção explícita --igdb-id/,
+  );
+});
+
+test('M/A — comparable candidates interrupt a dominant fictional genre sequence', () => {
+  const input = [
+    candidate(1, { genres: ['Mythic'], discoveryPriority: 100 }),
+    candidate(2, { genres: ['Mythic'], discoveryPriority: 99.9 }),
+    candidate(3, { genres: ['Mythic'], discoveryPriority: 99.8 }),
+    candidate(4, { genres: ['Logic'], discoveryPriority: 99.7 }),
+    candidate(5, { genres: ['Rhythm'], discoveryPriority: 99.6 }),
+  ];
+  const selected = applyCatalogAcquisitionDiversity(input, 5);
+  assert.equal(selected[0].igdbId, 1);
+  assert.notEqual(selected[1].genres[0], 'Mythic');
+  assert(selected.some((item) => item.igdbId === 2));
+  assert(selected.some((item) => item.igdbId === 3));
+});
+
+test('N/B — quality guard prevents a much weaker diverse candidate from jumping ahead', () => {
+  const input = [
+    candidate(1, { genres: ['Mythic'], discoveryPriority: 100 }),
+    candidate(2, { genres: ['Mythic'], discoveryPriority: 99.8 }),
+    candidate(3, {
+      genres: ['Logic'],
+      discoveryPriority: 99.8 - CATALOG_ACQUISITION_DIVERSITY_PRIORITY_TOLERANCE - 0.01,
+    }),
+  ];
+  const selected = applyCatalogAcquisitionDiversity(input, 3);
+  assert.deepEqual(
+    selected.slice(0, 2).map((item) => item.igdbId),
+    [1, 2],
+  );
+});
+
+test('O/C — diversity selection is deterministic for equivalent shuffled input', () => {
+  const input = Array.from({ length: 12 }, (_, index) =>
+    candidate(index + 1, {
+      genres: [index % 3 === 0 ? 'Mythic' : index % 3 === 1 ? 'Logic' : 'Rhythm'],
+      discoveryPriority: 100 - Math.floor(index / 2) * 0.2,
+    }),
+  );
+  const first = applyCatalogAcquisitionDiversity(input, 10).map((item) => item.igdbId);
+  const second = applyCatalogAcquisitionDiversity([...input].reverse(), 10).map(
+    (item) => item.igdbId,
+  );
+  assert.deepEqual(first, second);
+});
+
+test('P/D — dominant-genre candidates are deferred, never hard rejected', () => {
+  const input = [
+    candidate(1, { genres: ['Mythic'], discoveryPriority: 100 }),
+    candidate(2, { genres: ['Mythic'], discoveryPriority: 99.9 }),
+    candidate(3, { genres: ['Logic'], discoveryPriority: 99.8 }),
+    candidate(4, { genres: ['Mythic'], discoveryPriority: 99.7 }),
+  ];
+  const selected = applyCatalogAcquisitionDiversity(input, input.length);
+  assert.deepEqual(new Set(selected.map((item) => item.igdbId)), new Set([1, 2, 3, 4]));
+  assert(selected.findIndex((item) => item.igdbId === 2) > 0);
+});
+
+test('Q/E — every genre of a multi-genre candidate contributes to pressure', () => {
+  const input = [
+    candidate(1, { genres: ['Repeated'], discoveryPriority: 100 }),
+    candidate(2, { genres: ['Novel', 'Repeated'], discoveryPriority: 99.9 }),
+    candidate(3, { genres: ['Fresh'], discoveryPriority: 99.8 }),
+  ];
+  const selected = applyCatalogAcquisitionDiversity(input, 3);
+  assert.deepEqual(
+    selected.map((item) => item.igdbId),
+    [1, 3, 2],
+  );
+});
+
+test('R/F — diversity rule is generic and contains no production genre names', () => {
+  const input = [
+    candidate(1, { genres: ['Amber'], discoveryPriority: 100 }),
+    candidate(2, { genres: ['Amber'], discoveryPriority: 99.9 }),
+    candidate(3, { genres: ['Cobalt'], discoveryPriority: 99.8 }),
+  ];
+  assert.deepEqual(
+    applyCatalogAcquisitionDiversity(input, 3).map((item) => item.genres[0]),
+    ['Amber', 'Cobalt', 'Amber'],
+  );
+});
+
+test('S/G — diversity supports batch limits 1, 5, 10 and 25', () => {
+  const input = Array.from({ length: 30 }, (_, index) =>
+    candidate(index + 1, {
+      genres: [`Genre ${index % 5}`],
+      discoveryPriority: 100 - index * 0.05,
+    }),
+  );
+  for (const limit of [1, 5, 10, 25]) {
+    const selected = applyCatalogAcquisitionDiversity(input, limit);
+    assert.equal(selected.length, limit);
+    assert.equal(new Set(selected.map((item) => item.igdbId)).size, limit);
+  }
+});
+
+test('T/H — representative top-25 fixture reduces concentration without material score loss', () => {
+  const input = Array.from({ length: 35 }, (_, index) => {
+    const baseGenre =
+      index < 25 && ![4, 9, 14, 19].includes(index) ? 'Mythic' : `Diverse ${index % 7}`;
+    return candidate(index + 1, {
+      genres: [baseGenre, ...(index % 6 === 0 ? ['Secondary'] : [])],
+      discoveryPriority: 100 - index * 0.1,
+    });
+  });
+  const before = input.slice(0, 25);
+  const after = applyCatalogAcquisitionDiversity(input, 25);
+  const countGenre = (items, genre) => items.filter((item) => item.genres.includes(genre)).length;
+  const average = (items) =>
+    items.reduce((sum, item) => sum + item.discoveryPriority, 0) / items.length;
+
+  assert.equal(countGenre(before, 'Mythic'), 21);
+  assert(countGenre(after, 'Mythic') < 21);
+  assert(average(after) >= average(before) - 1);
+  assert(
+    after.some((item) => item.igdbId === 1),
+    'strongest candidate must remain selected',
+  );
+  assert(
+    before.slice(0, 17).every((item) => after.some((selected) => selected.igdbId === item.igdbId)),
+    'the quality head must remain inside a batch of 25',
   );
 });

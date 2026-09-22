@@ -1829,7 +1829,9 @@ Para operações canary, `--limit 1` sozinho não é suficiente se não houver g
 
 O modo manual exato continua disponível com `--apply --limit 1 --igdb-id <id>`. O CLI rejeita apply manual com múltiplos candidatos ou sem `--igdb-id`.
 
-O modo batch seguro exige a flag explícita `--batch`, possui limite inicial entre 1 e 25 e congela os candidatos selecionados do manifest antes de qualquer escrita. A seleção preserva estritamente a ordem determinística de `manifest.candidates`; não cria quotas, não muda o ranking e não substitui candidatos durante a execução.
+O modo batch seguro exige a flag explícita `--batch`, possui limite inicial entre 1 e 25 e congela os candidatos selecionados do manifest antes de qualquer escrita. O ranking base por `discoveryPriority` e seus desempates permanece canônico. Depois desse ranking, a seleção do batch aplica uma reordenação determinística e genérica por gênero: considera todos os gêneros dos candidatos, uma janela recente de quatro posições e a concentração acumulada do lote. A diversidade não é hard rejection nem quota; candidatos adiados continuam READY no pool.
+
+O quality guard permite uma promoção apenas quando o candidato está no máximo 1,5 ponto de `discoveryPriority` abaixo do candidato canônico daquela posição. Nenhum candidato pode ser adiado por mais de oito posições. A regra não contém hardcodes para Adventure, Puzzle, Indie ou qualquer outro gênero e não altera elegibilidade, exposure bands, Steam evidence, Steam Quality Gate ou a fórmula de `discoveryPriority`.
 
 Sintaxes oficiais:
 
@@ -2129,6 +2131,8 @@ Tukoni: Forest Keepers (`141273`) foi inserido individualmente e levou a contage
 Após essa correção, os 19 candidatos restantes do lote foram retomados e concluídos com **PASS**: 19 processados, 19 inseridos, zero skips, zero ambiguidades e zero falhas. A contagem avançou de 350 para 369. Em todos os 19, `plan primary = persisted primary = API primary`, o incremento foi exatamente +1 e o dedupe read-only posterior retornou `ALREADY_EXISTS`. Tukoni não foi reprocessado e nenhum fallback foi usado.
 
 O Catalog Acquisition agora possui batch automático seguro implementado e testado. Ele cria um `BATCH PLAN` com `sessionId`, contagem inicial, limite solicitado e lista congelada; revalida cada candidato; aplica individualmente; valida contagem, identidade, trailer persistido/API e dedupe; e para na primeira falha sem reposição. O limite máximo inicial é 25. O dry-run `--batch --limit N` executa seleção e revalidação sem writer. O apply exige `--batch --apply --limit N`. O modo manual exato por `--igdb-id` permanece disponível.
+
+Após a inclusão da diversidade pós-ranking, um dry-run real read-only de 25 candidatos foi concluído com **PASS**: 25 selecionados, 25 revalidados, zero writers, zero falhas/skips e catálogo 369 → 369. No mesmo pool, o top 25 base tinha Adventure em 21/25 (84%), sequência máxima de 13, `discoveryPriority` média 87,6516 e mínima 85,53. A seleção diversificada passou para Adventure em 14/25 (56%), sequência máxima de 4, média 87,4436 e mínima 84,51. A distribuição de exposure mudou de `HIDDEN_GEM 1 / DISCOVERY 7 / ESTABLISHED 2 / MAINSTREAM 4 / NON_STEAM 11` para `HIDDEN_GEM 1 / DISCOVERY 5 / ESTABLISHED 2 / MAINSTREAM 4 / NON_STEAM 13`. Os 17 primeiros candidatos do ranking base permaneceram no lote; sete candidatos da cauda do top 25 foram adiados, sem mudança de bucket ou hard rejection. Os gates Steam continuam em 100 reviews e 80% positivas. Nenhum batch real foi executado após essa mudança.
 
 Tratamento atual de cold start do Feed, conforme implementação validada:
 

@@ -31,6 +31,19 @@ export const STEAM_QUALITY_GATE_CONFIG = {
   minPositivePercentage: 80.0,
 } as const;
 
+export function compareCatalogAcquisitionCandidates(
+  a: EvaluatedCandidate,
+  b: EvaluatedCandidate,
+): number {
+  return (
+    b.discoveryPriority - a.discoveryPriority ||
+    b.adjustedRating - a.adjustedRating ||
+    (a.steamReviewCount ?? Number.MAX_SAFE_INTEGER) -
+      (b.steamReviewCount ?? Number.MAX_SAFE_INTEGER) ||
+    a.igdbId - b.igdbId
+  );
+}
+
 export type SteamEvidenceStatus =
   | 'STEAM_VERIFIED'
   | 'STEAM_EVIDENCE_UNAVAILABLE'
@@ -482,14 +495,7 @@ export class CatalogAcquisitionService {
     );
 
     // Quality remains relevant after the gate; Steam volume represents exposure, not quality.
-    const readyCandidates = [...buckets.ready].sort(
-      (a, b) =>
-        b.discoveryPriority - a.discoveryPriority ||
-        b.adjustedRating - a.adjustedRating ||
-        (a.steamReviewCount ?? Number.MAX_SAFE_INTEGER) -
-          (b.steamReviewCount ?? Number.MAX_SAFE_INTEGER) ||
-        a.igdbId - b.igdbId,
-    );
+    const readyCandidates = [...buckets.ready].sort(compareCatalogAcquisitionCandidates);
 
     // Grouping by band and cluster for READY candidates
     const byBand: Record<ExposureBand, EvaluatedCandidate[]> = {

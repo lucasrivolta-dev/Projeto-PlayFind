@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  compareCatalogAcquisitionCandidates,
   STEAM_QUALITY_GATE_CONFIG,
   type CatalogAcquisitionApplyResult,
   type CatalogAcquisitionManifest,
@@ -8,6 +9,118 @@ import {
 import type { DedupeStatus } from './catalog-hygiene.service.js';
 
 export const CATALOG_ACQUISITION_BATCH_MAX_LIMIT = 25;
+export const CATALOG_ACQUISITION_DIVERSITY_WINDOW = 4;
+export const CATALOG_ACQUISITION_DIVERSITY_PRIORITY_TOLERANCE = 1.5;
+export const CATALOG_ACQUISITION_DIVERSITY_MAX_DEFERRAL = 8;
+
+function normalizedGenres(candidate: EvaluatedCandidate): string[] {
+  return [
+    ...new Set(
+      (candidate.genres ?? [])
+        .map((genre) => genre.trim().toLowerCase())
+        .filter((genre) => genre.length > 0),
+    ),
+  ].sort();
+}
+
+function genreCounts(candidates: readonly EvaluatedCandidate[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const candidate of candidates) {
+    for (const genre of normalizedGenres(candidate)) {
+      counts.set(genre, (counts.get(genre) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+function diversityPressure(
+  candidate: EvaluatedCandidate,
+  selected: readonly EvaluatedCandidate[],
+): readonly number[] {
+  if (selected.length === 0) return [0, 0, 0, 0];
+  const genres = normalizedGenres(candidate);
+  if (genres.length === 0) return [1, 1, 1, 0];
+
+  const recent = selected.slice(-CATALOG_ACQUISITION_DIVERSITY_WINDOW);
+  const recentCounts = genreCounts(recent);
+  const overallCounts = genreCounts(selected);
+  const recentDenominator = recent.length + 1;
+  const overallDenominator = selected.length + 1;
+  const recentValues = genres.map((genre) => (recentCounts.get(genre) ?? 0) + 1);
+  const overallValues = genres.map((genre) => (overallCounts.get(genre) ?? 0) + 1);
+
+  return [
+    Math.max(...recentValues) / recentDenominator,
+    Math.max(...overallValues) / overallDenominator,
+    recentValues.reduce((sum, value) => sum + value, 0) / (genres.length * recentDenominator),
+    -genres.filter((genre) => !overallCounts.has(genre)).length,
+  ];
+}
+
+function comparePressure(a: readonly number[], b: readonly number[]): number {
+  for (let index = 0; index < Math.max(a.length, b.length); index++) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+/**
+ * Re-ranks READY candidates only after the canonical quality ranking.
+ * A candidate can move ahead solely when it is within 1.5 discoveryPriority
+ * points of the canonical candidate for that batch position. Genre pressure considers every genre,
+ * both in the last four picks and across the batch built so far. Nothing is
+ * rejected: candidates not selected for the current limit remain in the pool.
+ * No candidate can be deferred by more than eight positions.
+ */
+export function applyCatalogAcquisitionDiversity(
+  candidates: readonly EvaluatedCandidate[],
+  limit: number,
+): EvaluatedCandidate[] {
+  if (!Number.isSafeInteger(limit) || limit < 0) {
+    throw new Error('Catalog acquisition diversity limit must be a non-negative integer.');
+  }
+
+  const pool = [...candidates].sort(compareCatalogAcquisitionCandidates);
+  const baseOrder = [...pool];
+  const basePosition = new Map(baseOrder.map((candidate, index) => [candidate.igdbId, index]));
+  const selected: EvaluatedCandidate[] = [];
+
+  while (selected.length < limit && pool.length > 0) {
+    const oldestBasePosition = basePosition.get(pool[0].igdbId) ?? selected.length;
+    if (oldestBasePosition <= selected.length - CATALOG_ACQUISITION_DIVERSITY_MAX_DEFERRAL) {
+      selected.push(pool.shift()!);
+      continue;
+    }
+
+    const basePriority = baseOrder[selected.length].discoveryPriority;
+    let pickIndex = 0;
+    let pickPressure = diversityPressure(pool[0], selected);
+
+    for (let index = 1; index < pool.length; index++) {
+      const candidate = pool[index];
+      if (
+        basePriority - candidate.discoveryPriority >
+        CATALOG_ACQUISITION_DIVERSITY_PRIORITY_TOLERANCE
+      ) {
+        break;
+      }
+      const pressure = diversityPressure(candidate, selected);
+      const pressureOrder = comparePressure(pressure, pickPressure);
+      if (
+        pressureOrder < 0 ||
+        (pressureOrder === 0 && compareCatalogAcquisitionCandidates(candidate, pool[pickIndex]) < 0)
+      ) {
+        pickIndex = index;
+        pickPressure = pressure;
+      }
+    }
+
+    selected.push(pool.splice(pickIndex, 1)[0]);
+  }
+
+  return selected;
+}
 
 export interface CatalogAcquisitionBatchPlanItem {
   position: number;
@@ -121,23 +234,25 @@ export function createCatalogAcquisitionBatchPlan(
     throw new Error('Catalog acquisition batch requires a valid catalogCountBefore.');
   }
 
-  const selected = manifest.candidates.slice(0, options.limit).map((source, index) => {
-    if (
-      source.bucket !== 'READY' ||
-      source.finalEligible !== true ||
-      source.dedupeStatus !== 'NEW'
-    ) {
-      throw new Error(
-        `Batch selection failed closed for IGDB ${source.igdbId}: candidate is not READY, NEW and finalEligible.`,
-      );
-    }
-    const candidate = frozenCandidate(source);
-    return Object.freeze({
-      position: index + 1,
-      identityKey: candidateIdentityKey(candidate),
-      candidate,
-    });
-  });
+  const selected = applyCatalogAcquisitionDiversity(manifest.candidates, options.limit).map(
+    (source, index) => {
+      if (
+        source.bucket !== 'READY' ||
+        source.finalEligible !== true ||
+        source.dedupeStatus !== 'NEW'
+      ) {
+        throw new Error(
+          `Batch selection failed closed for IGDB ${source.igdbId}: candidate is not READY, NEW and finalEligible.`,
+        );
+      }
+      const candidate = frozenCandidate(source);
+      return Object.freeze({
+        position: index + 1,
+        identityKey: candidateIdentityKey(candidate),
+        candidate,
+      });
+    },
+  );
 
   if (new Set(selected.map((item) => item.candidate.igdbId)).size !== selected.length) {
     throw new Error('Batch selection contains duplicate IGDB IDs.');
