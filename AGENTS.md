@@ -2366,4 +2366,29 @@ O resolver de identidade Steam (`SteamMatcherService` / `steamClient.resolveConf
 * Candidatos classificados como `AMBIGUOUS` ou `NO_MATCH` não recebem `steamAppId`, não recebem reviews externas de outro produto e permanecem tratados de forma neutra como `NON_STEAM` (avaliados puramente pela evidência e qualidade IGDB).
 * O Steam Quality Gate (mínimo de 100 avaliações globais e 80% positivas com `language=all` e `purchase_type=all`) é aplicado exclusivamente após confirmação de identidade Steam (`CONFIDENT_MATCH` ou identidade nativa em `external_games`).
 * Fixture conhecida: IGDB `Overwatch` (ID 8173, lançado em 2016) vs Steam `Overwatch 2` (App ID 2357570, lançado em 2023) é um falso match comprovado (diferença temporal de 7 anos e divergência de produto). A nova regra classifica o par como `NO_MATCH`, bloqueando a associação do App ID 2357570 ao Overwatch original.
-* Novos batches de catálogo permanecem suspensos até que a validação de confiança de identidade seja concluída e auditada.
+* Remediação Operacional Overwatch (2026-09-22): O registro persistido no banco foi corrigido de forma segura e idempotente via `repair-overwatch-steam-identity.ts`. O vínculo incorreto `steamAppId: 2357570` e as ofertas Steam correspondentes foram removidos. O jogo permanece integro (mesmo UUID `f947626b-930f-440d-a004-84870f5d7d59`, IGDB 8173, metadados preservados) com `steamAppId: null` e status `NON_STEAM`. A contagem total do catálogo permaneceu inalterada (379 jogos).
+* Novos batches de catálogo permanecem suspensos até que a validação de confiança de identidade e dry-run pós-correção sejam concluídos.
+
+---
+
+# 51. INGESTÃO REAL DO BATCH 25 DE CATÁLOGO — 2026-09-22
+
+O primeiro batch real de 25 títulos após a implementação do Steam Confident Matcher e da remediação de identidade concluiu com sucesso operacional total (`RESULT: PASS`):
+
+* `CATALOG_COUNT_BEFORE`: 379
+* `CATALOG_COUNT_AFTER`: 404 (+25 novos títulos inseridos, 0 pulados, 0 falhas)
+* `authorized: 25`, `processed: 25`, `inserted: 25`, `failed: 0`, `stoppedAt: N/A`
+* Fail-closed e Stop-on-first-failure: Nenhuma anomalia, colisão ou interrupção durante o processo.
+* Contrato de Trailer: Para todos os 25 candidatos, `planned primary == persisted primary == API primary`.
+* Post-Write Dedupe: Todos os 25 candidatos retornaram `ALREADY_EXISTS` na reavaliação pós-escrita imediata.
+* Confident Matching e Contrato NON_STEAM:
+  * 17 candidatos confirmados na Steam (`CONFIDENT_MATCH`), todos cumprindo com folga o Steam Quality Gate (reviews entre 334 e 517.554; positivas entre 85,93% e 98,44%).
+  * 8 candidatos `NON_STEAM` (consoles Nintendo/Xbox, ex: Super Smash Bros. Ultimate, Xenoblade Chronicles 2, Luigi's Mansion 3, Forza Horizon 2) não receberam `steamAppId` espúrio e persistiram com `steamAppId: null`.
+* Distribuição por banda de exposição:
+  * `NON_STEAM`: 8 títulos (32%)
+  * `DISCOVERY`: 8 títulos (32%)
+  * `ESTABLISHED`: 4 títulos (16%)
+  * `MAINSTREAM`: 4 títulos (16%)
+  * `HIDDEN_GEM`: 1 título (4%)
+* Estado atual persistido do catálogo: 404 jogos.
+
