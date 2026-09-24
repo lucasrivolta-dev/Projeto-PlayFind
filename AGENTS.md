@@ -2507,4 +2507,28 @@ O sistema NextPlay opera com separação estrita entre duas operações de catá
 
 * Catálogo persistido: **504 jogos**.
 * Suíte de testes: **371/371 PASS (100%)**.
-* Status do Refresh: **Implementado, testado e documentado. Nenhum refresh real foi executado ainda.**
+* Status do Refresh: **Primeiro lote real de 10 jogos executado com sucesso e idempotência confirmada.**
+
+---
+
+# 55. PRIMEIRO REFRESH REAL CONTROLADO (10 TÍTULOS) — 2026-09-24
+
+O primeiro refresh real controlado foi executado com sucesso pleno (`RESULT: PASS`):
+
+* **Quantidade autorizada:** 10 jogos (`--limit 10`).
+* **`CATALOG_COUNT_BEFORE`:** 504
+* **`CATALOG_COUNT_AFTER`:** 504 (Zero jogos criados ou removidos; `BEFORE == AFTER`).
+* **Métricas do lote:**
+  * `requested: 10`, `processed: 10`, `updated: 10`, `noChange: 0`, `failed: 0`.
+* **Integridade e Identidade:**
+  * 100% de preservação de identidade (`id`, `igdbId`, `steamAppId`, `slug`, `source/sourceId` idênticos aos anteriores em todos os 10 títulos).
+  * Zero mutações indevidas, zero conflitos de ID cruzado.
+* **Tipos de Campos Atualizados:**
+  * **Preços e Ofertas Steam:** 7 jogos com reajustes reais de preço base/promoção (`priceCents`, `discountPercent`, `originalPriceCents`).
+  * **Avaliações IGDB:** 4 jogos com sincronização de contagens e notas refinadas (`rating`, `ratingCount`, `totalRating`, `totalRatingCount`).
+  * **Trailers:** 1 jogo (Tunic) atualizado para trailer canônico oficial de lançamento (`priority: 0`).
+  * **Metadados:** Preenchimento complementar de `originalPriceCents` oficial da Steam.
+* **Checagem de Idempotência:**
+  * Re-execução imediata dos 10 jogos atualizados retornou `processed: 10, eligible: 0, noChange: 10, failed: 0`.
+  * Idempotência comprovada: zero escritas adicionais disparadas.
+* **Catálogo persistido:** **504 jogos**.
