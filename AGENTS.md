@@ -2457,3 +2457,54 @@ O primeiro lote operacional com limite máximo expandido (50 títulos) foi execu
   * `MAINSTREAM`: 2 títulos (4%)
   * `HIDDEN_GEM`: 0 títulos (0%)
 * Novo estado persistido do catálogo: **504 jogos**.
+
+---
+
+# 54. CATALOG REFRESH — ARQUITETURA E OPERAÇÃO DE ATUALIZAÇÃO PERIÓDICA
+
+O sistema NextPlay opera com separação estrita entre duas operações de catálogo:
+
+1. **ACQUISITION:** Descoberta, qualificação e inserção de novos jogos elegíveis (atualmente operacional em batches de até 50 títulos com stop-on-first-failure e dedupe pós-write).
+2. **REFRESH:** Atualização periódica de dados mutáveis de jogos já existentes sem recriá-los ou alterar suas identidades canônicas.
+
+### Princípios e Separação de Dados
+
+* **Dados de Identidade / Estáveis (PROTEGIDOS):**
+  * `id` (UUID interno), `igdbId`, `steamAppId` confirmado, `slug` canônico, e relações de proveniência externa.
+  * O Refresh comum **NUNCA** altera a identidade do jogo.
+  * Se um provedor externo retornar dados divergentes (ex.: ID IGDB diferente ou Steam App ID conflitante com o confirmado), a operação falha de forma estrita (**fail-closed**) para o candidato, impedindo sobrescrita acidental.
+* **Dados Mutáveis / Atualizáveis:**
+  * **Preços e Ofertas Steam:** `priceCents`, `originalPriceCents`, `discountPercent`, `currency`, `isAvailable`, `isFree`.
+  * **Métricas Steam e Evidência de Qualidade:** `reviews` e `positivePercentage`. Quedas de nota abaixo do patamar recomendado são registradas como aviso de qualidade (`steamQualityWarning`), **sem** exclusão automática do catálogo ou perda de integridade.
+  * **Avaliações IGDB:** `rating`, `ratingCount`, `totalRating`, `totalRatingCount`.
+  * **Metadados Complementares:** `description`, `studio`, `publisher`, `coverUrl`, `heroUrl`, `releaseDate` (atualizados de forma aditiva apenas quando campos existentes estiverem ausentes).
+  * **Trailers:** Preservação estrita de trailers existentes válidos; reparo/substituição canônica permitida apenas se o trailer atual estiver quebrado/ausente ou se houver lançamento oficial comprovadamente superior.
+
+### Regras Operacionais e de Integridade
+
+1. **Regra de Não-Degradação:** `new value missing -> preserve existing`. Valores ausentes ou nulos retornados por provedores externos nunca apagam nem degradam metadados válidos existentes.
+2. **Deduplicação de Ofertas e Idempotência:**
+   * Atualizações de preço/desconto registram novos snapshots apenas quando houver alteração real frente à última oferta persistida.
+   * Execuções repetidas sem mudanças externas produzem `NO_CHANGE` e **zero** escritas adicionais.
+3. **Isolamento de Falhas:** Erros de comunicação ou falhas de atualização em um jogo específico não abortam a atualização dos demais títulos do lote.
+4. **Limites Operacionais:** `1 <= refresh limit <= 50`. Limites fora dessa faixa são rejeitados na inicialização.
+5. **Dry-Run Obrigatório:**
+   * `CatalogRefreshService.plan()` é 100% read-only, gerando um manifesto com diffs exatos de campos (`before` vs. `after`).
+   * A execução sem a flag explícita `--apply` nunca aciona writers no banco de dados.
+
+### Sintaxes Oficiais da Operação
+
+* **Refresh Dry-Run (Read-only):**
+  ```powershell
+  pnpm.cmd exec tsx src/scripts/catalog-refresh.ts --limit 50
+  ```
+* **Refresh Apply (Escrita Controlada):**
+  ```powershell
+  pnpm.cmd exec tsx src/scripts/catalog-refresh.ts --apply --limit 50
+  ```
+
+### Estado Atual
+
+* Catálogo persistido: **504 jogos**.
+* Suíte de testes: **371/371 PASS (100%)**.
+* Status do Refresh: **Implementado, testado e documentado. Nenhum refresh real foi executado ainda.**
