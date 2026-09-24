@@ -612,3 +612,271 @@ test('formatCatalogRefreshPlan and formatCatalogRefreshResult generate structure
   assert.ok(resultReport.includes('NEXTPLAY — CATALOG REFRESH EXECUTION REPORT'));
   assert.ok(resultReport.includes('updated:'));
 });
+
+test('IGDB Identity Test A: Multiple Steam IDs [12120, 12250] with catalog 12250 -> PASS', async () => {
+  const game = createMockGame({
+    title: 'Grand Theft Auto: San Andreas',
+    igdbId: 732,
+    steamAppId: 12250,
+  });
+
+  const service = new CatalogRefreshService({
+    loadCatalogGames: async () => [game],
+    fetchSteamDetails: async (appId) => ({
+      success: true,
+      data: {
+        steam_appid: appId,
+        price_overview: { final: 5000, initial: 10000, discount_percent: 50, currency: 'BRL' },
+      },
+    }),
+    fetchIgdbGame: async () => ({
+      id: 732,
+      external_games: [
+        { uid: '12120', external_game_source: { name: 'Steam' } },
+        { uid: '12250', external_game_source: { name: 'Steam' } },
+      ],
+    }),
+  });
+
+  const manifest = await service.plan({ limit: 1 });
+  assert.equal(manifest.failedCount, 0);
+  assert.equal(manifest.eligibleForRefresh, 1);
+  assert.equal(manifest.candidates[0].status, 'ELIGIBLE');
+  assert.equal(manifest.candidates[0].steamAppId, 12250);
+  assert.equal(game.steamAppId, 12250);
+});
+
+test('IGDB Identity Test B: Multiple Steam IDs [22490, 22380] with catalog 22380 -> PASS', async () => {
+  const game = createMockGame({
+    title: 'Fallout: New Vegas',
+    igdbId: 16,
+    steamAppId: 22380,
+  });
+
+  const service = new CatalogRefreshService({
+    loadCatalogGames: async () => [game],
+    fetchSteamDetails: async (appId) => ({
+      success: true,
+      data: {
+        steam_appid: appId,
+        price_overview: { final: 3900, initial: 3900, discount_percent: 0, currency: 'BRL' },
+      },
+    }),
+    fetchIgdbGame: async () => ({
+      id: 16,
+      external_games: [
+        { uid: '22490', external_game_source: { name: 'Steam' } },
+        { uid: '22380', external_game_source: { name: 'Steam' } },
+      ],
+    }),
+  });
+
+  const manifest = await service.plan({ limit: 1 });
+  assert.equal(manifest.failedCount, 0);
+  assert.equal(manifest.eligibleForRefresh, 1);
+  assert.equal(manifest.candidates[0].status, 'ELIGIBLE');
+  assert.equal(manifest.candidates[0].steamAppId, 22380);
+  assert.equal(game.steamAppId, 22380);
+});
+
+test('IGDB Identity Test C: IGDB [400] vs catalog 52003 -> FAILED_IDENTITY_CONFLICT', async () => {
+  const game = createMockGame({
+    title: 'Portal',
+    igdbId: 71,
+    steamAppId: 52003,
+  });
+
+  const service = new CatalogRefreshService({
+    loadCatalogGames: async () => [game],
+    fetchSteamDetails: async () => ({
+      success: true,
+      data: {
+        steam_appid: 52003,
+      },
+    }),
+    fetchIgdbGame: async () => ({
+      id: 71,
+      external_games: [
+        { uid: '400', external_game_source: { name: 'Steam' } },
+      ],
+    }),
+  });
+
+  const manifest = await service.plan({ limit: 1 });
+  assert.equal(manifest.failedCount, 1);
+  assert.equal(manifest.candidates[0].status, 'FAILED_IDENTITY_CONFLICT');
+  assert.ok(manifest.candidates[0].error.includes('conflicting Steam App ID(s): [400] vs existing confirmed 52003'));
+  assert.equal(manifest.candidates[0].steamAppId, 52003);
+  assert.equal(game.steamAppId, 52003);
+});
+
+test('IGDB Identity Test D: IGDB [35140] vs catalog 35010 -> FAILED_IDENTITY_CONFLICT', async () => {
+  const game = createMockGame({
+    title: 'Batman: Arkham Asylum',
+    igdbId: 500,
+    steamAppId: 35010,
+  });
+
+  const service = new CatalogRefreshService({
+    loadCatalogGames: async () => [game],
+    fetchSteamDetails: async () => ({
+      success: true,
+      data: {
+        steam_appid: 35010,
+      },
+    }),
+    fetchIgdbGame: async () => ({
+      id: 500,
+      external_games: [
+        { uid: '35140', external_game_source: { name: 'Steam' } },
+      ],
+    }),
+  });
+
+  const manifest = await service.plan({ limit: 1 });
+  assert.equal(manifest.failedCount, 1);
+  assert.equal(manifest.candidates[0].status, 'FAILED_IDENTITY_CONFLICT');
+  assert.ok(manifest.candidates[0].error.includes('conflicting Steam App ID(s): [35140] vs existing confirmed 35010'));
+  assert.equal(manifest.candidates[0].steamAppId, 35010);
+  assert.equal(game.steamAppId, 35010);
+});
+
+test('IGDB Identity Test E: IGDB [379720] vs catalog 430910 -> FAILED_IDENTITY_CONFLICT', async () => {
+  const game = createMockGame({
+    title: 'Doom',
+    igdbId: 7351,
+    steamAppId: 430910,
+  });
+
+  const service = new CatalogRefreshService({
+    loadCatalogGames: async () => [game],
+    fetchSteamDetails: async () => ({
+      success: true,
+      data: {
+        steam_appid: 430910,
+      },
+    }),
+    fetchIgdbGame: async () => ({
+      id: 7351,
+      external_games: [
+        { uid: '379720', external_game_source: { name: 'Steam' } },
+      ],
+    }),
+  });
+
+  const manifest = await service.plan({ limit: 1 });
+  assert.equal(manifest.failedCount, 1);
+  assert.equal(manifest.candidates[0].status, 'FAILED_IDENTITY_CONFLICT');
+  assert.ok(manifest.candidates[0].error.includes('conflicting Steam App ID(s): [379720] vs existing confirmed 430910'));
+  assert.equal(manifest.candidates[0].steamAppId, 430910);
+  assert.equal(game.steamAppId, 430910);
+});
+
+test('IGDB Identity Test F: duplicate, non-numeric and invalid strings are normalized and ignored', async () => {
+  const game = createMockGame({
+    title: 'Normalization Game',
+    igdbId: 9999,
+    steamAppId: 12250,
+  });
+
+  const service = new CatalogRefreshService({
+    loadCatalogGames: async () => [game],
+    fetchSteamDetails: async () => ({
+      success: true,
+      data: {
+        steam_appid: 12250,
+        price_overview: { final: 1000, initial: 1000, discount_percent: 0, currency: 'BRL' },
+      },
+    }),
+    fetchIgdbGame: async () => ({
+      id: 9999,
+      external_games: [
+        { uid: ' 12250 ', external_game_source: { name: 'Steam' } },
+        { uid: '12250', external_game_source: { name: 'Steam' } },
+        { uid: 'abc', external_game_source: { name: 'Steam' } },
+        { uid: '-500', external_game_source: { name: 'Steam' } },
+        { uid: '12.34', external_game_source: { name: 'Steam' } },
+        { uid: null, external_game_source: { name: 'Steam' } },
+        { uid: undefined, external_game_source: { name: 'Steam' } },
+      ],
+    }),
+  });
+
+  const manifest = await service.plan({ limit: 1 });
+  assert.equal(manifest.failedCount, 0);
+  assert.equal(manifest.candidates[0].status, 'ELIGIBLE');
+  assert.equal(manifest.candidates[0].steamAppId, 12250);
+});
+
+test('IGDB Identity Test G: external_games without Steam IDs preserves existing fail-closed behavior', async () => {
+  const game = createMockGame({
+    title: 'GOG Only Game',
+    igdbId: 8888,
+    steamAppId: 10010,
+  });
+
+  const service = new CatalogRefreshService({
+    loadCatalogGames: async () => [game],
+    fetchSteamDetails: async () => ({
+      success: true,
+      data: {
+        steam_appid: 10010,
+        price_overview: { final: 2000, initial: 2000, discount_percent: 0, currency: 'BRL' },
+      },
+    }),
+    fetchIgdbGame: async () => ({
+      id: 8888,
+      external_games: [
+        { uid: 'gog_123', external_game_source: { name: 'GOG' } },
+      ],
+    }),
+  });
+
+  const manifest = await service.plan({ limit: 1 });
+  // Does not fail from IGDB check, does not invent identity
+  assert.equal(manifest.failedCount, 0);
+  assert.equal(manifest.candidates[0].status, 'ELIGIBLE');
+  assert.equal(manifest.candidates[0].steamAppId, 10010);
+});
+
+test('IGDB Identity Test H: steamAppId is never mutated across plan or apply', async () => {
+  const originalSteamAppId = 12250;
+  const game = createMockGame({
+    title: 'Immutability Check',
+    igdbId: 732,
+    steamAppId: originalSteamAppId,
+  });
+
+  let updateCalled = false;
+  const service = new CatalogRefreshService({
+    loadCatalogGames: async () => [game],
+    fetchSteamDetails: async (appId) => ({
+      success: true,
+      data: {
+        steam_appid: appId,
+        price_overview: { final: 4000, initial: 8000, discount_percent: 50, currency: 'BRL' },
+      },
+    }),
+    fetchIgdbGame: async () => ({
+      id: 732,
+      external_games: [
+        { uid: '12120', external_game_source: { name: 'Steam' } },
+        { uid: '12250', external_game_source: { name: 'Steam' } },
+      ],
+    }),
+    applyUpdate: async (payload) => {
+      updateCalled = true;
+      // Payload MUST NOT contain steamAppId mutation
+      assert.equal(payload.steamAppId, undefined);
+      assert.equal(payload.updates.steamAppId, undefined);
+    },
+  });
+
+  const manifest = await service.plan({ limit: 1 });
+  assert.equal(game.steamAppId, originalSteamAppId);
+  assert.equal(manifest.candidates[0].steamAppId, originalSteamAppId);
+
+  const result = await service.apply(manifest);
+  assert.equal(result.updated, 1);
+  assert.equal(game.steamAppId, originalSteamAppId);
+});

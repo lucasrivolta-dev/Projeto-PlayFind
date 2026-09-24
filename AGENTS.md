@@ -2532,3 +2532,26 @@ O primeiro refresh real controlado foi executado com sucesso pleno (`RESULT: PAS
   * Re-execução imediata dos 10 jogos atualizados retornou `processed: 10, eligible: 0, noChange: 10, failed: 0`.
   * Idempotência comprovada: zero escritas adicionais disparadas.
 * **Catálogo persistido:** **504 jogos**.
+
+---
+
+# 56. CATALOG REFRESH — REGRA DE IDENTIDADE MULTI-STEAM EM EXTERNAL_GAMES (2026-09-24)
+
+Auditoria operacional realizada no dry-run de 50 títulos identificou e corrigiu uma limitação na validação de identidade entre catálogo e IGDB:
+
+### Regra Permanente de Identidade Multi-Steam
+
+1. **Validação por Conjunto de Pertinência:** Quando um registro IGDB possui múltiplos registros Steam em `external_games` (ex.: lançamentos com variação regional US vs ROW, edições múltiplas referenciadas pelo IGDB), a identidade é considerada **compatível** se o `steamAppId` já confirmado no catálogo estiver presente no conjunto de IDs válidos e normalizados do IGDB.
+2. **Independência de Ordem:** A ordem em que os IDs aparecem no array retornado pelo IGDB não define identidade nem pode causar rejeição precipitada.
+3. **Imutabilidade e Não-Substituição Automática:** A presença de múltiplos IDs externos no provedor **NUNCA** autoriza a troca automática do `steamAppId` persistido. O ID confirmado no catálogo permanece estritamente fixo.
+4. **Proteção Fail-Closed Mantida:** Se o IGDB reportar Steam IDs e o `steamAppId` confirmado do catálogo **NÃO** pertencer a esse conjunto, a operação falha estritamente como `FAILED_IDENTITY_CONFLICT`, impedindo qualquer mutação ou contaminação de metadados.
+5. **Casos Auditados e Reconciliados no Dry-Run 50:**
+   * **Grand Theft Auto: San Andreas** (`steamAppId: 12250`): IGDB possui `[12120, 12250]`. Com a nova regra por conjunto, a identidade é reconhecida como compatível e o jogo torna-se elegível ao refresh.
+   * **Fallout: New Vegas** (`steamAppId: 22380`): IGDB possui `[22490, 22380]`. Identidade compatível reconhecida, elegível ao refresh.
+   * **Portal** (`steamAppId: 52003`), **Batman: Arkham Asylum** (`steamAppId: 35010`) e **Doom** (`steamAppId: 430910`): Permanecem bloqueados com `FAILED_IDENTITY_CONFLICT` devido a divergências legítimas de alias legado, edição GOTY e Open Beta, aguardando eventual remediação/decisão separada.
+6. **Métricas do Novo Dry-Run de 50 Títulos:**
+   * `requested: 50`, `processed: 50`, `eligible: 47`, `failed: 3`, `writes: 0`.
+   * Zero jogos criados ou removidos.
+   * Zero `steamAppId` alterado.
+   * Nenhum refresh real foi executado nesta tarefa.
+* **Catálogo persistido:** **504 jogos**.

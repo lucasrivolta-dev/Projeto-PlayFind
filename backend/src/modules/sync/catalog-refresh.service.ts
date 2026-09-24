@@ -523,26 +523,32 @@ export class CatalogRefreshService {
 
             // Check if IGDB external_games has conflicting Steam ID
             if (record.steamAppId && igdbDto.external_games) {
+              const igdbSteamIds = new Set<number>();
               for (const ext of igdbDto.external_games) {
-                if (ext.external_game_source?.name?.trim().toLowerCase() === 'steam') {
-                  const extUid = Number(ext.uid);
-                  if (Number.isSafeInteger(extUid) && extUid > 0 && extUid !== record.steamAppId) {
-                    return {
-                      position,
-                      gameId: record.id,
-                      title: record.title,
-                      igdbId: record.igdbId,
-                      steamAppId: record.steamAppId,
-                      fieldsChanged: [],
-                      diffs: {},
-                      before: {},
-                      after: {},
-                      refreshEligible: false,
-                      status: 'FAILED_IDENTITY_CONFLICT',
-                      error: `IGDB reports conflicting Steam App ID: ${extUid} vs existing confirmed ${record.steamAppId}`,
-                    };
-                  }
+                if (ext.external_game_source?.name?.trim().toLowerCase() !== 'steam') continue;
+                const value = String(ext.uid ?? '').trim();
+                const id = Number(value);
+                if (/^\d+$/.test(value) && Number.isSafeInteger(id) && id > 0) {
+                  igdbSteamIds.add(id);
                 }
+              }
+
+              if (igdbSteamIds.size > 0 && !igdbSteamIds.has(record.steamAppId)) {
+                const reportedList = Array.from(igdbSteamIds).sort((a, b) => a - b).join(', ');
+                return {
+                  position,
+                  gameId: record.id,
+                  title: record.title,
+                  igdbId: record.igdbId,
+                  steamAppId: record.steamAppId,
+                  fieldsChanged: [],
+                  diffs: {},
+                  before: {},
+                  after: {},
+                  refreshEligible: false,
+                  status: 'FAILED_IDENTITY_CONFLICT',
+                  error: `IGDB reports conflicting Steam App ID(s): [${reportedList}] vs existing confirmed ${record.steamAppId}`,
+                };
               }
             }
           }
