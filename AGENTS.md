@@ -2429,4 +2429,31 @@ Com a estabilidade comprovada das últimas 3 execuções reais de 25 jogos (tota
     ```powershell
     pnpm.cmd exec tsx src/scripts/catalog-acquisition-apply.ts --batch --apply --limit 50 --snapshot reports/catalog-acquisition-v1/audited-raw.json
     ```
-* Estado do banco de dados permanece em **454 jogos** (nenhum batch real de 50 foi executado nesta tarefa).
+* Estado do banco de dados após a promoção inicial: **454 jogos**.
+
+---
+
+# 53. PRIMEIRO BATCH REAL DE 50 TÍTULOS — 2026-09-23
+
+O primeiro lote operacional com limite máximo expandido (50 títulos) foi executado com sucesso integral (`RESULT: PASS`):
+
+* `CATALOG_COUNT_BEFORE`: 454
+* `CATALOG_COUNT_AFTER`: 504 (+50 novos títulos inseridos, 0 pulados, 0 falhas)
+* `sessionId: a10539fb-7355-485a-afd3-7c072eecbf5b`
+* `authorized: 50`, `processed: 50`, `inserted: 50`, `failed: 0`, `stoppedAt: N/A`
+* Resoluções de Identidade Steam:
+  * `CONFIDENT_MATCH`: 43 títulos, todos validados e aprovados no Steam Quality Gate (reviews entre 1.078 e 182.533; aprovação entre 88,29% e 99,32%).
+  * `AMBIGUOUS`: 0
+  * `NO_MATCH`: 7 títulos exclusivos de consoles ou clients proprietários (Tetris 99, Clone Hero, The Great Ace Attorney: Adventures, The Legend of Zelda: Twilight Princess HD, Teamfight Tactics, Honkai: Star Rail, Kingdom Hearts III).
+* Contratos e Integridade Operacional:
+  * NON_STEAM: Todos os 7 títulos persistiram com `steamAppId: null` e sem ofertas da Steam.
+  * Contrato de Trailer: Para todos os 50 títulos, `planned primary == persisted primary == API primary`.
+  * Post-Write Dedupe: Todos os 50 títulos retornaram `ALREADY_EXISTS` na verificação pós-escrita imediata.
+  * Stop-on-first-failure e fail-closed mantiveram 100% de estabilidade sem acionamentos parciais.
+* Distribuição de Bandas:
+  * `DISCOVERY`: 35 títulos (70%)
+  * `NON_STEAM`: 7 títulos (14%)
+  * `ESTABLISHED`: 6 títulos (12%)
+  * `MAINSTREAM`: 2 títulos (4%)
+  * `HIDDEN_GEM`: 0 títulos (0%)
+* Novo estado persistido do catálogo: **504 jogos**.
