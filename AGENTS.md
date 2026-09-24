@@ -2402,7 +2402,31 @@ Os batches reais executados após a validação do Steam Confident Matcher e rem
   * `planned primary == persisted primary == API primary` (contrato de trailer respeitado rigorosamente).
   * `post-write dedupe == ALREADY_EXISTS`.
   * Nenhum falso Steam match persistido; títulos `NON_STEAM` mantidos com `steamAppId: null`.
-  * Todos os títulos Steam confirmados cumpriram com folga o Steam Quality Gate (mínimo de 100 reviews globais e 80% positivas).
-* Suite de 350 testes unitários e de integração concluída com 100% PASS.
+  * Suite de testes unitários e de integração concluída com 100% PASS (354/354 testes).
 
+---
 
+# 52. PROMOÇÃO DO LIMITE DE BATCH OPERACIONAL (MAX 50) — 2026-09-23
+
+Com a estabilidade comprovada das últimas 3 execuções reais de 25 jogos (totalizando 75 inserções sem qualquer falha ou regressão de qualidade), o limite máximo de aquisição em lote foi promovido:
+
+* Novo limite máximo: `1 <= limit <= 50` (`CATALOG_ACQUISITION_BATCH_MAX_LIMIT = 50`).
+* Limites `<= 0` ou `>= 51` falham imediatamente antes de qualquer writer.
+* Controles mantidos integralmente:
+  * Stop-on-first-failure inalterado.
+  * Revalidação fail-closed antes de cada write individual.
+  * Steam Confident Matching (`CONFIDENT_MATCH`, `AMBIGUOUS`, `NO_MATCH`) e Steam Quality Gate ($\ge 100$ reviews globais e $\ge 80\%$ positivas) 100% obrigatórios.
+  * Títulos `NON_STEAM` persistem rigorosamente com `steamAppId: null`.
+  * Contrato de trailer `planned primary == persisted primary == API primary`.
+  * Dedupe pós-write obrigatório (`ALREADY_EXISTS`).
+  * Diversity pós-ranking preservada com determinismo.
+* Dry-run continua como etapa operacional estritamente obrigatória antes de qualquer escrita real:
+  * Sintaxe oficial Dry-Run 50:
+    ```powershell
+    pnpm.cmd exec tsx src/scripts/catalog-acquisition-apply.ts --batch --limit 50 --snapshot reports/catalog-acquisition-v1/audited-raw.json
+    ```
+  * Sintaxe oficial Apply 50:
+    ```powershell
+    pnpm.cmd exec tsx src/scripts/catalog-acquisition-apply.ts --batch --apply --limit 50 --snapshot reports/catalog-acquisition-v1/audited-raw.json
+    ```
+* Estado do banco de dados permanece em **454 jogos** (nenhum batch real de 50 foi executado nesta tarefa).

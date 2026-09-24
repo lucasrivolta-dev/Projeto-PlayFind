@@ -232,15 +232,26 @@ test('G — catalog count increasing by more than one stops the batch', async ()
   assert.deepEqual(runtime.writes, [1, 2]);
 });
 
-test('H — limit above 25 is rejected before any writer', () => {
+test('H — limit above 50 is rejected before any writer, limit 50 is accepted', () => {
   let writerCalls = 0;
   assert.throws(
-    () => parseCatalogAcquisitionApplyArgs(['--batch', '--apply', '--limit', '26']),
-    /--limit entre 1 e 25/,
+    () => parseCatalogAcquisitionApplyArgs(['--batch', '--apply', '--limit', '51']),
+    /--limit entre 1 e 50/,
   );
   assert.throws(
-    () => createCatalogAcquisitionBatchPlan(manifest([]), { limit: 26, catalogCountBefore: 0 }),
-    /between 1 and 25/,
+    () => createCatalogAcquisitionBatchPlan(manifest([]), { limit: 51, catalogCountBefore: 0 }),
+    /between 1 and 50/,
+  );
+  assert.throws(
+    () => parseCatalogAcquisitionApplyArgs(['--batch', '--apply', '--limit', '100']),
+    /--limit entre 1 e 50/,
+  );
+  assert.throws(
+    () => createCatalogAcquisitionBatchPlan(manifest([]), { limit: 100, catalogCountBefore: 0 }),
+    /between 1 and 50/,
+  );
+  assert.doesNotThrow(() =>
+    parseCatalogAcquisitionApplyArgs(['--batch', '--apply', '--limit', '50']),
   );
   assert.equal(writerCalls, 0);
 });
@@ -409,14 +420,14 @@ test('R/F — diversity rule is generic and contains no production genre names',
   );
 });
 
-test('S/G — diversity supports batch limits 1, 5, 10 and 25', () => {
-  const input = Array.from({ length: 30 }, (_, index) =>
+test('S/G — diversity supports batch limits 1, 5, 10, 25 and 50', () => {
+  const input = Array.from({ length: 60 }, (_, index) =>
     candidate(index + 1, {
       genres: [`Genre ${index % 5}`],
       discoveryPriority: 100 - index * 0.05,
     }),
   );
-  for (const limit of [1, 5, 10, 25]) {
+  for (const limit of [1, 5, 10, 25, 50]) {
     const selected = applyCatalogAcquisitionDiversity(input, limit);
     assert.equal(selected.length, limit);
     assert.equal(new Set(selected.map((item) => item.igdbId)).size, limit);
@@ -449,4 +460,104 @@ test('T/H — representative top-25 fixture reduces concentration without materi
     before.slice(0, 17).every((item) => after.some((selected) => selected.igdbId === item.igdbId)),
     'the quality head must remain inside a batch of 25',
   );
+});
+
+test('U — batch 50 dry-run validates exactly 50 candidates with zero writes', async () => {
+  const plan = planOf(60, 50);
+  const runtime = dependencies();
+  const result = await runCatalogAcquisitionBatch(plan, runtime.deps, { apply: false });
+
+  assert.equal(result.result, 'PASS');
+  assert.equal(result.processed, 50);
+  assert.equal(result.inserted, 0);
+  assert.equal(runtime.writes.length, 0);
+  assert.equal(runtime.validations.length, 50);
+  assert.equal(result.results.length, 50);
+  assert(result.results.every((r) => r.result === 'VALIDATED'));
+});
+
+test('V — batch 50 stops at candidate 27 on failure, remaining 28-50 never execute', async () => {
+  const plan = planOf(60, 50);
+  const runtime = dependencies({
+    applyCandidate: (item) => {
+      if (item.position !== 27) return undefined;
+      return {
+        requested: 1,
+        processed: 1,
+        inserted: 0,
+        skippedAlreadyExists: 0,
+        skippedAmbiguous: 0,
+        failed: 1,
+        results: [
+          { ...successfulApply(item.candidate).results[0], status: 'FAILED', error: 'candidate 27 error' },
+        ],
+      };
+    },
+  });
+  const result = await runCatalogAcquisitionBatch(plan, runtime.deps, { apply: true });
+
+  assert.equal(result.result, 'PARTIAL');
+  assert.equal(result.processed, 27);
+  assert.equal(result.inserted, 26);
+  assert.equal(result.failed, 1);
+  assert.equal(result.stoppedAt, 27);
+  assert.deepEqual(
+    runtime.writes,
+    Array.from({ length: 27 }, (_, i) => i + 1),
+  );
+  assert(!runtime.writes.includes(28));
+  assert(!runtime.writes.includes(50));
+});
+
+test('W — batch 50 snapshot plan freezes exactly 50 candidates deterministically', () => {
+  const candidates = Array.from({ length: 70 }, (_, index) => candidate(index + 1));
+  const plan1 = createCatalogAcquisitionBatchPlan(manifest(candidates), {
+    limit: 50,
+    catalogCountBefore: 454,
+    sessionId: 'session-a',
+  });
+  const plan2 = createCatalogAcquisitionBatchPlan(manifest(candidates), {
+    limit: 50,
+    catalogCountBefore: 454,
+    sessionId: 'session-b',
+  });
+
+  assert.equal(plan1.selected.length, 50);
+  assert.equal(plan2.selected.length, 50);
+  assert.deepEqual(
+    plan1.selected.map((item) => item.candidate.igdbId),
+    plan2.selected.map((item) => item.candidate.igdbId),
+  );
+  assert.deepEqual(
+    plan1.selected.map((item) => item.identityKey),
+    plan2.selected.map((item) => item.identityKey),
+  );
+});
+
+test('X — batch 50 enforces Steam Quality Gate and trailer contract fail-closed', async () => {
+  const plan = planOf(60, 50);
+
+  // Steam gate failure at item 10 stops batch before writer 10
+  const steamFailRuntime = dependencies({
+    revalidate: (item) => ({
+      dedupeStatus: 'NEW',
+      identityMatches: true,
+      finalEligible: true,
+      steamQualityGatePassed: item.position !== 10,
+    }),
+  });
+  const steamResult = await runCatalogAcquisitionBatch(plan, steamFailRuntime.deps, { apply: true });
+  assert.equal(steamResult.result, 'PARTIAL');
+  assert.equal(steamResult.stoppedAt, 10);
+  assert.equal(steamFailRuntime.writes.length, 9);
+
+  // Trailer mismatch at item 15 stops batch immediately
+  const trailerMismatchRuntime = dependencies({
+    persistedPrimary: (item) => (item.position === 15 ? 'divergent-trailer' : undefined),
+  });
+  const trailerResult = await runCatalogAcquisitionBatch(plan, trailerMismatchRuntime.deps, { apply: true });
+  assert.equal(trailerResult.result, 'PARTIAL');
+  assert.equal(trailerResult.stoppedAt, 15);
+  assert.equal(trailerMismatchRuntime.writes.length, 15);
+  assert.match(trailerResult.results[14].error, /Persisted primary trailer mismatch/);
 });

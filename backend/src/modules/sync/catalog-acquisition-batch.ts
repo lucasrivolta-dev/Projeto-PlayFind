@@ -8,7 +8,7 @@ import {
 } from './catalog-acquisition.service.js';
 import type { DedupeStatus } from './catalog-hygiene.service.js';
 
-export const CATALOG_ACQUISITION_BATCH_MAX_LIMIT = 25;
+export const CATALOG_ACQUISITION_BATCH_MAX_LIMIT = 50;
 export const CATALOG_ACQUISITION_DIVERSITY_WINDOW = 4;
 export const CATALOG_ACQUISITION_DIVERSITY_PRIORITY_TOLERANCE = 1.5;
 export const CATALOG_ACQUISITION_DIVERSITY_MAX_DEFERRAL = 8;
