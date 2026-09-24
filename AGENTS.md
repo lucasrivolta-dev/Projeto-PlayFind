@@ -2555,3 +2555,31 @@ Auditoria operacional realizada no dry-run de 50 títulos identificou e corrigiu
    * Zero `steamAppId` alterado.
    * Nenhum refresh real foi executado nesta tarefa.
 * **Catálogo persistido:** **504 jogos**.
+
+---
+
+# 57. PRIMEIRO REFRESH REAL CONTROLADO DE 50 TÍTULOS — 2026-09-24
+
+O primeiro refresh real controlado com limite máximo expandido (50 títulos) foi executado com sucesso pleno (`RESULT: PASS`):
+
+* **Comando executado:** `pnpm.cmd exec tsx src/scripts/catalog-refresh.ts --apply --limit 50`
+* **`CATALOG_COUNT_BEFORE`:** 504
+* **`CATALOG_COUNT_AFTER`:** 504 (Zero jogos criados ou removidos; `BEFORE == AFTER`).
+* **Métricas do lote:**
+  * `requested: 50`, `processed: 50`, `updated: 47`, `noChange: 0`, `failed: 3`.
+* **Isolamento de Falha e Fail-Closed dos 3 Conflitos de Identidade:**
+  * **Portal** (`steamAppId: 52003` vs retornado `400`): FAILED (Steam App ID mismatch) — zero escritas, fail-closed mantido.
+  * **Batman: Arkham Asylum** (`steamAppId: 35010` vs retornado `35140`): FAILED (Steam App ID mismatch) — zero escritas, fail-closed mantido.
+  * **Doom** (`steamAppId: 430910` vs retornado `379720`): FAILED (Steam App ID mismatch) — zero escritas, fail-closed mantido.
+  * Em todos os 3 casos legítimos, nenhum dado foi degradado, nenhuma troca de identidade foi permitida e seus registros no banco permaneceram rigorosamente intocados.
+* **Jogos Multi-Steam Auditados Atualizados com Sucesso:**
+  * **Grand Theft Auto: San Andreas** (`steamAppId: 12250` preservado): atualizado com sucesso via pertinência ao conjunto IGDB `[12120, 12250]`.
+  * **Fallout: New Vegas** (`steamAppId: 22380` preservado): atualizado com sucesso via pertinência ao conjunto IGDB `[22490, 22380]`.
+* **Integridade e Identidade dos 47 Títulos Elegíveis:**
+  * 100% de preservação de identidade (`id`, `igdbId`, `steamAppId`, `slug`, `source/sourceId` inalterados).
+  * Atualização segura de dados mutáveis: ofertas e preços Steam (`priceCents`, `discountPercent`, `originalPriceCents`), avaliações IGDB (`rating`, `ratingCount`, `totalRating`, `totalRatingCount`) e alinhamento de trailers oficiais canônicos.
+  * Regra de não-degradação cumprida rigorosamente: nenhum campo válido apagado.
+* **Checagem de Idempotência Pós-Refresh:**
+  * Verificação com `service.plan()` sobre os 50 jogos sincronizados: `requested: 50, processed: 50, eligibleForRefresh: 0, noChangeCount: 50, failedCount: 0`.
+  * Idempotência absoluta comprovada: 50/50 `NO_CHANGE` e zero escritas adicionais disparadas.
+* **Catálogo persistido:** **504 jogos**.
