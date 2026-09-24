@@ -2583,3 +2583,43 @@ O primeiro refresh real controlado com limite máximo expandido (50 títulos) fo
   * Verificação com `service.plan()` sobre os 50 jogos sincronizados: `requested: 50, processed: 50, eligibleForRefresh: 0, noChangeCount: 50, failedCount: 0`.
   * Idempotência absoluta comprovada: 50/50 `NO_CHANGE` e zero escritas adicionais disparadas.
 * **Catálogo persistido:** **504 jogos**.
+
+---
+
+# 58. CATALOG MAINTENANCE — ORQUESTRADOR OPERACIONAL (2026-09-24)
+
+O sistema de catálogo conta agora com uma camada de orquestração operacional unificada (`CatalogMaintenanceService` em `backend/src/modules/sync/catalog-maintenance.service.ts` e CLI em `backend/src/scripts/catalog-maintenance.ts`), coordenada sobre os serviços existentes sem duplicar regras de negócio:
+
+### Princípios e Arquitetura do Orquestrador:
+1. **Composição Estrita:** O orquestrador não reimplementa a lógica interna de `CatalogAcquisitionService` ou `CatalogRefreshService`. Ele atua como coordenador de ciclo de vida, controle de concorrência, validação de limites e agregador de relatórios.
+2. **Modos Suportados:**
+   * `--mode refresh`: executa exclusivamente o ciclo de refresh de jogos existentes.
+   * `--mode acquisition`: executa exclusivamente o lote de aquisição e descoberta de novos jogos.
+   * `--mode full`: executa a sequência lógica **REFRESH $\rightarrow$ ACQUISITION** (atualizar dados de jogos existentes antes de incorporar novos títulos).
+3. **Dry-Run por Padrão:** Sem a flag explícita `--apply`, todas as operações executadas pelo orquestrador permanecem estritamente read-only (zero writes no banco de dados).
+4. **Aplicação Controlada (`--apply`):** A gravação real no banco exige a flag explícita `--apply`.
+5. **Limites Operacionais:** Ambas as operações (`refresh-limit` e `acquisition-limit`) respeitam o intervalo conservador `1 <= limit <= 50`. Limites inválidos ou superiores a 50 são rejeitados na inicialização antes de qualquer escrita.
+6. **Proteção de Concorrência e Lock Exclusivo:**
+   * Utiliza mecanismo de lock atômico (`FileMaintenanceLock` em arquivo local ou `InMemoryMaintenanceLock`/`PostgresAdvisoryLock`).
+   * Se uma sessão de manutenção já estiver ativa, novas tentativas são imediatamente rejeitadas com status `REJECTED_LOCKED` e zero escritas.
+   * O lock é liberado com segurança no bloco `finally`, permitindo que execuções subsequentes ocorram normalmente.
+7. **Tratamento de Falhas no Modo Full:**
+   * Falhas estruturais no refresh (ex.: indisponibilidade de banco de dados, exceções de infraestrutura) interrompem o fluxo e **NÃO** iniciam o acquisition.
+   * Falhas a nível de candidato no refresh (ex.: `FAILED_IDENTITY_CONFLICT` esperado em títulos protegidos como Portal, Batman e Doom) preservam a integridade e **permitem** que o acquisition prossiga.
+   * O stop-on-first-failure canônico do acquisition permanece 100% ativo.
+8. **Relatório Unificado:** Saída determinística contendo `sessionId`, `mode`, `apply`, `startedAt`, `finishedAt`, `catalogCountBefore`, `catalogCountAfter`, métricas segmentadas de `REFRESH` e `ACQUISITION`, e `maintenanceResult` (`PASS`, `PARTIAL` ou `FAIL`).
+
+### Sintaxes Oficiais:
+* **Dry-Run:**
+  ```powershell
+  pnpm.cmd exec tsx src/scripts/catalog-maintenance.ts --mode full --refresh-limit 50 --acquisition-limit 50
+  ```
+* **Apply Futuro (Requer autorização explícita):**
+  ```powershell
+  pnpm.cmd exec tsx src/scripts/catalog-maintenance.ts --mode full --apply --refresh-limit 50 --acquisition-limit 50
+  ```
+
+### Estado Atual:
+* **Catálogo persistido:** **504 jogos**.
+* **Status:** Implementado, testado (17 novos testes, 396/396 testes PASS) e documentado.
+* **Execuções reais:** Nenhum maintenance apply real foi executado nesta tarefa.
