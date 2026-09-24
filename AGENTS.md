@@ -2620,6 +2620,38 @@ O sistema de catálogo conta agora com uma camada de orquestração operacional 
   ```
 
 ### Estado Atual:
-* **Catálogo persistido:** **504 jogos**.
+* **Catálogo persistido:** **504 jogos** (anterior à execução).
 * **Status:** Implementado, testado (17 novos testes, 396/396 testes PASS) e documentado.
-* **Execuções reais:** Nenhum maintenance apply real foi executado nesta tarefa.
+* **Execuções reais:** Primeiro maintenance apply real supervisionado executado com sucesso (504 -> 514).
+
+---
+
+# 59. PRIMEIRO MAINTENANCE APPLY REAL SUPERVISIONADO (2026-09-24)
+
+O primeiro maintenance apply real supervisionado foi executado com sucesso e isolamento estrito via orquestrador (`CatalogMaintenanceService` / `catalog-maintenance.ts`):
+
+* **Comando executado:**
+  ```powershell
+  pnpm.cmd exec tsx src/scripts/catalog-maintenance.ts --mode full --apply --refresh-limit 10 --acquisition-limit 10
+  ```
+* **Session ID:** `403bcf4e-4cba-4eb4-b0cd-71be0b0c4680`
+* **Contagem de Catálogo:**
+  * `CATALOG_COUNT_BEFORE`: **504**
+  * `CATALOG_COUNT_AFTER`: **514** (+10 novos jogos ingeridos via acquisition; zero remoções ou duplicações).
+* **Métricas do Refresh Real:**
+  * `requested: 10`, `processed: 10`, `updated: 7`, `noChange: 0`, `failed: 3`.
+  * Os 3 bloqueios de identidade conhecidos (Portal, Batman: Arkham Asylum e Doom) permaneceram protegidos via fail-closed sem sofrer mutações nem bloquear a etapa seguinte.
+  * 100% de preservação de identidades e integridade de campos válidos.
+* **Métricas do Acquisition Real:**
+  * `requested: 10`, `processed: 10`, `inserted: 10`, `skipped: 0`, `ambiguous: 0`, `failed: 0`.
+  * Todos os 10 candidatos aprovados no Steam Quality Gate, confident matching, contrato de trailers canônicos e dedupe pós-write (`ALREADY_EXISTS`).
+* **Proteção de Lock:**
+  * Lock atômico adquirido com sucesso antes de qualquer leitura ou escrita.
+  * Mantido durante toda a execução das etapas REFRESH e ACQUISITION.
+  * Liberado com sucesso ao final no bloco `finally`.
+* **Idempotência Pós-Apply (Dry-Run 10/10 com Catálogo 514):**
+  * `CATALOG_COUNT_BEFORE`: 514 $\rightarrow$ `CATALOG_COUNT_AFTER`: 514.
+  * Zero escritas adicionais (`additionalWrites: 0`).
+  * Candidatos recém-adquiridos assimilados com sucesso no catálogo.
+* **Resultado Geral da Manutenção:** **PARTIAL** (devido aos 3 candidate-level failures legítimos do refresh).
+* **Novo Estado Persistido do Catálogo:** **514 jogos**.
