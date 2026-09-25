@@ -119,7 +119,7 @@ test('queue hands approved patch to next executor and produces cumulative patch'
   const r = await executeQueue({ ...f, queue, agent: async x => {
     if (x.role === 'executor' && x.task.id === 'smoke') await makeFile(x.work, 'first\n');
     if (x.role === 'executor' && x.task.id === 'next') {
-      secondSawFirst = (await readFile(path.join(x.work, 'docs/result.md'), 'utf8')) === 'first\n';
+      secondSawFirst = (await readFile(path.join(x.work, 'docs/result.md'), 'utf8')).replaceAll('\r\n', '\n') === 'first\n';
       await writeFile(path.join(x.work, 'docs/next.md'), 'second\n');
     }
     return approved;
