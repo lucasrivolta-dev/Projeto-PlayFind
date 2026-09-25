@@ -313,10 +313,7 @@ Lucas Rivolta
 
 O histórico completo de desenvolvimento e contribuições pode ser acompanhado através dos commits do repositório.
 
-<div align="center">
+
 🎮 NextPlay
-
 Seu próximo jogo pode estar a um swipe de distância.
-
-</div>
 
