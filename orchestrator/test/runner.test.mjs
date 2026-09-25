@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { execute, validateTask, validateDecision, safeEnv, windowsCommand, command } from '../runner.mjs';
+import { execute, executeQueue, validateQueue, validateTask, validateDecision, safeEnv, windowsCommand, command } from '../runner.mjs';
 
 const task = { id: 'smoke', title: 'Smoke', prompt: 'Create docs/result.md', allowedPaths: ['docs/result.md'], checks: ['orchestrator'], model: 'gpt-6-sol', reasoning: 'low', reviewReasoning: 'low', maxAttempts: 2, timeoutMinutes: 1, requiresManualValidation: false };
 const approved = { decision: 'APPROVED', summary: 'OK', blockingIssues: [] };
@@ -105,4 +105,53 @@ test('lock rejects simultaneous run and is preserved', async t => {
 });
 test('timeout terminates command', async () => {
   await assert.rejects(command(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { timeoutMs: 100 }), /Tempo limite/);
+});
+test('queue rejects duplicate or unbounded tasks', () => {
+  assert.throws(() => validateQueue({ id: 'queue', tasks: [task, task] }), /repetido/);
+  assert.throws(() => validateQueue({ id: 'queue', tasks: [task] }), /2 ou 3/);
+  assert.throws(() => validateQueue({ id: 'queue', tasks: [task, { ...task, id: 'next', allowedPaths: ['.env'] }] }), /Escopo/);
+});
+test('queue hands approved patch to next executor and produces cumulative patch', async t => {
+  const f = await fixture(t);
+  const next = { ...task, id: 'next', prompt: 'Read docs/result.md then create docs/next.md', allowedPaths: ['docs/next.md'] };
+  const queue = { id: 'flow', tasks: [task, next] };
+  let secondSawFirst = false;
+  const r = await executeQueue({ ...f, queue, agent: async x => {
+    if (x.role === 'executor' && x.task.id === 'smoke') await makeFile(x.work, 'first\n');
+    if (x.role === 'executor' && x.task.id === 'next') {
+      secondSawFirst = (await readFile(path.join(x.work, 'docs/result.md'), 'utf8')) === 'first\n';
+      await writeFile(path.join(x.work, 'docs/next.md'), 'second\n');
+    }
+    return approved;
+  } });
+  assert.equal(r.status, 'READY_FOR_REVIEW', r.reason);
+  assert.equal(r.steps.length, 2); assert.equal(secondSawFirst, true);
+  const patch = await readFile(path.join(r.runDir, 'changes.patch'), 'utf8');
+  assert.match(patch, /docs\/result.md/); assert.match(patch, /docs\/next.md/);
+  assert.equal(f.git('status', '--porcelain'), '');
+});
+test('queue stops after first human decision without starting next task', async t => {
+  const f = await fixture(t); let second = false;
+  const queue = { id: 'stop', tasks: [task, { ...task, id: 'next', allowedPaths: ['docs/next.md'] }] };
+  const r = await executeQueue({ ...f, queue, agent: async x => {
+    if (x.task.id === 'next') second = true;
+    return { decision: 'HUMAN_REQUIRED', summary: 'Needs product decision', blockingIssues: [] };
+  } });
+  assert.equal(r.status, 'HUMAN_REQUIRED'); assert.equal(r.steps.length, 1); assert.equal(second, false);
+});
+test('queue rejects unauthorized changes to inherited file', async t => {
+  const f = await fixture(t);
+  const queue = { id: 'guard', tasks: [task, { ...task, id: 'next', allowedPaths: ['docs/next.md'] }] };
+  const r = await executeQueue({ ...f, queue, agent: async x => {
+    if (x.role === 'executor' && x.task.id === 'smoke') await makeFile(x.work, 'first\n');
+    if (x.role === 'executor' && x.task.id === 'next') await makeFile(x.work, 'tampered\n');
+    return approved;
+  } });
+  assert.equal(r.status, 'HUMAN_REQUIRED'); assert.equal(r.steps.length, 2);
+  assert.match(r.steps[1].reason, /arquivo herdado fora do escopo/);
+});
+test('queue lock prevents a parallel standalone task', async t => {
+  const f = await fixture(t); await mkdir(f.stateRoot);
+  await writeFile(path.join(f.stateRoot, 'queue.lock'), 'running');
+  await assert.rejects(execute({ ...f, agent: () => assert.fail() }), /fila está ativa/);
 });
