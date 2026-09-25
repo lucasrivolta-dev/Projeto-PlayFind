@@ -1,0 +1,13 @@
+{
+  "id": "001-smoke",
+  "title": "Documentar o primeiro teste do Autopilot",
+  "prompt": "Leia AGENTS.md e orchestrator/README.md. Crie somente docs/autopilot-smoke.md com um resumo curto do fluxo real implementado, comandos de simulação e limites da v0.1. Não afirme que execução real ou Android foram validados. Não altere outros arquivos.",
+  "allowedPaths": ["docs/autopilot-smoke.md"],
+  "checks": ["orchestrator"],
+  "model": "gpt-6-sol",
+  "reasoning": "low",
+  "reviewReasoning": "low",
+  "maxAttempts": 2,
+  "timeoutMinutes": 10,
+  "requiresManualValidation": false
+}
