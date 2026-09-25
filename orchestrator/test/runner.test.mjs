@@ -190,3 +190,40 @@ test('does not resume an explicit human decision', async t => {
   const stopped = await executeQueue({ ...f, queue, agent: async () => ({ decision: 'HUMAN_REQUIRED', summary: 'Needs product decision', blockingIssues: [] }) });
   await assert.rejects(executeQueue({ ...f, queue, resumeFrom: path.join(stopped.runDir, 'report.json'), agent: () => assert.fail() }), /Retomada permitida/);
 });
+test('resumes a verified 401 without rerunning the approved first stage', async t => {
+  const f = await fixture(t);
+  const queue = { id: 'auth-resume', tasks: [task, { ...task, id: 'next', allowedPaths: ['docs/next.md'] }] };
+  let firstExecutions = 0;
+  const stopped = await executeQueue({ ...f, queue, agent: async x => {
+    if (x.task.id === 'smoke' && x.role === 'executor') { firstExecutions++; await makeFile(x.work, 'first\n'); }
+    if (x.task.id === 'next' && x.role === 'executor') {
+      await writeFile(path.join(x.runDir, 'executor-1.jsonl'), '{"type":"turn.failed","error":{"message":"401 Unauthorized"}}\n');
+      throw Error('Codex executor saiu com 1; consulte o log');
+    }
+    return approved;
+  } });
+  assert.equal(stopped.status, 'HUMAN_REQUIRED');
+  const resumed = await executeQueue({ ...f, queue, resumeFrom: path.join(stopped.runDir, 'report.json'), agent: async x => {
+    assert.equal(x.task.id, 'next');
+    if (x.role === 'executor') {
+      assert.equal((await readFile(path.join(x.work, 'docs/result.md'), 'utf8')).replaceAll('\r\n', '\n'), 'first\n');
+      await writeFile(path.join(x.work, 'docs/next.md'), 'second\n');
+    }
+    return approved;
+  } });
+  assert.equal(resumed.status, 'READY_FOR_REVIEW', resumed.reason);
+  assert.equal(firstExecutions, 1);
+});
+test('does not resume a generic Codex failure without 401 evidence', async t => {
+  const f = await fixture(t);
+  const queue = { id: 'generic-failure', tasks: [task, { ...task, id: 'next', allowedPaths: ['docs/next.md'] }] };
+  const stopped = await executeQueue({ ...f, queue, agent: async x => {
+    if (x.task.id === 'smoke' && x.role === 'executor') await makeFile(x.work);
+    if (x.task.id === 'next' && x.role === 'executor') {
+      await writeFile(path.join(x.runDir, 'executor-1.jsonl'), '{"type":"turn.failed","error":{"message":"Other error"}}\n');
+      throw Error('Codex executor saiu com 1; consulte o log');
+    }
+    return approved;
+  } });
+  await assert.rejects(executeQueue({ ...f, queue, resumeFrom: path.join(stopped.runDir, 'report.json'), agent: () => assert.fail() }), /Retomada permitida/);
+});

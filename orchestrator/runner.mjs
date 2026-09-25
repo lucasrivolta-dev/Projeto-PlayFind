@@ -142,7 +142,10 @@ async function codexAgent({ role, work, runDir, task, attempt, prompt }) {
   const output = path.join(runDir, `${role}-${attempt}.json`);
   const args = ['--ask-for-approval', 'never', 'exec', '--sandbox', role === 'reviewer' ? 'read-only' : 'workspace-write', '--model', task.model, '-c', `model_reasoning_effort="${role === 'reviewer' ? task.reviewReasoning : task.reasoning}"`, '--json', '--output-schema', path.join(runDir, 'response.schema.json'), '--output-last-message', output, '-'];
   const r = await command('codex', args, { cwd: work, input: prompt, timeoutMs: task.timeoutMinutes * 60000, log: path.join(runDir, `${role}-${attempt}.jsonl`) });
-  if (r.code !== 0) throw Error(`Codex ${role} saiu com ${r.code}; consulte o log`);
+  if (r.code !== 0) {
+    if (/401 Unauthorized/i.test(r.stdout + r.stderr)) throw Error('Autenticação do Codex recusada (401); renove o login antes de retomar');
+    throw Error(`Codex ${role} saiu com ${r.code}; consulte o log`);
+  }
   return validateDecision(JSON.parse(await readFile(output, 'utf8')));
 }
 export async function execute({ root = ROOT, task, dryRun = true, agent = codexAgent, runChecks = checks, stateRoot, previous = null, queueRun = false, baseRef = null } = {}) {
@@ -280,8 +283,13 @@ export async function executeQueue({ root = ROOT, queue, dryRun = true, agent = 
     if (!Array.isArray(old.steps) || !old.steps.length || old.steps.length > queue.tasks.length) throw Error('Etapas da fila inválidas');
     completed = old.steps.slice(0, -1);
     const interrupted = old.steps.at(-1);
-    if (interrupted.status !== 'HUMAN_REQUIRED' || interrupted.reason !== 'Execução interrompida' || interrupted.task !== queue.tasks[completed.length]?.id ||
-      completed.some((s, i) => s.task !== queue.tasks[i].id || s.status !== 'READY_FOR_REVIEW')) throw Error('Retomada permitida apenas após interrupção, sem decisão humana pendente');
+    let authFailure = false;
+    if (/^(Codex executor saiu com 1; consulte o log|Autenticação do Codex recusada \(401\))/.test(interrupted.reason || '') && interrupted.attempts > 0 && !interrupted.files?.length) {
+      const log = await readFile(path.join(interrupted.runDir, `executor-${interrupted.attempts}.jsonl`), 'utf8');
+      authFailure = /401 Unauthorized/i.test(log.slice(-32768));
+    }
+    if (interrupted.status !== 'HUMAN_REQUIRED' || !(interrupted.reason === 'Execução interrompida' || authFailure) || interrupted.task !== queue.tasks[completed.length]?.id ||
+      completed.some((s, i) => s.task !== queue.tasks[i].id || s.status !== 'READY_FOR_REVIEW')) throw Error('Retomada permitida apenas após interrupção ou falha 401 comprovada, sem decisão humana pendente');
     if (completed.length) {
       const last = completed.at(-1);
       const approved = JSON.parse(await readFile(path.join(last.runDir, 'report.json'), 'utf8'));
