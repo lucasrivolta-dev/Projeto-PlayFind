@@ -318,4 +318,5 @@ O histórico completo de desenvolvimento e contribuições pode ser acompanhado 
 
 Seu próximo jogo pode estar a um swipe de distância.
 
-</div> ```
+</div>
+
