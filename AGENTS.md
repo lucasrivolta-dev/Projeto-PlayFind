@@ -2620,9 +2620,9 @@ O sistema de catálogo conta agora com uma camada de orquestração operacional 
   ```
 
 ### Estado Atual:
-* **Catálogo persistido:** **539 jogos**.
+* **Catálogo persistido:** **589 jogos**.
 * **Status:** Implementado, testado (396/396 testes PASS) e documentado.
-* **Execuções reais:** Primeiro (504 -> 514) e segundo (514 -> 539) maintenance apply real supervisionados executados com sucesso.
+* **Execuções reais:** Primeiro (504 -> 514), segundo (514 -> 539) e terceiro em escala operacional completa (539 -> 589) maintenance apply real supervisionados executados com sucesso.
 
 ---
 
@@ -2689,3 +2689,37 @@ O segundo maintenance apply real supervisionado foi executado com sucesso e isol
   * Candidatos recém-adquiridos assimilados com sucesso no catálogo e validados como `ALREADY_EXISTS`.
 * **Resultado Geral da Manutenção:** **PARTIAL** (devido ao candidate-level failure legítimo de Batman: Arkham Asylum no refresh).
 * **Novo Estado Persistido do Catálogo:** **539 jogos**.
+
+---
+
+# 61. TERCEIRO MAINTENANCE APPLY REAL SUPERVISIONADO (50/50 — LIMITE OPERACIONAL COMPLETO) (2026-09-25)
+
+O primeiro maintenance apply real supervisionado no limite operacional completo (50/50) foi executado com sucesso e isolamento estrito via orquestrador (`CatalogMaintenanceService` / `catalog-maintenance.ts`):
+
+* **Comando executado:**
+  ```powershell
+  pnpm.cmd exec tsx src/scripts/catalog-maintenance.ts --mode full --apply --refresh-limit 50 --acquisition-limit 50
+  ```
+* **Session ID:** `c1094347-e07e-4fcf-9ea4-f16dd30434d7`
+* **Contagem de Catálogo:**
+  * `CATALOG_COUNT_BEFORE`: **539**
+  * `CATALOG_COUNT_AFTER`: **589** (+50 novos jogos ingeridos via acquisition; zero remoções ou duplicações).
+* **Métricas do Refresh Real:**
+  * `requested: 50`, `processed: 50`, `updated: 49`, `noChange: 0`, `failed: 1`.
+  * Falha conhecida encontrada: apenas *Batman: Arkham Asylum* (`Steam App ID mismatch: expected 35010, received 35140`) permaneceu protegido via fail-closed sem sofrer mutações nem bloquear a etapa seguinte.
+  * Portal (`steamAppId: 52003`) e Doom (`steamAppId: 430910`) permaneceram com identidades intactas e inalteradas.
+  * 100% de preservação de identidades e integridade de campos válidos; zero oferta duplicada e zero identity swap.
+* **Métricas do Acquisition Real:**
+  * `requested: 50`, `processed: 50`, `inserted: 50`, `skipped: 0`, `ambiguous: 0`, `failed: 0`.
+  * Todos os 50 candidatos aprovados no Steam Quality Gate, confident matching, contrato de trailers canônicos e dedupe pós-write (`ALREADY_EXISTS`).
+  * 50 novos jogos ingeridos: Eriksholm: The Stolen Dream, SuperHot, Stellar Blade, Overcooked!, Monument Valley II, Pokémon Omega Ruby, Nex Machina, Arknights, Sifu, Tormentum: Dark Sorrow, Hellblade: Senua's Sacrifice, Everlasting Summer, OneShot, Void Stranger, Genshin Impact, Gorogoa, Dragon Quest VII Reimagined, The Séance of Blake Manor, Gabriel Knight: Sins of the Fathers - 20th Anniversary Edition, Final Fantasy Tactics: The Ivalice Chronicles, Dropsy, Dystopika, Post Void, The Last Guardian, Caves of Qud, Battle Chef Brigade, Shin Megami Tensei V, Wanderstop, Ni no Kuni: Wrath of the White Witch Remastered, Pokémon Pokopia, The Evil Within 2, Judgment, Supraland, F1 2017, Tormented Souls II, Workers & Resources: Soviet Republic, American Arcadia, Pokémon Legends: Arceus, Ravendawn, Ender Magnolia: Bloom in the Mist, Fire Emblem Echoes: Shadows of Valentia, AM2R: Return of Samus, Burnhouse Lane, When the Darkness comes, Xenoblade Chronicles X, The Alters, Keep Driving, Cryptmaster, The Count Lucanor, Football Manager 2024.
+* **Proteção de Lock:**
+  * Lock atômico adquirido com sucesso antes de qualquer leitura ou escrita.
+  * Mantido durante toda a execução das etapas REFRESH e ACQUISITION.
+  * Liberado com sucesso ao final no bloco `finally`.
+* **Idempotência Pós-Apply (Dry-Run 50/50 com Catálogo 589):**
+  * `CATALOG_COUNT_BEFORE`: 589 $\rightarrow$ `CATALOG_COUNT_AFTER`: 589.
+  * Zero escritas adicionais (`additionalWrites: 0`).
+  * Candidatos recém-adquiridos assimilados com sucesso no catálogo e validados como `ALREADY_EXISTS` (50 de 50).
+* **Resultado Geral da Manutenção:** **PARTIAL** (devido ao candidate-level failure legítimo de Batman: Arkham Asylum no refresh).
+* **Novo Estado Persistido do Catálogo:** **589 jogos**.
