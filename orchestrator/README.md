@@ -55,6 +55,8 @@ node orchestrator/runner.mjs queue-run orchestrator/queues/002-two-step-smoke.js
 
 A fila roda em uma pasta irmã `<repo>-autopilot/queue-<id>-<timestamp>/`, com `queue.json`, `report.json` e `changes.patch` cumulativo quando todas as etapas terminam bem. Os relatórios e logs detalhados de cada tarefa continuam em suas próprias pastas. A fila tem um lock exclusivo; uma execução avulsa é recusada enquanto ela estiver ativa. Para revisar, comece pelo `report.json` da fila e pelo `changes.patch`, depois abra os relatórios individuais. O limite de 2–3 tarefas e no máximo duas tentativas por tarefa é fixo nesta versão.
 
+Se o subprocesso for interrompido após uma etapa aprovada, é possível recomeçar **somente a etapa interrompida** com `node orchestrator/runner.mjs queue-resume <caminho-do-report.json-da-fila>`. Esse comando lê a definição congelada em `queue.json`, confere as evidências da etapa anterior e reutiliza o patch aprovado numa cópia nova. Não reaproveita alterações parciais do agente interrompido. A retomada exige `reason: "Execução interrompida"`; uma decisão `HUMAN_REQUIRED` explícita, falha de testes ou escopo não são retomadas automaticamente. Se a branch tiver avançado desde então, o clone da etapa retomada usa o commit original, que precisa ser ancestral do HEAD atual.
+
 O exemplo usa **gpt-6-sol / raciocínio Baixo** em cada executor/revisor. Duas tarefas gastam mais limite do Codex que o smoke de uma etapa. Não inclua trabalho de produto na fila sem definir previamente o objetivo e os caminhos específicos de cada tarefa. O status final `READY_FOR_REVIEW` ainda requer revisão humana antes de publicar qualquer mudança.
 
 ## Resultados e acompanhamento
@@ -82,7 +84,7 @@ Estados:
 
 `APPROVED` no JSON do agente não significa merge aprovado. Alterações Flutter sempre exigem validação manual. Player/gestos continuam exigindo Samsung físico primeiro, conforme `AGENTS.md`.
 
-Se o processo for encerrado abruptamente, o lock pode permanecer. Leia `run.lock` ou `queue.lock`, confirme que o PID e seus subprocessos terminaram e só então remova esse arquivo específico. O runner nunca remove lock de outra execução por conta própria. Uma nova execução usa uma cópia nova; não retoma trabalho parcialmente concluído.
+Se o processo for encerrado abruptamente, o lock pode permanecer. Leia `run.lock` ou `queue.lock`, confirme que o PID e seus subprocessos terminaram e só então remova esse arquivo específico. O runner nunca remove lock de outra execução por conta própria. A retomada usa uma cópia nova e só transporta o trabalho já aprovado.
 
 ## Formato da tarefa
 
@@ -107,7 +109,7 @@ Use somente código/dependências confiáveis e revise seus servidores MCP e con
 
 ## Validação desta entrega
 
-Testes automatizados locais cobrem aprovação, feedback/correção, limite de tentativas, working tree sujo, falha de baseline, lock, escopo, inclusão de novos arquivos no patch, resposta inválida, mudanças durante revisão, validação manual, filtragem de ambiente, quoting Windows, timeout, transporte do patch entre etapas, parada e preservação do escopo herdado.
+Testes automatizados locais cobrem aprovação, feedback/correção, limite de tentativas, working tree sujo, falha de baseline, lock, escopo, inclusão de novos arquivos no patch, resposta inválida, mudanças durante revisão, validação manual, filtragem de ambiente, quoting Windows, timeout, transporte do patch entre etapas, parada, preservação do escopo herdado e retomada após interrupção com a branch atualizada.
 
 O fluxo dos agentes nos testes automatizados é simulado. O smoke de **uma tarefa** da v0.1 foi executado com Codex autenticado no Windows: baseline e checks passaram, uma tentativa, revisão APPROVED, resultado READY_FOR_REVIEW. A fila v0.2 ainda precisa do teste autenticado no Windows. Backend, Flutter e Android não foram executados para esta mudança isolada no orquestrador.
 

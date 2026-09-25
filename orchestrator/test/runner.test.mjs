@@ -155,3 +155,38 @@ test('queue lock prevents a parallel standalone task', async t => {
   await writeFile(path.join(f.stateRoot, 'queue.lock'), 'running');
   await assert.rejects(execute({ ...f, agent: () => assert.fail() }), /fila está ativa/);
 });
+test('resumes only interrupted second stage with approved first patch', async t => {
+  const f = await fixture(t);
+  const next = { ...task, id: 'next', allowedPaths: ['docs/next.md'] };
+  const queue = { id: 'resume', tasks: [task, next] };
+  let firstExecutions = 0;
+  const interrupted = await executeQueue({ ...f, queue, agent: async x => {
+    if (x.task.id === 'smoke' && x.role === 'executor') { firstExecutions++; await makeFile(x.work, 'first\n'); }
+    if (x.task.id === 'next' && x.role === 'executor') throw Error('Execução interrompida');
+    return approved;
+  } });
+  assert.equal(interrupted.status, 'HUMAN_REQUIRED');
+  assert.equal(interrupted.steps[0].status, 'READY_FOR_REVIEW');
+  assert.equal(interrupted.steps[1].reason, 'Execução interrompida');
+  await writeFile(path.join(f.root, 'tool-version.txt'), 'updated runner');
+  f.git('add', 'tool-version.txt'); f.git('commit', '-m', 'update runner after interruption');
+  const resumed = await executeQueue({ ...f, queue, resumeFrom: path.join(interrupted.runDir, 'report.json'), agent: async x => {
+    assert.equal(x.task.id, 'next');
+    if (x.role === 'executor') {
+      await assert.rejects(readFile(path.join(x.work, 'tool-version.txt')), { code: 'ENOENT' });
+      assert.equal((await readFile(path.join(x.work, 'docs/result.md'), 'utf8')).replaceAll('\r\n', '\n'), 'first\n');
+      await writeFile(path.join(x.work, 'docs/next.md'), 'second\n');
+    }
+    return approved;
+  } });
+  assert.equal(resumed.status, 'READY_FOR_REVIEW', resumed.reason);
+  assert.equal(resumed.steps.length, 2); assert.equal(firstExecutions, 1);
+  const patch = await readFile(path.join(resumed.runDir, 'changes.patch'), 'utf8');
+  assert.match(patch, /docs\/result.md/); assert.match(patch, /docs\/next.md/);
+});
+test('does not resume an explicit human decision', async t => {
+  const f = await fixture(t);
+  const queue = { id: 'no-resume', tasks: [task, { ...task, id: 'next', allowedPaths: ['docs/next.md'] }] };
+  const stopped = await executeQueue({ ...f, queue, agent: async () => ({ decision: 'HUMAN_REQUIRED', summary: 'Needs product decision', blockingIssues: [] }) });
+  await assert.rejects(executeQueue({ ...f, queue, resumeFrom: path.join(stopped.runDir, 'report.json'), agent: () => assert.fail() }), /Retomada permitida/);
+});

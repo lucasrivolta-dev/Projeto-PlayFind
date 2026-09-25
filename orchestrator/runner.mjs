@@ -145,10 +145,15 @@ async function codexAgent({ role, work, runDir, task, attempt, prompt }) {
   if (r.code !== 0) throw Error(`Codex ${role} saiu com ${r.code}; consulte o log`);
   return validateDecision(JSON.parse(await readFile(output, 'utf8')));
 }
-export async function execute({ root = ROOT, task, dryRun = true, agent = codexAgent, runChecks = checks, stateRoot, previous = null, queueRun = false } = {}) {
+export async function execute({ root = ROOT, task, dryRun = true, agent = codexAgent, runChecks = checks, stateRoot, previous = null, queueRun = false, baseRef = null } = {}) {
   validateTask(task);
   root = path.resolve(root);
-  const base = (await git(root, ['rev-parse', 'HEAD'])).trim();
+  const base = baseRef || (await git(root, ['rev-parse', 'HEAD'])).trim();
+  if (baseRef) {
+    if (!/^[0-9a-f]{40}$/.test(baseRef)) throw Error('Commit original inválido');
+    const ancestor = await command('git', ['merge-base', '--is-ancestor', baseRef, 'HEAD'], { cwd: root });
+    if (ancestor.code !== 0) throw Error('Commit original não é ancestral da branch atual');
+  }
   const agents = await readFile(path.join(root, 'AGENTS.md'), 'utf8');
   const plan = { task: task.id, model: task.model, reasoning: task.reasoning, reviewReasoning: task.reviewReasoning, maxAttempts: task.maxAttempts, checks: task.checks, base, allowedPaths: task.allowedPaths };
   if (dryRun) return { status: 'DRY_RUN', ...plan };
@@ -177,6 +182,7 @@ export async function execute({ root = ROOT, task, dryRun = true, agent = codexA
     await writeFile(path.join(runDir, 'task.json'), json(task));
     await git(root, ['clone', '--local', '--no-hardlinks', '--', root, work]);
     await git(work, ['remote', 'remove', 'origin']);
+    if (baseRef) await git(work, ['switch', '--detach', baseRef]);
     await git(work, ['switch', '-c', `agent/${task.id}`]);
     if ((await git(work, ['rev-parse', 'HEAD'])).trim() !== base) throw Error('HEAD mudou durante clone');
     if (agent === codexAgent) await prepareDependencies(work, task, runDir);
@@ -251,26 +257,50 @@ export function validateQueue(queue) {
   }
   return queue;
 }
-export async function executeQueue({ root = ROOT, queue, dryRun = true, agent = codexAgent, runChecks = checks, stateRoot } = {}) {
+export async function executeQueue({ root = ROOT, queue, dryRun = true, agent = codexAgent, runChecks = checks, stateRoot, resumeFrom = null } = {}) {
   validateQueue(queue);
   root = path.resolve(root);
-  const base = (await git(root, ['rev-parse', 'HEAD'])).trim();
+  const currentBase = (await git(root, ['rev-parse', 'HEAD'])).trim();
+  const oldReport = resumeFrom ? JSON.parse(await readFile(path.resolve(resumeFrom), 'utf8')) : null;
+  const base = oldReport?.base || currentBase;
+  if (resumeFrom && base !== currentBase) {
+    if (!/^[0-9a-f]{40}$/.test(base) || (await command('git', ['merge-base', '--is-ancestor', base, currentBase], { cwd: root })).code !== 0) throw Error('Commit original não é ancestral da branch atual');
+  }
   const outline = { queue: queue.id, base, tasks: queue.tasks.map(t => ({ id: t.id, model: t.model, reasoning: t.reasoning, reviewReasoning: t.reviewReasoning, checks: t.checks, allowedPaths: t.allowedPaths })) };
+  if (resumeFrom && dryRun) throw Error('Retomada exige execução real');
   if (dryRun) return { status: 'DRY_RUN', ...outline };
   if ((await git(root, ['status', '--porcelain', '--untracked-files=all'])).trim()) throw Error('Working tree tem alterações. A fila exige uma cópia limpa.');
+  let completed = [];
+  let previous = null;
+  if (resumeFrom) {
+    const old = oldReport;
+    if (old.queue !== queue.id || old.base !== base || old.status !== 'HUMAN_REQUIRED' || old.runDir !== path.dirname(path.resolve(resumeFrom))) throw Error('Relatório de retomada não corresponde ao commit/fila');
+    const frozen = JSON.parse(await readFile(path.join(old.runDir, 'queue.json'), 'utf8'));
+    if (json(frozen) !== json(queue)) throw Error('Definição da fila mudou desde a interrupção');
+    if (!Array.isArray(old.steps) || !old.steps.length || old.steps.length > queue.tasks.length) throw Error('Etapas da fila inválidas');
+    completed = old.steps.slice(0, -1);
+    const interrupted = old.steps.at(-1);
+    if (interrupted.status !== 'HUMAN_REQUIRED' || interrupted.reason !== 'Execução interrompida' || interrupted.task !== queue.tasks[completed.length]?.id ||
+      completed.some((s, i) => s.task !== queue.tasks[i].id || s.status !== 'READY_FOR_REVIEW')) throw Error('Retomada permitida apenas após interrupção, sem decisão humana pendente');
+    if (completed.length) {
+      const last = completed.at(-1);
+      const approved = JSON.parse(await readFile(path.join(last.runDir, 'report.json'), 'utf8'));
+      if (approved.status !== 'READY_FOR_REVIEW' || approved.base !== base || json(approved.files) !== json(last.files) || !last.files?.length) throw Error('Etapa anterior perdeu aprovação ou evidências');
+      previous = { base, files: last.files, patch: await readFile(path.join(last.runDir, 'changes.patch'), 'utf8') };
+    }
+  }
   const state = stateRoot || path.join(path.dirname(root), `${path.basename(root)}-autopilot`);
   await mkdir(state, { recursive: true });
   const lockPath = path.join(state, 'queue.lock');
   const lock = await open(lockPath, 'wx').catch(() => { throw Error(`Fila já ativa: ${lockPath}`); });
   const runDir = path.join(state, `queue-${queue.id}-${Date.now()}`);
-  const report = { ...outline, status: 'RUNNING', runDir, steps: [] };
+  const report = { ...outline, status: 'RUNNING', runDir, ...(resumeFrom ? { resumedFrom: path.resolve(resumeFrom) } : {}), steps: [...completed] };
   try {
     await lock.writeFile(json({ pid: process.pid, runDir }));
     await mkdir(runDir);
     await writeFile(path.join(runDir, 'queue.json'), json(queue));
-    let previous = null;
-    for (const task of queue.tasks) {
-      const result = await execute({ root, task, dryRun: false, agent, runChecks, stateRoot: state, previous, queueRun: true });
+    for (const task of queue.tasks.slice(completed.length)) {
+      const result = await execute({ root, task, dryRun: false, agent, runChecks, stateRoot: state, previous, queueRun: true, baseRef: base === currentBase ? null : base });
       report.steps.push({ task: task.id, status: result.status, attempts: result.attempts, files: result.files || [], runDir: result.runDir, reason: result.reason });
       await writeFile(path.join(runDir, 'report.json'), json(report));
       if (result.status !== 'READY_FOR_REVIEW') {
@@ -300,11 +330,18 @@ export async function executeQueue({ root = ROOT, queue, dryRun = true, agent = 
 }
 async function main() {
   const [mode, taskPath, ...extra] = process.argv.slice(2);
-  if (!['plan', 'run', 'queue-plan', 'queue-run'].includes(mode) || !taskPath || extra.length) throw Error('Uso: node orchestrator/runner.mjs <plan|run|queue-plan|queue-run> <json>');
-  const config = JSON.parse(await readFile(path.resolve(taskPath), 'utf8'));
-  const result = mode.startsWith('queue-')
-    ? await executeQueue({ queue: config, dryRun: mode === 'queue-plan' })
-    : await execute({ task: config, dryRun: mode === 'plan' });
+  if (!['plan', 'run', 'queue-plan', 'queue-run', 'queue-resume'].includes(mode) || !taskPath || extra.length) throw Error('Uso: node orchestrator/runner.mjs <plan|run|queue-plan|queue-run|queue-resume> <json>');
+  let result;
+  if (mode === 'queue-resume') {
+    const reportPath = path.resolve(taskPath);
+    const config = JSON.parse(await readFile(path.join(path.dirname(reportPath), 'queue.json'), 'utf8'));
+    result = await executeQueue({ queue: config, dryRun: false, resumeFrom: reportPath });
+  } else {
+    const config = JSON.parse(await readFile(path.resolve(taskPath), 'utf8'));
+    result = mode.startsWith('queue-')
+      ? await executeQueue({ queue: config, dryRun: mode === 'queue-plan' })
+      : await execute({ task: config, dryRun: mode === 'plan' });
+  }
   console.log(json(result));
   if (result.status === 'HUMAN_REQUIRED') process.exitCode = 2;
 }
