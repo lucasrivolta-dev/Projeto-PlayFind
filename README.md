@@ -1,144 +1,321 @@
 <div align="center">
 
-# NextPlay
+# 🎮 NextPlay
 
 ### Descubra seu próximo jogo.
 
-Explore jogos em um feed vertical de trailers, encontre títulos que combinam com você e organize o que quer jogar.
+**Um app de descoberta de jogos em formato de feed vertical.**  
+Assista a trailers, descubra títulos fora do óbvio e construa uma biblioteca baseada no seu gosto.
 
-**Flutter · Dart · Node.js · TypeScript · Fastify · PostgreSQL · Prisma**
+<br>
+
+**Flutter · Dart · Node.js · TypeScript · Fastify · PostgreSQL · Prisma · Firebase**
 
 </div>
 
-## O projeto
+---
 
-Sabe quando você quer jogar algo diferente, mas não sabe por onde começar? O NextPlay nasceu dessa ideia. Em vez de depender só de listas e rankings, você pode descobrir jogos pelo trailer, explorar o catálogo e guardar os títulos que chamaram sua atenção.
+## 📖 Sobre o NextPlay
 
-O projeto reúne um aplicativo Flutter e uma API própria. O aplicativo consome dados normalizados pela API, que mantém o catálogo, as interações dos usuários e o feed de descoberta.
+Encontrar um jogo novo para jogar nem sempre é fácil.
 
-## Prévia
+As lojas possuem milhares de títulos, recomendações costumam repetir os mesmos jogos populares e muitas vezes você acaba passando mais tempo procurando algo interessante do que realmente jogando.
+
+O **NextPlay** nasceu para tornar essa descoberta mais simples.
+
+A proposta é oferecer uma experiência semelhante a um feed de vídeos curtos: o usuário navega verticalmente por jogos, assiste aos trailers e pode rapidamente descobrir títulos que chamam sua atenção.
+
+Conforme utiliza o aplicativo, suas preferências, interações e histórico ajudam a API a construir um feed cada vez mais relevante.
+
+---
+
+## 📱 Preview
 
 <div align="center">
-  <img src="samsung_screen.png" alt="Feed do NextPlay em um celular Android" width="290">
+
+<img src="samsung_screen.png" alt="Feed do NextPlay em execução em um dispositivo Android" width="290">
+
 </div>
 
-> Captura do aplicativo em desenvolvimento. A reprodução e a disponibilidade dos trailers dependem da mídia de cada jogo e do provedor de vídeo.
+<p align="center">
+  <i>Versão atual do feed do NextPlay em desenvolvimento.</i>
+</p>
 
-## Funcionalidades
+> A reprodução e disponibilidade dos trailers dependem da mídia disponível para cada jogo e do provedor de vídeo.
 
-| Área | O que já existe no projeto |
+---
+
+## ✨ Funcionalidades
+
+| Área | Funcionalidade |
 | --- | --- |
-| **Feed** | Navegação vertical por jogos com trailers quando disponíveis e imagem de fallback. |
-| **Descoberta personalizada** | Seleção do feed considerando preferências, interações e jogos já vistos. |
-| **Explorar** | Busca e navegação pelo catálogo de jogos. |
-| **Detalhes** | Informações e mídia de cada jogo. |
-| **Biblioteca** | Curtidas, favoritos, jogos que o usuário quer jogar ou já jogou, notas e avaliações. |
-| **Comunidade** | Comentários e telas de fórum. |
-| **Conta** | Autenticação com Firebase e perfil do usuário. |
-| **Catálogo** | Integração e rotinas de aquisição, atualização e verificação de dados da IGDB e da Steam. |
+| 🎬 **Feed** | Navegação vertical por jogos utilizando trailers e imagens de fallback. |
+| 🧠 **Descoberta personalizada** | Recomendações baseadas em preferências, interações e jogos já visualizados. |
+| 🔎 **Explorar** | Pesquisa e navegação pelo catálogo disponível. |
+| 🎮 **Detalhes do jogo** | Informações, gêneros, plataformas e mídia de cada título. |
+| ❤️ **Biblioteca** | Curtidas, favoritos, jogos que deseja jogar, já jogou, notas e avaliações. |
+| 💬 **Comunidade** | Estrutura para comentários, discussões e fóruns relacionados aos jogos. |
+| 👤 **Conta** | Autenticação e gerenciamento de usuário utilizando Firebase. |
+| 🗃️ **Catálogo** | Pipeline de aquisição, validação e atualização de jogos provenientes da IGDB e Steam. |
 
-O NextPlay está **em desenvolvimento**. A existência de uma tela ou rotina no repositório não significa que todos os fluxos já estejam prontos para lançamento público.
+> O NextPlay ainda está em desenvolvimento. Algumas funcionalidades presentes no repositório continuam em processo de implementação, teste ou refinamento.
 
-## Como funciona
+---
+
+## 🧠 Como o feed funciona
+
+O NextPlay não foi pensado apenas como uma lista aleatória de jogos.
+
+A API considera informações como:
+
+- preferências de gênero;
+- interações do usuário;
+- jogos curtidos e favoritados;
+- jogos já visualizados;
+- histórico da biblioteca;
+- qualidade e disponibilidade dos dados do catálogo.
+
+Esses sinais são utilizados para criar uma experiência de descoberta mais personalizada e reduzir a repetição de jogos no feed.
+
+---
+
+## 🏗️ Arquitetura
 
 ```text
-Flutter (app) ──HTTP──> API Fastify ──Prisma──> PostgreSQL
-                         │
-                         ├── IGDB e Steam: dados do catálogo
-                         └── Firebase Admin: validação da identidade
-```
+                       ┌─────────────────┐
+                       │   Flutter App   │
+                       │   Android/Web   │
+                       └────────┬────────┘
+                                │
+                               HTTP
+                                │
+                       ┌────────▼────────┐
+                       │   Fastify API   │
+                       │   TypeScript    │
+                       └───┬─────────┬───┘
+                           │         │
+                         Prisma      │
+                           │         │
+                  ┌────────▼─────┐   │
+                  │ PostgreSQL   │   │
+                  └──────────────┘   │
+                                    │
+                  ┌─────────────────┼─────────────────┐
+                  │                 │                 │
+             ┌────▼────┐      ┌─────▼─────┐    ┌─────▼─────┐
+             │  IGDB   │      │   Steam   │    │ Firebase  │
+             │ Catalog │      │   Data    │    │   Auth    │
+             └─────────┘      └───────────┘    └───────────┘
 
-O app usa o UUID interno de cada jogo nas interações. IDs da IGDB e da Steam ficam como referências externas. A API combina dados do catálogo, preferências e histórico de interações para compor o feed, com mecanismos para reduzir repetições e priorizar jogos ainda não vistos.
+O aplicativo utiliza um UUID interno para identificar os jogos.
 
-## Tecnologias
+IDs externos da IGDB e da Steam são mantidos apenas como referências de integração. Isso evita acoplamento da aplicação com provedores externos e permite que diferentes fontes de dados sejam combinadas pelo backend.
 
-| Camada | Tecnologias |
-| --- | --- |
-| Aplicativo | Flutter, Dart |
-| API | Node.js, TypeScript, Fastify |
-| Persistência | PostgreSQL, Prisma |
-| Autenticação | Firebase Authentication, Firebase Admin |
-| Dados de jogos | IGDB, Steam |
-| Reprodução de trailers | YouTube no aplicativo, quando há trailer compatível |
+🛠️ Tecnologias
+Camada	Tecnologias
+📱 Aplicativo	Flutter, Dart
+⚙️ Backend	Node.js, TypeScript, Fastify
+🗄️ Banco de dados	PostgreSQL
+🔗 ORM	Prisma
+🔐 Autenticação	Firebase Authentication, Firebase Admin
+🎮 Dados de jogos	IGDB API, Steam
+🎥 Trailers	YouTube
+🌐 Comunicação	REST API
+📂 Estrutura do projeto
+NextPlay/
+│
+├── lib/                 # Aplicativo Flutter
+│   └── features/        # Funcionalidades do aplicativo
+│
+├── test/                # Testes Flutter
+├── assets/              # Recursos do aplicativo
+├── android/             # Projeto Android
+├── web/                 # Suporte web
+│
+├── backend/
+│   ├── prisma/          # Schema e migrations
+│   ├── src/
+│   │   ├── modules/     # Módulos da API
+│   │   └── scripts/     # Scripts de catálogo e manutenção
+│   └── test/            # Testes do backend
+│
+├── dev.ps1              # Automação do ambiente local
+├── pubspec.yaml
+└── README.md
 
-## Estrutura do repositório
+O projeto Flutter fica na raiz do repositório, enquanto a API e suas dependências ficam dentro de backend/.
 
-```text
-lib/             Aplicativo Flutter, telas e funcionalidades
-test/            Testes do aplicativo
-assets/          Fontes e recursos do aplicativo
-android/         Projeto Android
-web/             Suporte à execução web
-backend/         API, schema Prisma, integrações, scripts e testes
-README.md        Apresentação do projeto
-```
+🚀 Executando localmente
+Pré-requisitos
 
-O projeto Flutter fica na **raiz** do repositório. As dependências e os comandos da API ficam em `backend/`.
+Antes de iniciar, tenha instalado:
 
-## Executar localmente
+Flutter 3.38+;
+Node.js;
+pnpm;
+PostgreSQL;
+Android SDK ou navegador compatível.
 
-### Pré-requisitos
+Algumas funcionalidades também exigem credenciais externas para:
 
-- Flutter compatível com `pubspec.yaml` (Flutter 3.38 ou superior) e um dispositivo ou navegador configurado.
-- Node.js e pnpm para a API.
-- Uma instância PostgreSQL e as credenciais necessárias aos fluxos que você pretende testar.
+Firebase;
+IGDB;
+Steam.
+1️⃣ Backend
 
-### 1. Preparar a API
+Entre na pasta da API:
 
-Na pasta `backend/`, copie `.env.example` para `.env` e configure pelo menos `DATABASE_URL`. Configure as credenciais do Firebase para rotas autenticadas e as da IGDB/Steam para executar as rotinas de catálogo. Não publique o `.env`.
-
-```bash
 cd backend
+
+Instale as dependências:
+
 pnpm install --frozen-lockfile
+
+Crie seu arquivo de ambiente:
+
+.env.example → .env
+
+Configure ao menos:
+
+DATABASE_URL=
+
+Dependendo da funcionalidade que deseja testar, também serão necessárias credenciais da IGDB e do Firebase.
+
+⚠️ Nunca publique seu arquivo .env.
+
+Prepare o Prisma:
+
 pnpm run prisma:generate
 pnpm run prisma:deploy
+
+Execute a API:
+
 pnpm run dev
-```
 
-A API local responde em `http://127.0.0.1:3333`; confira `http://127.0.0.1:3333/health`. Use um banco de desenvolvimento ao aplicar migrations e rodar testes que dependem do banco.
+A API ficará disponível em:
 
-### 2. Executar o aplicativo
+http://127.0.0.1:3333
 
-Em outro terminal, volte à raiz do repositório:
+Health check:
 
-```bash
-flutter pub get
-flutter run -d edge --dart-define=API_BASE_URL=http://127.0.0.1:3333/api/v1
-```
-
-No Android conectado por USB, a API que roda no computador pode ser acessada pelo celular após configurar o redirecionamento da porta:
-
-```bash
-adb reverse tcp:3333 tcp:3333
-flutter run -d <id-do-dispositivo> --dart-define=API_BASE_URL=http://127.0.0.1:3333/api/v1
-```
-
-No Windows, `dev.ps1` reúne os modos `edge`, `mobile` e `api`, mas usa caminhos locais de Flutter, JDK e Android SDK que podem precisar de ajuste na sua máquina.
-
-Mais detalhes de configuração, autenticação, sync e endpoints estão em [`backend/README.md`](backend/README.md). A organização do app está em [`frontend/README.md`](frontend/README.md).
-
-## Verificações
+http://127.0.0.1:3333/health
+2️⃣ Aplicativo Flutter
 
 Na raiz do projeto:
 
-```bash
+flutter pub get
+Executar no navegador
+flutter run -d edge \
+  --dart-define=API_BASE_URL=http://127.0.0.1:3333/api/v1
+Executar em dispositivo Android via USB
+
+Primeiro redirecione a porta da API:
+
+adb reverse tcp:3333 tcp:3333
+
+Depois execute:
+
+flutter run -d <id-do-dispositivo> \
+  --dart-define=API_BASE_URL=http://127.0.0.1:3333/api/v1
+
+Também existe o script:
+
+./dev.ps1
+
+Com suporte aos modos:
+
+edge
+mobile
+api
+
+Alguns caminhos de Flutter, Android SDK e JDK dentro do script podem precisar ser ajustados dependendo da máquina.
+
+🧪 Testes e qualidade
+Flutter
+
+Na raiz:
+
 flutter analyze
 flutter test
-```
+Backend
 
-Na pasta `backend/`:
+Dentro de backend/:
 
-```bash
 pnpm run typecheck
 pnpm run test
-```
 
-Parte dos testes da API requer um banco PostgreSQL de teste configurado. Consulte as instruções em [`backend/README.md`](backend/README.md) antes de executá-los.
+Alguns testes da API dependem de um banco PostgreSQL de teste configurado.
 
-## Estado atual
+Mais informações estão disponíveis em:
 
-O app, a API e as rotinas de catálogo continuam em desenvolvimento e validação. O foco atual é melhorar a qualidade dos jogos apresentados, a correspondência dos trailers, a experiência do feed e a confiabilidade das recomendações. Esta é uma apresentação do código disponível, não um anúncio de lançamento.
+backend/README.md
+frontend/README.md
+🗃️ Pipeline de catálogo
 
-## Autoria
+O backend possui rotinas responsáveis por adquirir, validar e normalizar dados de jogos vindos de fontes externas.
 
-Projeto idealizado por Lucas e Lucas Rivolta. Confira o histórico de contribuições para acompanhar o desenvolvimento no repositório.
+O objetivo não é simplesmente adicionar o maior número possível de jogos, mas manter um catálogo com informações confiáveis e úteis para descoberta.
+
+Entre as verificações realizadas estão:
+
+IGDB / Steam
+      │
+      ▼
+Aquisição de candidatos
+      │
+      ▼
+Validação e deduplicação
+      │
+      ▼
+Verificação de qualidade
+      │
+      ▼
+Normalização dos dados
+      │
+      ▼
+Persistência no PostgreSQL
+      │
+      ▼
+Disponibilização para o Feed
+
+Esse pipeline permite evoluir o catálogo sem depender diretamente dos dados brutos fornecidos pelos provedores externos.
+
+🚧 Estado atual
+
+O NextPlay está atualmente em desenvolvimento ativo.
+
+As principais áreas em evolução são:
+
+qualidade e variedade do catálogo;
+personalização das recomendações;
+redução de repetição no feed;
+correspondência correta entre jogos e trailers;
+estabilidade do player;
+experiência de navegação mobile;
+qualidade dos dados provenientes de fontes externas.
+
+O repositório representa o estado atual do desenvolvimento e não uma versão final pronta para produção.
+
+🎯 Visão do projeto
+
+O objetivo do NextPlay é transformar a maneira como jogadores encontram algo novo para jogar.
+
+Em vez de procurar por horas em lojas, rankings ou listas:
+
+abra o NextPlay, deslize pelo feed e encontre algo que você realmente queira jogar.
+
+👨‍💻 Autores
+
+Idealizado e desenvolvido por:
+
+Lucas Rodrigues
+Lucas Rivolta
+
+O histórico completo de desenvolvimento e contribuições pode ser acompanhado através dos commits do repositório.
+
+<div align="center">
+🎮 NextPlay
+
+Seu próximo jogo pode estar a um swipe de distância.
+
+</div> ```
