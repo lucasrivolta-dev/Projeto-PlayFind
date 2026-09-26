@@ -184,6 +184,30 @@ test('resumes only interrupted second stage with approved first patch', async t 
   const patch = await readFile(path.join(resumed.runDir, 'changes.patch'), 'utf8');
   assert.match(patch, /docs\/result.md/); assert.match(patch, /docs\/next.md/);
 });
+test('resumes a baseline timeout without repeating an approved stage', async t => {
+  const f = await fixture(t);
+  const queue = { id: 'baseline-resume', tasks: [task, { ...task, id: 'next', allowedPaths: ['docs/next.md'] }] };
+  let firstExecutions = 0;
+  const stopped = await executeQueue({ ...f, queue, runChecks: async (_work, checkTask) => {
+    if (checkTask.id === 'next') throw Error('Tempo limite excedido');
+    return pass();
+  }, agent: async x => {
+    if (x.role === 'executor') { firstExecutions++; await makeFile(x.work, 'first\n'); }
+    return approved;
+  } });
+  assert.equal(stopped.steps[1].attempts, 0);
+  assert.equal(stopped.steps[1].reason, 'Tempo limite excedido');
+  const resumed = await executeQueue({ ...f, queue, resumeFrom: path.join(stopped.runDir, 'report.json'), agent: async x => {
+    assert.equal(x.task.id, 'next');
+    if (x.role === 'executor') {
+      assert.equal((await readFile(path.join(x.work, 'docs/result.md'), 'utf8')).replaceAll('\r\n', '\n'), 'first\n');
+      await writeFile(path.join(x.work, 'docs/next.md'), 'second\n');
+    }
+    return approved;
+  } });
+  assert.equal(resumed.status, 'READY_FOR_REVIEW', resumed.reason);
+  assert.equal(firstExecutions, 1);
+});
 test('does not resume an explicit human decision', async t => {
   const f = await fixture(t);
   const queue = { id: 'no-resume', tasks: [task, { ...task, id: 'next', allowedPaths: ['docs/next.md'] }] };
