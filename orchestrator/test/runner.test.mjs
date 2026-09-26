@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { execute, validateTask, validateDecision, safeEnv, windowsCommand, command } from '../runner.mjs';
+import { execute, executeQueue, validateQueue, validateTask, validateDecision, safeEnv, windowsCommand, command } from '../runner.mjs';
 
 const task = { id: 'smoke', title: 'Smoke', prompt: 'Create docs/result.md', allowedPaths: ['docs/result.md'], checks: ['orchestrator'], model: 'gpt-6-sol', reasoning: 'low', reviewReasoning: 'low', maxAttempts: 2, timeoutMinutes: 1, requiresManualValidation: false };
 const approved = { decision: 'APPROVED', summary: 'OK', blockingIssues: [] };
@@ -105,4 +105,125 @@ test('lock rejects simultaneous run and is preserved', async t => {
 });
 test('timeout terminates command', async () => {
   await assert.rejects(command(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { timeoutMs: 100 }), /Tempo limite/);
+});
+test('queue rejects duplicate or unbounded tasks', () => {
+  assert.throws(() => validateQueue({ id: 'queue', tasks: [task, task] }), /repetido/);
+  assert.throws(() => validateQueue({ id: 'queue', tasks: [task] }), /2 ou 3/);
+  assert.throws(() => validateQueue({ id: 'queue', tasks: [task, { ...task, id: 'next', allowedPaths: ['.env'] }] }), /Escopo/);
+});
+test('queue hands approved patch to next executor and produces cumulative patch', async t => {
+  const f = await fixture(t);
+  const next = { ...task, id: 'next', prompt: 'Read docs/result.md then create docs/next.md', allowedPaths: ['docs/next.md'] };
+  const queue = { id: 'flow', tasks: [task, next] };
+  let secondSawFirst = false;
+  const r = await executeQueue({ ...f, queue, agent: async x => {
+    if (x.role === 'executor' && x.task.id === 'smoke') await makeFile(x.work, 'first\n');
+    if (x.role === 'executor' && x.task.id === 'next') {
+      secondSawFirst = (await readFile(path.join(x.work, 'docs/result.md'), 'utf8')).replaceAll('\r\n', '\n') === 'first\n';
+      await writeFile(path.join(x.work, 'docs/next.md'), 'second\n');
+    }
+    return approved;
+  } });
+  assert.equal(r.status, 'READY_FOR_REVIEW', r.reason);
+  assert.equal(r.steps.length, 2); assert.equal(secondSawFirst, true);
+  const patch = await readFile(path.join(r.runDir, 'changes.patch'), 'utf8');
+  assert.match(patch, /docs\/result.md/); assert.match(patch, /docs\/next.md/);
+  assert.equal(f.git('status', '--porcelain'), '');
+});
+test('queue stops after first human decision without starting next task', async t => {
+  const f = await fixture(t); let second = false;
+  const queue = { id: 'stop', tasks: [task, { ...task, id: 'next', allowedPaths: ['docs/next.md'] }] };
+  const r = await executeQueue({ ...f, queue, agent: async x => {
+    if (x.task.id === 'next') second = true;
+    return { decision: 'HUMAN_REQUIRED', summary: 'Needs product decision', blockingIssues: [] };
+  } });
+  assert.equal(r.status, 'HUMAN_REQUIRED'); assert.equal(r.steps.length, 1); assert.equal(second, false);
+});
+test('queue rejects unauthorized changes to inherited file', async t => {
+  const f = await fixture(t);
+  const queue = { id: 'guard', tasks: [task, { ...task, id: 'next', allowedPaths: ['docs/next.md'] }] };
+  const r = await executeQueue({ ...f, queue, agent: async x => {
+    if (x.role === 'executor' && x.task.id === 'smoke') await makeFile(x.work, 'first\n');
+    if (x.role === 'executor' && x.task.id === 'next') await makeFile(x.work, 'tampered\n');
+    return approved;
+  } });
+  assert.equal(r.status, 'HUMAN_REQUIRED'); assert.equal(r.steps.length, 2);
+  assert.match(r.steps[1].reason, /arquivo herdado fora do escopo/);
+});
+test('queue lock prevents a parallel standalone task', async t => {
+  const f = await fixture(t); await mkdir(f.stateRoot);
+  await writeFile(path.join(f.stateRoot, 'queue.lock'), 'running');
+  await assert.rejects(execute({ ...f, agent: () => assert.fail() }), /fila está ativa/);
+});
+test('resumes only interrupted second stage with approved first patch', async t => {
+  const f = await fixture(t);
+  const next = { ...task, id: 'next', allowedPaths: ['docs/next.md'] };
+  const queue = { id: 'resume', tasks: [task, next] };
+  let firstExecutions = 0;
+  const interrupted = await executeQueue({ ...f, queue, agent: async x => {
+    if (x.task.id === 'smoke' && x.role === 'executor') { firstExecutions++; await makeFile(x.work, 'first\n'); }
+    if (x.task.id === 'next' && x.role === 'executor') throw Error('Execução interrompida');
+    return approved;
+  } });
+  assert.equal(interrupted.status, 'HUMAN_REQUIRED');
+  assert.equal(interrupted.steps[0].status, 'READY_FOR_REVIEW');
+  assert.equal(interrupted.steps[1].reason, 'Execução interrompida');
+  await writeFile(path.join(f.root, 'tool-version.txt'), 'updated runner');
+  f.git('add', 'tool-version.txt'); f.git('commit', '-m', 'update runner after interruption');
+  const resumed = await executeQueue({ ...f, queue, resumeFrom: path.join(interrupted.runDir, 'report.json'), agent: async x => {
+    assert.equal(x.task.id, 'next');
+    if (x.role === 'executor') {
+      await assert.rejects(readFile(path.join(x.work, 'tool-version.txt')), { code: 'ENOENT' });
+      assert.equal((await readFile(path.join(x.work, 'docs/result.md'), 'utf8')).replaceAll('\r\n', '\n'), 'first\n');
+      await writeFile(path.join(x.work, 'docs/next.md'), 'second\n');
+    }
+    return approved;
+  } });
+  assert.equal(resumed.status, 'READY_FOR_REVIEW', resumed.reason);
+  assert.equal(resumed.steps.length, 2); assert.equal(firstExecutions, 1);
+  const patch = await readFile(path.join(resumed.runDir, 'changes.patch'), 'utf8');
+  assert.match(patch, /docs\/result.md/); assert.match(patch, /docs\/next.md/);
+});
+test('does not resume an explicit human decision', async t => {
+  const f = await fixture(t);
+  const queue = { id: 'no-resume', tasks: [task, { ...task, id: 'next', allowedPaths: ['docs/next.md'] }] };
+  const stopped = await executeQueue({ ...f, queue, agent: async () => ({ decision: 'HUMAN_REQUIRED', summary: 'Needs product decision', blockingIssues: [] }) });
+  await assert.rejects(executeQueue({ ...f, queue, resumeFrom: path.join(stopped.runDir, 'report.json'), agent: () => assert.fail() }), /Retomada permitida/);
+});
+test('resumes a verified 401 without rerunning the approved first stage', async t => {
+  const f = await fixture(t);
+  const queue = { id: 'auth-resume', tasks: [task, { ...task, id: 'next', allowedPaths: ['docs/next.md'] }] };
+  let firstExecutions = 0;
+  const stopped = await executeQueue({ ...f, queue, agent: async x => {
+    if (x.task.id === 'smoke' && x.role === 'executor') { firstExecutions++; await makeFile(x.work, 'first\n'); }
+    if (x.task.id === 'next' && x.role === 'executor') {
+      await writeFile(path.join(x.runDir, 'executor-1.jsonl'), '{"type":"turn.failed","error":{"message":"401 Unauthorized"}}\n');
+      throw Error('Codex executor saiu com 1; consulte o log');
+    }
+    return approved;
+  } });
+  assert.equal(stopped.status, 'HUMAN_REQUIRED');
+  const resumed = await executeQueue({ ...f, queue, resumeFrom: path.join(stopped.runDir, 'report.json'), agent: async x => {
+    assert.equal(x.task.id, 'next');
+    if (x.role === 'executor') {
+      assert.equal((await readFile(path.join(x.work, 'docs/result.md'), 'utf8')).replaceAll('\r\n', '\n'), 'first\n');
+      await writeFile(path.join(x.work, 'docs/next.md'), 'second\n');
+    }
+    return approved;
+  } });
+  assert.equal(resumed.status, 'READY_FOR_REVIEW', resumed.reason);
+  assert.equal(firstExecutions, 1);
+});
+test('does not resume a generic Codex failure without 401 evidence', async t => {
+  const f = await fixture(t);
+  const queue = { id: 'generic-failure', tasks: [task, { ...task, id: 'next', allowedPaths: ['docs/next.md'] }] };
+  const stopped = await executeQueue({ ...f, queue, agent: async x => {
+    if (x.task.id === 'smoke' && x.role === 'executor') await makeFile(x.work);
+    if (x.task.id === 'next' && x.role === 'executor') {
+      await writeFile(path.join(x.runDir, 'executor-1.jsonl'), '{"type":"turn.failed","error":{"message":"Other error"}}\n');
+      throw Error('Codex executor saiu com 1; consulte o log');
+    }
+    return approved;
+  } });
+  await assert.rejects(executeQueue({ ...f, queue, resumeFrom: path.join(stopped.runDir, 'report.json'), agent: () => assert.fail() }), /Retomada permitida/);
 });

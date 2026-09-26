@@ -1,0 +1,31 @@
+{
+  "id": "002-two-step-smoke",
+  "tasks": [
+    {
+      "id": "002-step-one",
+      "title": "Registrar o contrato da fila",
+      "prompt": "Leia AGENTS.md, orchestrator/README.md e o runner atual. Crie somente docs/autopilot-queue-contract.md, resumindo em português o que a fila v0.2 faz, quando ela para e onde ficam os resultados. Não altere código, outras páginas ou configuração. Não afirme que Android foi validado.",
+      "allowedPaths": ["docs/autopilot-queue-contract.md"],
+      "checks": ["orchestrator"],
+      "model": "gpt-6-sol",
+      "reasoning": "low",
+      "reviewReasoning": "low",
+      "maxAttempts": 2,
+      "timeoutMinutes": 10,
+      "requiresManualValidation": false
+    },
+    {
+      "id": "002-step-two",
+      "title": "Confirmar continuidade do contexto",
+      "prompt": "Leia docs/autopilot-queue-contract.md criado na etapa anterior, AGENTS.md e orchestrator/README.md. Crie somente docs/autopilot-queue-handoff.md. Cite o título exato da página herdada, resuma duas regras concretas dela e explique como report.json e changes.patch da fila ajudam a revisar as duas etapas. Se a página anterior não existir, retorne HUMAN_REQUIRED. Não modifique a página anterior. Não afirme que Android foi validado.",
+      "allowedPaths": ["docs/autopilot-queue-handoff.md"],
+      "checks": ["orchestrator"],
+      "model": "gpt-6-sol",
+      "reasoning": "low",
+      "reviewReasoning": "low",
+      "maxAttempts": 2,
+      "timeoutMinutes": 10,
+      "requiresManualValidation": false
+    }
+  ]
+}
