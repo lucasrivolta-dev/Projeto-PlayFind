@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 import { readFile, writeFile, mkdir, open, unlink, lstat, readdir } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { finished } from 'node:stream/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -58,6 +60,8 @@ export async function command(exe, args, { cwd, input = '', timeoutMs = 600000, 
   const argv = win ? ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(windowsCommand(exe, args), 'utf16le').toString('base64')] : args;
   return new Promise((resolve, reject) => {
     const child = spawn(actual, argv, { cwd, env: safeEnv(), shell: false, detached: !win, stdio: ['pipe', 'pipe', 'pipe'] });
+    const logStream = log ? createWriteStream(log, { flags: 'w' }) : null;
+    logStream?.on('error', () => {});
     let stdout = '', stderr = '', failure;
     const stop = reason => {
       if (failure) return;
@@ -70,17 +74,18 @@ export async function command(exe, args, { cwd, input = '', timeoutMs = 600000, 
     process.once('SIGINT', cancel); process.once('SIGTERM', cancel);
     const collect = (kind, chunk) => {
       if (kind === 'out') stdout += chunk; else stderr += chunk;
+      logStream?.write(chunk);
       if (stdout.length + stderr.length > 8_000_000) stop('Saída excedeu 8 MB');
     };
     child.stdout.setEncoding('utf8').on('data', c => collect('out', c));
     child.stderr.setEncoding('utf8').on('data', c => collect('err', c));
     child.stdin.on('error', () => {}); child.stdin.end(input);
     const cleanup = () => { clearTimeout(timer); process.off('SIGINT', cancel); process.off('SIGTERM', cancel); };
-    child.once('error', e => { cleanup(); reject(e); });
+    child.once('error', e => { cleanup(); logStream?.end(); reject(e); });
     child.once('close', async code => {
       cleanup();
       try {
-        if (log) await writeFile(log, stdout + '\n--- stderr ---\n' + stderr);
+        if (logStream) { logStream.end(); await finished(logStream); }
         if (failure) reject(Error(failure)); else resolve({ code, stdout, stderr });
       } catch (e) { reject(e); }
     });
@@ -148,6 +153,14 @@ async function codexAgent({ role, work, runDir, task, attempt, prompt }) {
   }
   return validateDecision(JSON.parse(await readFile(output, 'utf8')));
 }
+async function preflightCodex(work, runDir, task) {
+  const r = await command('codex', ['--ask-for-approval', 'never', 'exec', '--sandbox', 'read-only', '--model', task.model, '-c', 'model_reasoning_effort="low"', 'Responda apenas OK.'], {
+    cwd: work, timeoutMs: 120000, log: path.join(runDir, 'codex-preflight.log'),
+  }).catch(e => { throw Error(`Teste curto do Codex falhou: ${e.message}. Consulte codex-preflight.log`); });
+  if (r.code !== 0) throw Error(/401 Unauthorized/i.test(r.stdout + r.stderr)
+    ? 'Autenticação do Codex recusada (401) no teste curto; consulte codex-preflight.log'
+    : `Teste curto do Codex saiu com ${r.code}; consulte codex-preflight.log`);
+}
 export async function execute({ root = ROOT, task, dryRun = true, agent = codexAgent, runChecks = checks, stateRoot, previous = null, queueRun = false, baseRef = null } = {}) {
   validateTask(task);
   root = path.resolve(root);
@@ -205,6 +218,11 @@ export async function execute({ root = ROOT, task, dryRun = true, agent = codexA
       try { inherited.set(p, hash(await readFile(path.join(work, p)))); }
       catch (e) { if (e.code === 'ENOENT') inherited.set(p, null); else throw e; }
     }
+    report.phase = 'codex-preflight';
+    await writeFile(path.join(runDir, 'report.json'), json(report));
+    if (agent === codexAgent) await preflightCodex(work, runDir, task);
+    report.phase = 'baseline';
+    await writeFile(path.join(runDir, 'report.json'), json(report));
     report.baseline = await runChecks(work, task, runDir, 'baseline');
     if (!report.baseline.passed) throw Error('Validação inicial falhou. Consulte os logs antes de alterar ou iniciar outra tarefa.');
     if ((await snapshot(work, base, scope)).fingerprint !== initial.fingerprint) throw Error('Validação inicial alterou arquivos; revisão humana necessária');
@@ -212,6 +230,8 @@ export async function execute({ root = ROOT, task, dryRun = true, agent = codexA
     let feedback = '';
     for (let attempt = 1; attempt <= task.maxAttempts; attempt++) {
       report.attempts = attempt;
+      report.phase = 'executor';
+      await writeFile(path.join(runDir, 'report.json'), json(report));
       const result = validateDecision(await agent({ role: 'executor', work, runDir, task, attempt, prompt: `${rules}\nImplemente somente a tarefa. APPROVED significa implementação pronta para validação externa.\nFeedback da tentativa anterior:\n${feedback}` }));
       const snap = await snapshot(work, base, scope);
       for (const [p, before] of inherited) {
@@ -288,7 +308,13 @@ export async function executeQueue({ root = ROOT, queue, dryRun = true, agent = 
       const log = await readFile(path.join(interrupted.runDir, `executor-${interrupted.attempts}.jsonl`), 'utf8');
       authFailure = /401 Unauthorized/i.test(log.slice(-32768));
     }
-    if (interrupted.status !== 'HUMAN_REQUIRED' || !(interrupted.reason === 'Execução interrompida' || authFailure) || interrupted.task !== queue.tasks[completed.length]?.id ||
+    if (/^Autenticação do Codex recusada \(401\) no teste curto/.test(interrupted.reason || '') && interrupted.attempts === 0 && !interrupted.files?.length) {
+      const log = await readFile(path.join(interrupted.runDir, 'codex-preflight.log'), 'utf8');
+      authFailure = /401 Unauthorized/i.test(log.slice(-32768));
+    }
+    const baselineTimeout = interrupted.reason === 'Tempo limite excedido' && interrupted.attempts === 0 && !interrupted.files?.length;
+    const preflightTimeout = /^Teste curto do Codex falhou: Tempo limite excedido/.test(interrupted.reason || '') && interrupted.attempts === 0 && !interrupted.files?.length;
+    if (interrupted.status !== 'HUMAN_REQUIRED' || !(interrupted.reason === 'Execução interrompida' || authFailure || baselineTimeout || preflightTimeout) || interrupted.task !== queue.tasks[completed.length]?.id ||
       completed.some((s, i) => s.task !== queue.tasks[i].id || s.status !== 'READY_FOR_REVIEW')) throw Error('Retomada permitida apenas após interrupção ou falha 401 comprovada, sem decisão humana pendente');
     if (completed.length) {
       const last = completed.at(-1);
