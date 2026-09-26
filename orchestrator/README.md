@@ -33,12 +33,13 @@ A execução real usa a autenticação salva do Codex e está sujeita aos limite
 2. Obtém lock exclusivo na pasta irmã `<repo>-autopilot`.
 3. Cria clone local independente, sem hardlinks, remove o remote e cria `agent/<task-id>` nele. A origem permanece intocada.
 4. Prepara dependências apenas quando necessárias: backend usa instalação pelo lockfile e `prisma:generate`; Flutter usa `pub get --enforce-lockfile`. Esses comandos podem acessar a rede e executar scripts das dependências do repositório confiável. Não roda migrations, seed, sync, `test:db` ou manutenção de catálogo.
-5. Roda a validação inicial; se já falhar, para antes de gastar chamadas de IA.
-6. Executa Codex com sandbox `workspace-write`, aprovação `never`, modelo e esforço explícitos. Bloqueios de sandbox não são contornados.
-7. Confere HEAD e escopo, incluindo arquivos novos, e executa os checks.
-8. Envia erros reais da validação para no máximo uma correção adicional.
-9. Abre novo contexto Codex em `read-only` para revisar tarefa, diff e resultados. Nenhuma sessão do executor é retomada pelo revisor.
-10. Confere que o código não mudou durante validação/revisão, grava relatório, patch e texto de PR, libera lock e para.
+5. Faz uma chamada curta e somente leitura ao Codex, com limite de dois minutos, para detectar falha de autenticação ou conexão antes dos testes demorados. Essa chamada consome uma pequena parte do limite da conta.
+6. Roda a validação inicial; se já falhar, para antes de executar a tarefa.
+7. Executa Codex com sandbox `workspace-write`, aprovação `never`, modelo e esforço explícitos. Bloqueios de sandbox não são contornados.
+8. Confere HEAD e escopo, incluindo arquivos novos, e executa os checks.
+9. Envia erros reais da validação para no máximo uma correção adicional.
+10. Abre novo contexto Codex em `read-only` para revisar tarefa, diff e resultados. Nenhuma sessão do executor é retomada pelo revisor.
+11. Confere que o código não mudou durante validação/revisão, grava relatório, patch e texto de PR, libera lock e para.
 
 A execução isolada da v0.1 continua disponível. A v0.2 adiciona uma fila explícita e finita (2–3 tarefas), descrita abaixo. Não há fila infinita, retomada automática, integração Antigravity, commit, push, abertura de PR remoto, merge ou deploy. O texto `PR.md` é um rascunho local. Publicação do resultado é uma ação separada; isso preserva a regra de Git da seção 47 de `AGENTS.md`.
 
@@ -55,7 +56,7 @@ node orchestrator/runner.mjs queue-run orchestrator/queues/002-two-step-smoke.js
 
 A fila roda em uma pasta irmã `<repo>-autopilot/queue-<id>-<timestamp>/`, com `queue.json`, `report.json` e `changes.patch` cumulativo quando todas as etapas terminam bem. Os relatórios e logs detalhados de cada tarefa continuam em suas próprias pastas. A fila tem um lock exclusivo; uma execução avulsa é recusada enquanto ela estiver ativa. Para revisar, comece pelo `report.json` da fila e pelo `changes.patch`, depois abra os relatórios individuais. O limite de 2–3 tarefas e no máximo duas tentativas por tarefa é fixo nesta versão.
 
-Se o subprocesso for interrompido após uma etapa aprovada, é possível recomeçar **somente a etapa interrompida** com `node orchestrator/runner.mjs queue-resume <caminho-do-report.json-da-fila>`. Esse comando lê a definição congelada em `queue.json`, confere as evidências da etapa anterior e reutiliza o patch aprovado numa cópia nova. Não reaproveita alterações parciais do agente interrompido. A retomada também aceita uma falha de autenticação `401 Unauthorized` comprovada no log da execução do Codex, após renovar o login; uma decisão `HUMAN_REQUIRED` explícita, falha de testes ou escopo não são retomadas automaticamente. Se a branch tiver avançado desde então, o clone da etapa retomada usa o commit original, que precisa ser ancestral do HEAD atual.
+Se o subprocesso for interrompido após uma etapa aprovada, é possível recomeçar **somente a etapa interrompida** com `node orchestrator/runner.mjs queue-resume <caminho-do-report.json-da-fila>`. Esse comando lê a definição congelada em `queue.json`, confere as evidências da etapa anterior e reutiliza o patch aprovado numa cópia nova. Não reaproveita alterações parciais do agente interrompido. A retomada também aceita timeout da validação inicial, falha do teste curto de conexão e `401 Unauthorized` comprovado no log do Codex; uma decisão `HUMAN_REQUIRED` explícita, falha de testes ou escopo não são retomadas automaticamente. Se a branch tiver avançado desde então, o clone da etapa retomada usa o commit original, que precisa ser ancestral do HEAD atual.
 
 O exemplo usa **gpt-6-sol / raciocínio Baixo** em cada executor/revisor. Duas tarefas gastam mais limite do Codex que o smoke de uma etapa. Não inclua trabalho de produto na fila sem definir previamente o objetivo e os caminhos específicos de cada tarefa. O status final `READY_FOR_REVIEW` ainda requer revisão humana antes de publicar qualquer mudança.
 
@@ -65,6 +66,7 @@ Cada execução fica na pasta irmã `<repo>-autopilot/<task-id>-<timestamp>/`:
 
 - `work/`: código proposto, branch própria, sem remote;
 - `task.json`: tarefa congelada;
+- `codex-preflight.log`: teste curto de conexão e autenticação;
 - `baseline-*.log`, `attempt-*.log`, `setup-*.log`: validações/preparação;
 - `executor-*.jsonl`, `reviewer-*.jsonl`: eventos e stderr;
 - `executor-*.json`, `reviewer-*.json`: decisões estruturadas;
@@ -72,7 +74,7 @@ Cada execução fica na pasta irmã `<repo>-autopilot/<task-id>-<timestamp>/`:
 - `report.json`: resultado e evidências;
 - `PR.md`: rascunho de descrição para revisão humana.
 
-Durante a execução, acompanhe os processos Codex no terminal/sistema. Os logs de cada subprocesso são gravados quando ele termina. `report.json` é gravado ao final. `Ctrl+C` cancela o subprocesso e encerra o ciclo, preservando a cópia de trabalho.
+Durante a execução, os logs recebem saída conforme ela chega; `report.json` da tarefa registra também a fase atual. `Ctrl+C` cancela o subprocesso e encerra o ciclo, preservando a cópia de trabalho.
 
 Estados:
 
